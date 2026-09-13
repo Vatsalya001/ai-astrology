@@ -4,8 +4,15 @@
 
 ## Decision
 
-`services/api/go.mod` declares `toolchain go1.23.4`, so the Go tool fetches a verified
+`services/api/go.mod` declares `toolchain go1.26.8`, so the Go tool fetches a verified
 toolchain into the module cache rather than using whatever is installed system-wide.
+
+**Stay one minor release behind the newest.** Go 1.27.1 was available and was tried
+first; `govulncheck` — itself built against 1.26 — could not parse 1.27 standard-library
+source and failed with parse errors rather than a vulnerability report. The analysis
+tooling ecosystem (`govulncheck`, `golangci-lint`, `gopls`) reliably lags a major Go
+release by weeks. Running on the latest patch of the previous line gets the security
+fixes without breaking the tools that verify them.
 
 ## Context
 

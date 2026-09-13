@@ -1,0 +1,1 @@
+{"event_id":"28bbbea0d4743588","ts":"2026-09-13T07:17:39Z","kind":"escalation","from_tier":0,"to_tier":1,"trigger":"path_pattern","reason":"tier1_infra","phase":"implement"}
