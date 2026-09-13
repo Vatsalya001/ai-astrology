@@ -182,6 +182,46 @@ Restart the API before continuing.
 
 ---
 
+## 7b. Loading and error states
+
+Neither has an automated test, because both need the page to misbehave and
+neither is worth shipping a fake throwing route for. They are verified by
+temporarily breaking `status/page.tsx`, observing, and reverting — the
+procedure below. Both were observed on 2026-09-13.
+
+**Loading skeleton.** Add a delay before the fetch:
+
+```tsx
+await new Promise((r) => setTimeout(r, 4000))   // TEMP
+```
+
+Rebuild, then navigate from `/` by clicking "View system status" — a
+client-side navigation, which is when `loading.tsx` renders. **Expect** the
+skeleton: heading present, six grey rows at the real row height, banner at
+the real banner height. Nothing should shift when the data lands.
+
+**Error boundary.** Replace the delay with a throw that carries something
+that must never be shown:
+
+```tsx
+throw new Error('TEMP: postgres://ayana:hunter2@localhost:5433/ayana')
+```
+
+**Expect** the branded "We couldn't render this page" card, a "Try again"
+button, and a `Reference:` digest. **The connection string must not appear
+anywhere in the HTML** — that is the whole point of not rendering
+`error.message`, since a server-render failure routinely carries one.
+
+> **Known limitation.** The error page returns **HTTP 200**, not 500. The
+> App Router has already committed the response status by the time a
+> streamed Server Component throws, so the boundary cannot change it. An
+> uptime monitor watching status codes will therefore not notice this
+> failure — watch for the log line instead.
+
+Revert the edit and rebuild before continuing.
+
+---
+
 ## 8. Cross-service trace correlation
 
 One request must produce the same `trace_id` in all three services.

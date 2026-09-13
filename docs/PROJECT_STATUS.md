@@ -180,6 +180,51 @@ negatively: removing the `primary` token still builds clean, and fails that test
 
 ---
 
+## Running it
+
+`./scripts/ayana up` starts everything in order and waits on each healthcheck;
+`status` prints every URL and port; `smoke` runs 15 assertions; `test` is the
+full gate. `docs/TESTING-PHASE-0.md` is the manual plan.
+
+| | |
+|---|---|
+| Landing / status | http://localhost:3000 · /status |
+| api-service | :4000 — the only public surface |
+| astro / ai | :8100 · :8200 — loopback only |
+| Mailpit · MinIO | :8025 · :9001 |
+| Postgres · Redis · Ollama | :5433 · :6381 · :11434 |
+
+---
+
+## UI audit (2026-09-13)
+
+Running the UI rather than reading the checklist found five gaps. All closed;
+see the table in `docs/TESTING-PHASE-0.md`.
+
+**The one that mattered:** `/health` returned `err.Error()` verbatim to any
+unauthenticated caller — `dial tcp 127.0.0.1:8025: connect: connection
+refused`, the internal host, port and path. Confirmed reachable over the LAN.
+Replaced with a closed vocabulary (`timeout` / `unreachable` / `unavailable`);
+full detail now goes to the log under the request's `trace_id`. Asserted in a
+Go test, a Playwright test and a smoke check.
+
+The other four were missing UI states: no branded 404, no error boundary, no
+loading skeleton on the only `force-dynamic` route, and every page reporting
+the landing page's `<title>`.
+
+**Observed, not merely shipped.** The loading skeleton and the error boundary
+were each verified by temporarily breaking `status/page.tsx` and watching them
+fire — the error boundary specifically checked to confirm a thrown connection
+string does not reach the HTML. Procedure recorded in the testing doc. Neither
+has an automated test; that is a deliberate call, not an oversight, because
+the alternative is shipping a route that exists only to throw.
+
+**Known limitation:** the error page returns HTTP 200, not 500 — the App
+Router commits the status before a streamed Server Component throws. Uptime
+monitors watching status codes will not see it.
+
+---
+
 ## Open decisions
 
 | ADR | Question | Due |
