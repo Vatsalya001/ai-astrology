@@ -75,6 +75,68 @@ jobs:
           go install golang.org/x/vuln/cmd/govulncheck@latest
           govulncheck ./...
 
+  go-integration:
+    name: Go — integration (real Postgres)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/api
+    env:
+      # Ryuk is testcontainers' cleanup sidecar. GitHub runners are
+      # ephemeral, so it buys nothing and occasionally flakes.
+      TESTCONTAINERS_RYUK_DISABLED: "true"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+          cache-dependency-path: services/api/go.sum
+
+      # Proves the single-writer rule holds: astro_ro can SELECT and
+      # cannot INSERT, UPDATE, DELETE, TRUNCATE or CREATE TABLE. Runs the
+      # REAL bootstrap SQL, so weakening those grants fails CI.
+      - run: go test ./... -tags=integration -race -count=1
+
+  contracts:
+    name: Cross-service contracts are in sync
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+          cache-dependency-path: services/api/go.sum
+      - uses: astral-sh/setup-uv@v3
+
+      - name: Regenerate OpenAPI documents and Go clients
+        run: |
+          go install github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen@latest
+          uv run --directory services/astro python -m app.export_openapi > contracts/openapi/astro.json
+          uv run --directory services/ai    python -m app.export_openapi > contracts/openapi/ai.json
+          oapi-codegen -config contracts/astro-client.yaml contracts/openapi/astro.json
+          oapi-codegen -config contracts/ai-client.yaml    contracts/openapi/ai.json
+          gofmt -w services/api/internal/platform/clients
+
+      # A cross-service contract must never change without the diff being
+      # visible in review. Never hand-write these clients (ADR-005).
+      - name: Fail if the committed output drifted
+        run: |
+          if ! git diff --exit-code contracts/ services/api/internal/platform/clients/; then
+            echo "::error::Contracts are out of date. Run 'task contracts' and commit the result."
+            exit 1
+          fi
+
+  secrets:
+    name: Secret scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # gitleaks scans full history, not just the tip
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
   python:
     name: Python — ${{ matrix.service }}
     runs-on: ubuntu-latest

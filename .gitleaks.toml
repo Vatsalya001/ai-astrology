@@ -1,0 +1,55 @@
+# gitleaks configuration.
+#
+# Philosophy: keep this file SMALL. Every entry here is a place the
+# scanner has been told to stop looking, and a scanner with a long
+# allowlist eventually stops being a scanner.
+#
+# Prefer fixing the finding over suppressing it. If a test needs a
+# credential-shaped value, use an obviously-fake literal
+# ("example-not-a-real-token") rather than a random-looking string plus
+# an allowlist entry.
+#
+# Run locally:  task secrets
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Generated and vendored paths only"
+
+paths = [
+  # Build output. Next.js writes preview/encryption keys into its cache
+  # and manifests on every build. Gitignored, never committed, and
+  # regenerated constantly — scanning it produces pure noise.
+  '''apps/web/\.next/.*''',
+
+  # Vendored dependencies. Third-party code carries its own test
+  # fixtures and example keys; those are not our secrets to manage, and
+  # supply-chain scanning is a separate concern with separate tooling
+  # (npm audit, govulncheck, pip-audit — all already in CI).
+  '''node_modules/.*''',
+  '''.*/\.venv/.*''',
+  '''.*/site-packages/.*''',
+
+  # Lockfiles contain integrity hashes that pattern-match as secrets.
+  '''package-lock\.json''',
+  '''.*/uv\.lock''',
+  '''services/api/go\.sum''',
+]
+
+regexes = [
+  # A fake token in services/api/internal/config/config_test.go as of
+  # commit 9c36613. It was never a credential — the test only asserts a
+  # long-enough INTERNAL_TOKEN is accepted in production. The literal has
+  # since been changed to an obviously-fake value, but it remains in
+  # published history, and rewriting history to delete a string that was
+  # never secret would cost more than it buys.
+  #
+  # Scoped to this exact value, not to the file or the commit, so a real
+  # secret added to that test later would still be caught.
+  '''9f2c4a7e11b8d3650fa2''',
+]
+
+# NOTE: .env is NOT allowlisted, on purpose. It is gitignored, but if it
+# is ever committed by accident the scanner must be the thing that
+# catches it.

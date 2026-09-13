@@ -26,7 +26,7 @@ const mono = JetBrains_Mono({
 })
 
 export const metadata: Metadata = {
-  title: 'Antara — Your personal AI astrologer',
+  title: 'Ayana — Your personal AI astrologer',
   description:
     'A personal AI astrologer that understands your birth chart, your life context and your history — and connects you to a human astrologer when you need one.',
   robots: { index: false, follow: false }, // pre-launch

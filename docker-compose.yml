@@ -1,9 +1,24 @@
-name: astro
+name: ayana
+
+# ──────────────────────────────────────────────────────────────────────
+#  `docker compose up -d` brings up the whole backend: infrastructure
+#  plus both Python services.
+#
+#  For hot-reload development of a Python service, stop its container
+#  first and run it from source — `task dev:astro` does both:
+#      docker compose stop astro && uv run uvicorn ... --reload
+#
+#  api-service is deliberately NOT in here. It is the service you edit
+#  most, and `task dev:api` running it from source is faster than any
+#  container rebuild loop. Its Dockerfile exists for deployment.
+# ──────────────────────────────────────────────────────────────────────
+
+x-internal-token: &internal-token ${INTERNAL_TOKEN:-dev-internal-token-change-me}
 
 services:
   postgres:
     image: pgvector/pgvector:pg16
-    container_name: astro-postgres
+    container_name: ayana-postgres
     environment:
       POSTGRES_USER: astro
       POSTGRES_PASSWORD: astro
@@ -23,7 +38,7 @@ services:
 
   redis:
     image: redis:7-alpine
-    container_name: astro-redis
+    container_name: ayana-redis
     # Host port 6381: 6379 and 6380 are both already taken on this machine.
     ports: ["6381:6379"]
     healthcheck:
@@ -34,7 +49,7 @@ services:
 
   minio:
     image: minio/minio
-    container_name: astro-minio
+    container_name: ayana-minio
     command: server /data --console-address ":9001"
     environment:
       MINIO_ROOT_USER: minioadmin
@@ -52,7 +67,7 @@ services:
 
   mailpit:
     image: axllent/mailpit
-    container_name: astro-mailpit
+    container_name: ayana-mailpit
     ports:
       - "1025:1025"   # SMTP
       - "8025:8025"   # web UI
@@ -61,6 +76,51 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
+
+  astro:
+    build:
+      context: ./services/astro
+    container_name: ayana-astro
+    ports: ["8100:8100"]
+    environment:
+      ENV: development
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      INTERNAL_TOKEN: *internal-token
+      # NOTE: deliberately no model provider configuration. This service
+      # must never be able to reach an LLM. See ADR-001.
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8100/health', timeout=2).status==200 else 1)"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+
+  ai:
+    build:
+      context: ./services/ai
+    container_name: ayana-ai
+    ports: ["8200:8200"]
+    environment:
+      ENV: development
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      INTERNAL_TOKEN: *internal-token
+      # READ-ONLY role. Note this is the in-network port (5432), not the
+      # remapped host port.
+      AI_DATABASE_URL: postgresql://astro_ro:astro_ro@postgres:5432/astro_dev
+      # Reach the host's Ollama from inside the container.
+      LLM_BASE_URL: ${LLM_BASE_URL:-http://host.docker.internal:11434/v1}
+      LLM_PROVIDER_TIER: local
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8200/health', timeout=2).status==200 else 1)"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
 
 volumes:
   pgdata:

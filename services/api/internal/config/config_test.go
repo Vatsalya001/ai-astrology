@@ -127,7 +127,11 @@ func TestProductionRefusesDevelopmentToken(t *testing.T) {
 func TestProductionAcceptsRealToken(t *testing.T) {
 	setEnv(t, validEnv())
 	t.Setenv("ENV", EnvProduction)
-	t.Setenv("INTERNAL_TOKEN", "9f2c4a7e11b8d3650fa2")
+	// Deliberately not a random-looking hex string: a value that *looks*
+	// like a credential trips secret scanners, and suppressing that with
+	// an allowlist entry would blunt the scanner for real secrets too.
+	// The only property under test is that it passes the length check.
+	t.Setenv("INTERNAL_TOKEN", "example-not-a-real-token")
 
 	cfg, err := Load()
 	if err != nil {

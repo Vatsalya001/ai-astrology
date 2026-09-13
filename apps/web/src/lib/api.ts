@@ -7,37 +7,13 @@
  * without touching the frontend.
  */
 
+import type { HealthResponse, MetaResponse } from '@ayana/types'
+
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000'
 
-export type CheckStatus = 'ok' | 'error' | 'degraded'
-
-export type Check = {
-  status: CheckStatus
-  latency_ms: number
-  error?: string
-}
-
-export type HealthResponse = {
-  status: CheckStatus
-  service: string
-  version: string
-  checks: Record<string, Check>
-}
-
-export type MetaResponse = {
-  service: string
-  version: string
-  env: string
-  phase: string
-  features: {
-    ai_chat: boolean
-    voice: boolean
-    astrologers: boolean
-    compatibility: boolean
-    payments: boolean
-    pdf: boolean
-  }
-}
+// Response shapes live in @ayana/types so the mobile app (Phase 10) uses
+// the identical definitions rather than a drifting copy.
+export type { Check, CheckStatus, HealthResponse, MetaResponse } from '@ayana/types'
 
 /**
  * Distinguishes "the API said no" from "the API was unreachable".

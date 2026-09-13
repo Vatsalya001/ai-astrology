@@ -1,0 +1,40 @@
+# sqlc generates type-safe Go from the SQL in db/queries.
+#
+# Not an ORM (ADR-006). You write SQL; you get structs and methods.
+# This project's hard parts — SELECT ... FOR UPDATE on wallet balances
+# (Phase 7), hybrid pgvector + tsvector retrieval (Phase 5), billing
+# ticks under contention (Phase 8) — are SQL problems. An ORM would
+# obscure exactly the queries that most need careful reading.
+#
+# Regenerate with: task sqlc
+version: "2"
+
+sql:
+  - engine: postgresql
+    schema: db/migrations
+    queries: db/queries
+    gen:
+      go:
+        package: dbgen
+        out: internal/platform/db/dbgen
+        sql_package: pgx/v5
+
+        # Distinguish "column is NULL" from "column is the zero value".
+        # Without this, a NULL text column and an empty string are
+        # indistinguishable in Go, which silently loses information.
+        emit_pointers_for_null_types: true
+
+        emit_json_tags: false          # DB structs are not API structs
+        emit_prepared_queries: false   # pgx statement-caches already
+        emit_interface: true           # enables mocking at the seam
+        emit_empty_slices: true        # a nil slice marshals as null
+
+        # Money is int64 paise everywhere (Phase 7). Postgres BIGINT maps
+        # to int64 by default, which is what we want — this block exists
+        # so the next person sees the intent rather than inferring it.
+        overrides:
+          - db_type: "timestamptz"
+            go_type: "time.Time"
+          - db_type: "timestamptz"
+            nullable: true
+            go_type: "*time.Time"

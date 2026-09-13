@@ -50,6 +50,15 @@ type Config struct {
 	AIServiceURL    string        `env:"AI_SERVICE_URL,required"    validate:"required,url"`
 	ServiceTimeout  time.Duration `env:"SERVICE_TIMEOUT"            envDefault:"10s" validate:"required"`
 
+	// ─── Optional health probes ─────────────────────────────────
+	// Object storage and mail are reported by /health when a probe URL
+	// is configured, and silently omitted when it is not. Optional
+	// because a deployment may front them with something that has no
+	// health endpoint, and a health check that cannot be satisfied is
+	// worse than one that is absent.
+	StorageHealthURL string `env:"STORAGE_HEALTH_URL" envDefault:""`
+	MailHealthURL    string `env:"MAIL_HEALTH_URL"    envDefault:""`
+
 	// InternalToken authenticates api-service to the Python services.
 	// Minimum length is validated because a short shared secret is
 	// worse than an obviously absent one — it looks configured.

@@ -1,0 +1,16 @@
+# Generated Go client for astro-service.
+#
+# Output lands inside services/api so the repo stays a single Go module —
+# a separate module for two generated files would add replace directives
+# and version skew for no benefit.
+#
+# DO NOT EDIT the generated file. Regenerate with: task contracts
+# CI fails if the committed output differs from what the source produces,
+# which is what makes a contract change visible in review.
+package: astroclient
+output: services/api/internal/platform/clients/astroclient/client.gen.go
+generate:
+  models: true
+  client: true
+output-options:
+  skip-prune: true

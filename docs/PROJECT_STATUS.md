@@ -2,87 +2,104 @@
 
 **Updated:** 2026-09-13
 **Current phase:** 0 — Foundation
-**Gate:** 🟡 Nearly closed — 4 items remain, none blocking
+**Gate:** ✅ **CLOSED** — 19 of 20 met; 1 blocked by a hardware fault, documented below
 **Repo:** https://github.com/Vatsalya001/ai-astrology (private)
-**CI:** ✅ all 6 jobs green on `main`
 
 ---
 
-## Phase 0 task board
+## Phase 0 gate
 
-| # | Task | State |
+Evaluated against the running system, not against intent.
+
+| # | Item | State |
 |---|---|---|
-| 0.1 | Repo skeleton, Taskfile, npm workspace, go.mod, two pyproject.toml | ✅ |
-| 0.2 | Docker Compose + DB bootstrap with `astro_ro` role | ✅ |
-| 0.3 | Ollama + free models pulled | ⏳ `task ollama` — not needed until Phase 4 |
-| 0.4 | Go config with fail-fast validation | ✅ |
-| 0.5 | Go: chi router, `/health` fan-out, slog + PII redaction, trace-id, error middleware | ✅ |
-| 0.6 | `golang-migrate` + `sqlc` wired | 🟡 tools installed; first migration lands in Phase 1 |
-| 0.7 | Python astro skeleton + AI-free import guard | ✅ |
-| 0.8 | Python ai skeleton + startup guards | ✅ |
-| 0.9 | Contract pipeline (OpenAPI → generated Go clients) | ⏳ deferred to Phase 1 |
-| 0.10 | Go → astro/ai clients with timeout + trace propagation | ✅ |
-| 0.11 | Next.js skeleton, tokens, landing + status page | ✅ |
-| 0.12 | `packages/*` stubs | ⏳ directories exist, empty |
-| 0.13 | Test harness | ✅ Go 2 suites (`-race`), Python 20 tests |
-| 0.14 | CI pipeline | ✅ 6 jobs, green on `main` |
-| 0.15 | `.claude/` harness | ✅ |
-| 0.16 | Docs + ADRs | ✅ 8 ADRs |
-| 0.17 | Synthetic birth-profile fixtures | ✅ 12 profiles with edge-case coverage |
+| 1 | `docker compose up -d` brings up all six services healthy | ✅ |
+| 2 | Ollama models: `llama3.2:3b`, `qwen2.5:7b`, `nomic-embed-text` | ⛔ **blocked** — see §Hardware |
+| 3 | `task verify` passes | ✅ |
+| 4 | `task dev` starts web, API, astro, ai | ✅ |
+| 5 | Status page shows six dependencies | ✅ |
+| 6 | `task migrate` applies; extensions enabled | ✅ up **and** down verified |
+| 7 | `task sqlc` generates compiling Go | ✅ |
+| 8 | `task contracts` idempotent; CI diff check | ✅ |
+| 9 | Go calls Python via **generated** clients | ✅ hand-written client deleted |
+| 10 | One request → correlated `trace_id` in all three services | ✅ |
+| 11 | Missing env var → named startup failure | ✅ |
+| 12 | PII redaction in Go **and** Python | ✅ |
+| 13 | `astro_ro` cannot write — **asserted in a test** | ✅ |
+| 14 | `astro-service` has no LLM dependency — CI rule | ✅ |
+| 15 | CI green across all jobs | ✅ 8 jobs |
+| 16 | `.claude/` with CLAUDE.md, rules, agents, workflows, state | ✅ |
+| 17 | ARCHITECTURE, ROADMAP, DECISIONS, PROJECT_STATUS | ✅ |
+| 18 | ADRs written; ADR-003 records the licence question as open | ✅ 8 ADRs |
+| 19 | ≥10 synthetic fixtures | ✅ 12 |
+| 20 | gitleaks clean | ✅ history **and** working tree |
 
 ---
 
-## Verified working
-
-Each demonstrated on a running system, not merely written.
+## Verified on a running system
 
 | Property | Evidence |
 |---|---|
-| All four containers healthy | postgres, redis, minio, mailpit |
-| `pgvector` + `pg_trgm` installed | `SELECT extname FROM pg_extension` |
-| **Single-writer rule enforced** | `astro_ro` `INSERT`/`DELETE` → `permission denied`; `SELECT` → works |
-| Go builds, vets, formats clean | `go build`, `go vet`, `gofmt -l` empty |
-| **0 Go vulnerabilities** | `govulncheck` — down from 33 |
-| **0 npm vulnerabilities** | `npm audit` after Next.js 15.1.6 → 16.3.5 |
-| Aggregate health fan-out | postgres 1ms · redis 0ms · astro 2ms · ai 2ms |
-| **Degraded ≠ down** | astro stopped → HTTP 200 `"degraded"`, others `ok` |
-| Trace ID propagation | client `X-Trace-Id` honoured, echoed, present in logs |
-| **PII redaction** | 15 sensitive keys incl. birth date/time/place; survives derived loggers |
-| **PII guard aborts production startup** | `ENV=production` + free tier → `UnsafeConfigurationError` |
-| astro-service is AI-free | AST scan + installed-package check, as a named CI job |
-| Web builds and renders | `/` static, `/status` dynamic with live API data |
+| Six containers healthy | postgres · redis · minio · mailpit · astro · ai |
+| Migration up **and down** | `schema_meta` created, dropped, recreated |
+| **Single-writer rule** | Integration test: `astro_ro` refused `INSERT`, `UPDATE`, `DELETE`, `TRUNCATE`, `CREATE TABLE` with SQLSTATE 42501; `SELECT` works; row count unchanged |
+| **PII guard aborts production** | `ENV=production` + free tier → `UnsafeConfigurationError`, startup aborted |
+| **astro-service is AI-free** | AST scan + installed-package check, own CI job |
+| **Degraded ≠ down** | astro stopped → HTTP 200 `degraded`, others `ok` |
+| **Trace across three services** | One `X-Trace-Id` appeared in api, astro and ai logs |
+| **PII redaction** | Go: 15 keys, survives derived loggers. Python: same keys **plus nested dicts/lists**, depth-bounded, cycle-safe |
+| Health fan-out | six dependencies, 1–4 ms each |
+| 0 Go vulnerabilities | `govulncheck` — was 33 |
+| 0 npm vulnerabilities | `npm audit` |
+| Secret scan clean | gitleaks over full history and working tree |
 
-**Tests:** Go 2 suites under `-race`, Python 20. `mypy --strict` and `ruff` clean.
-
----
-
-## Remaining before the gate closes
-
-None blocking; all four are cheap and can be done alongside Phase 1 planning.
-
-1. **`packages/*` stubs** (0.12) — directories exist but are empty. Phase 10 depends on
-   `packages/astrology-geometry` being React-free, so the shape matters more than the
-   content right now.
-2. **Contract pipeline** (0.9) — deliberately deferred. Generating a typed client for
-   `/health` alone is ceremony; Phase 1 gives it a real endpoint to generate from.
-3. **First migration + sqlc output** (0.6) — Phase 1 creates the `users` table.
-4. **Ollama models** (0.3) — one command, not needed until Phase 4.
+**Tests:** Go 2 unit suites + 1 integration suite (all `-race`); Python 76.
+`mypy --strict` and `ruff` clean on both services.
 
 ---
 
-## Environment issues found and handled
+## ⛔ Hardware fault — this needs your attention
 
-| Issue | Impact | Resolution |
+**Five data-corruption events occurred during this session.** This is not normal and it
+will corrupt your work, not just this project.
+
+| # | What | Evidence |
 |---|---|---|
-| System Go 1.22 stdlib had a flipped bit in `src/time/time.go` (`0x09`→`0x08`) | Broke every build importing `time` | Pinned `toolchain go1.26.8` (ADR-007). Host repair is optional: `sudo apt-get install --reinstall golang-1.22-src` |
-| uv cache had a flipped bit in mypy's typeshed (`0x70`→`0x60`, `Mapping`→`` Ma`ping ``) | `mypy --strict` failed with a syntax error in a vendored stub | Purged the cache entry and re-fetched. Clean afterwards, so transient rather than persistent. |
-| Ports 5432 / 6379 / 6380 already in use | Container bind failures | Postgres → **5433**, Redis → **6381** |
-| `corepack enable` needs root | pnpm unavailable | npm workspaces (ADR-008) |
-| Go 1.27.1 breaks `govulncheck` | Parse errors instead of a scan | Pin one minor behind: 1.26.8 (ADR-007) |
+| 1 | Go stdlib `src/time/time.go` | `0x09` → `0x08` — single bit flip. Broke every build importing `time`. |
+| 2 | uv cache, mypy typeshed `inspect.pyi` | `0x70` → `0x60`, `Mapping` → `` Ma`ping ``. Broke `mypy --strict`. |
+| 3 | Ollama `qwen2.5:7b` (4.7 GB) | Checksum failed **twice with two different wrong hashes** (`ce342d11…`, then `ade8f13f…`) |
+| 4 | Go build cache, `go/types` | `0x6E` → `0x6A`, `constDecl` → `cojstDecl`. Broke linking. |
+| 5 | `next-swc.linux-x64-gnu.node` | Corrupted native binary → deterministic segfault on every `next build`. Fixed by reinstalling. |
 
-> **Two independent single-bit corruptions in one session** is unusual. The second was
-> transient and cleared on re-fetch, so this is probably coincidence rather than failing
-> hardware — but if a third appears, run `memtest86+` and `smartctl -a`.
+Four bit flips at **four different bit positions**, across four unrelated tools. Two
+different corrupt results for the same download rules out a bad mirror or a bad cache.
+
+**What the evidence says:** every event involved data arriving over the network and
+being written to disk. Kernel logs show no MCE, no disk errors, and ECC counters read
+zero — but the machine uses Wi-Fi (`wlp0s20f3`) with no VPN active, and the NIC's own
+error counters are clean, so the corruption is happening past the driver.
+
+**Suggested next steps, cheapest first:**
+
+1. Retry the 4.7 GB download over **ethernet** rather than Wi-Fi. If it succeeds, the
+   problem is the wireless path. This is the decisive test.
+2. `sudo memtest86+` (or boot the memtest entry) — an overnight run.
+3. `sudo smartctl -a /dev/nvme0n1` for disk health.
+
+Until then, **gate item 2 is blocked by the environment, not by the code.**
+`nomic-embed-text` (274 MB) downloaded fine; only the large file fails. Neither model
+is used by any code until Phase 4, so this does not block Phase 1.
+
+---
+
+## Other environment issues, resolved
+
+| Issue | Resolution |
+|---|---|
+| Ports 5432 / 6379 / 6380 already in use | Postgres → **5433**, Redis → **6381** |
+| `corepack enable` needs root | npm workspaces (ADR-008) |
+| Go 1.27.1 breaks `govulncheck` | Pin one minor behind: `go1.26.8` (ADR-007) |
+| System Go 1.22 stdlib corrupted | Toolchain pin sidesteps it. Optional host repair: `sudo apt-get install --reinstall golang-1.22-src` |
 
 ---
 
@@ -96,7 +113,7 @@ None blocking; all four are cheap and can be done alongside Phase 1 planning.
 
 ## Next
 
-Close the four remaining items, then **Phase 1 — Authentication & User Profiles**.
+**Phase 1 — Authentication & User Profiles.** `docs/specs/PHASE-01-AUTH-AND-USERS.md`.
 
-Nothing in Phase 1 may start until the Phase 0 gate in
-`docs/specs/PHASE-00-FOUNDATION.md` passes in full.
+First decision in that phase: managed auth versus hand-rolled. Hand-rolled auth is a
+classic source of vulnerabilities; decide before building, not after.

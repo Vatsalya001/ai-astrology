@@ -1,0 +1,69 @@
+{
+  "components": {
+    "schemas": {
+      "HealthResponse": {
+        "properties": {
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          },
+          "provider_tier": {
+            "title": "Provider Tier",
+            "type": "string"
+          },
+          "service": {
+            "title": "Service",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "version": {
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "service",
+          "version",
+          "provider",
+          "provider_tier"
+        ],
+        "title": "HealthResponse",
+        "type": "object"
+      }
+    }
+  },
+  "info": {
+    "description": "LLM orchestration, RAG and safety. Internal only.",
+    "title": "ai-service",
+    "version": "0.1.0"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/health": {
+      "get": {
+        "description": "Liveness check.\n\nDeliberately does NOT probe the model provider. Two reasons:\n\n  * A health check that calls an LLM costs money on every poll and\n    adds seconds of latency to something that should take\n    milliseconds.\n  * Provider reachability is a runtime concern handled by the retry\n    and circuit-breaker logic in Phase 4, not a reason to mark this\n    process unhealthy and have it restarted.\n\nThe provider fields are reported so operators can see at a glance\nwhich backend is configured \u2014 useful when the answer to \"why is dev\noutput worse than prod?\" is \"dev is on a 3B local model\".",
+        "operationId": "health_health_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Health",
+        "tags": [
+          "ops"
+        ]
+      }
+    }
+  }
+}

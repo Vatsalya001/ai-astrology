@@ -2,28 +2,27 @@
 
 ```
 Phase: 0 — Foundation
-Gate:  🔒 LOCKED  (5 items outstanding)
+Gate:  ✅ CLOSED  (19/20; item 2 blocked by a hardware fault, documented)
 
-├── 0.1  Repo skeleton + Taskfile          ✅
-├── 0.2  Docker Compose + astro_ro role    ✅
-├── 0.3  Ollama free models                ⏳  (task ollama — not needed until Phase 4)
-├── 0.4  Go config, fail-fast              ✅
-├── 0.5  Go router, health, logging, trace ✅
-├── 0.6  migrate + sqlc wired              🟡  tools installed, no migrations yet
-├── 0.7  astro-service + AI-free guard     ✅
-├── 0.8  ai-service + startup guards       ✅
-├── 0.9  Contract pipeline                 ⏳  deferred to Phase 1
-├── 0.10 Go → Python typed clients         ✅
-├── 0.11 Web: tokens, landing, status      ✅
-├── 0.12 packages/* stubs                  ⏳
-├── 0.13 Test harness                      ✅  Go 3 suites, Python 20 tests
-├── 0.14 CI pipeline                       🟡  written, not yet run on a PR
-├── 0.15 .claude/ harness                  ✅
-├── 0.16 Docs + ADRs                       ✅  8 ADRs
-└── 0.17 Synthetic fixtures                ⏳
+All tasks complete. See docs/PROJECT_STATUS.md for the full gate table
+and the hardware-fault writeup.
 ```
 
-Next task: 0.17 — write 10 synthetic birth profiles in `tests/fixtures/charts/`.
+## Next: Phase 1 — Authentication & User Profiles
 
-Do not begin Phase 1 until every box above is ✅ and the Phase Gate in
-`docs/specs/PHASE-00-FOUNDATION.md` passes.
+Spec: `docs/specs/PHASE-01-AUTH-AND-USERS.md`
+
+Entirely a Go phase. Neither Python service is touched.
+
+**Decide first:** managed auth provider versus hand-rolled. Hand-rolled auth is a
+classic source of vulnerabilities. If the team would rather not own it, write the ADR
+before building — not after.
+
+**Do not start until** you have read the Phase 1 spec end to end. The task list, data
+model and API surface are already written; do not redesign them ad hoc.
+
+**Carried forward into Phase 1:**
+- The first domain migration (`users`, `sessions`, `auth_identities`, `audit_logs`)
+- A trusted-proxy-aware client-IP resolver — chi's `middleware.RealIP` was deliberately
+  not used because it is spoofable, and Phase 1 rate-limits per IP
+- Extending the account-deletion integration test as each new user-owned table lands

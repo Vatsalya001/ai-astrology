@@ -1,4 +1,4 @@
-# Antara — AI Astrology Companion
+# Ayana — AI Astrology Companion
 
 > **The AI doesn't just know astrology. It knows YOUR astrology.**
 
@@ -8,8 +8,10 @@ conversation history — and connects you to a human astrologer when you need on
 **Status: Phase 0 — Foundation.** No product features yet. The scaffolding, service
 topology and safety invariants are in place and verified.
 
-> `Antara` is a working name (Sanskrit: *inner*, and the root of *antardasha*).
-> Easily changed — it appears only in `apps/web/src/components/Logo.tsx` and page metadata.
+> **Ayana** — from *ayanamsa*, the precession constant that defines sidereal astrology
+> and therefore the most load-bearing parameter in this entire system. Independently,
+> *ayana* means *path* or *journey*.
+> Provisional: it appears only in `apps/web/src/components/Logo.tsx` and page metadata.
 
 ---
 

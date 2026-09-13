@@ -147,6 +147,16 @@ const DEPENDENCY_INFO: Record<
     detail: 'LLM orchestration and retrieval. Python, read-only database role.',
     critical: false,
   },
+  storage: {
+    label: 'Object storage',
+    detail: 'S3-compatible. PDF reports and generated assets from Phase 3.',
+    critical: false,
+  },
+  mail: {
+    label: 'Mail',
+    detail: 'Transactional email. Carries login OTPs from Phase 1.',
+    critical: false,
+  },
 }
 
 function Dependencies({ health }: { health: Fetched<HealthResponse> }) {

@@ -60,14 +60,18 @@ tasks:
     cmds: [go run ./cmd/worker]
 
   dev:astro:
-    desc: Run astro-service (Python)
-    dir: '{{.ASTRO_DIR}}'
-    cmds: [uv run uvicorn app.main:app --reload --port 8100]
+    desc: Run astro-service from source with live reload
+    # Stops the container first: compose publishes 8100, so both cannot
+    # run at once.
+    cmds:
+      - docker compose stop astro
+      - uv run --directory {{.ASTRO_DIR}} uvicorn app.main:app --reload --port 8100
 
   dev:ai:
-    desc: Run ai-service (Python)
-    dir: '{{.AI_DIR}}'
-    cmds: [uv run uvicorn app.main:app --reload --port 8200]
+    desc: Run ai-service from source with live reload
+    cmds:
+      - docker compose stop ai
+      - uv run --directory {{.AI_DIR}} uvicorn app.main:app --reload --port 8200
 
   dev:web:
     desc: Run the Next.js web app
@@ -94,6 +98,18 @@ tasks:
     desc: Regenerate type-safe Go from db/queries/*.sql
     dir: '{{.API_DIR}}'
     cmds: [sqlc generate]
+
+  contracts:
+    desc: Regenerate OpenAPI documents and the typed Go clients
+    # Never hand-write a cross-service client (ADR-005). CI fails if the
+    # committed output differs from what the source produces, which is
+    # what makes a contract change visible in review.
+    cmds:
+      - uv run --directory {{.ASTRO_DIR}} python -m app.export_openapi > contracts/openapi/astro.json
+      - uv run --directory {{.AI_DIR}}    python -m app.export_openapi > contracts/openapi/ai.json
+      - oapi-codegen -config contracts/astro-client.yaml contracts/openapi/astro.json
+      - oapi-codegen -config contracts/ai-client.yaml    contracts/openapi/ai.json
+      - cd {{.API_DIR}} && gofmt -w internal/platform/clients
 
   psql:
     desc: Open a psql shell against the dev database
@@ -149,6 +165,19 @@ tasks:
       - uv run --directory {{.ASTRO_DIR}} pytest -q
       - uv run --directory {{.AI_DIR}} pytest -q
 
+  test:integration:
+    desc: Integration tests against real containers (needs Docker)
+    dir: '{{.API_DIR}}'
+    env:
+      TESTCONTAINERS_RYUK_DISABLED: "true"
+    cmds:
+      - go test ./... -tags=integration -race -count=1
+
+  secrets:
+    desc: Scan the working tree and full git history for secrets
+    cmds:
+      - gitleaks detect --source . --redact --verbose --no-banner
+
   build:
     desc: Build all production artefacts
     cmds:
@@ -158,6 +187,12 @@ tasks:
   verify:
     desc: The commit gate — lint, test and build everything
     cmds:
+      - task: contracts
+      # NOTE: the "did regeneration change anything?" check lives in CI,
+      # not here. `git diff --exit-code` cannot distinguish contract drift
+      # from ordinary uncommitted work, so locally it would fail on every
+      # in-progress change. CI runs it against a clean checkout, where the
+      # comparison is meaningful.
       - task: lint
       - task: test
       - task: build

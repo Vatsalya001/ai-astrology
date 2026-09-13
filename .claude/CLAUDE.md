@@ -1,4 +1,4 @@
-# Antara — project constitution
+# Ayana — project constitution
 
 Read this at the start of every session. It is short on purpose.
 

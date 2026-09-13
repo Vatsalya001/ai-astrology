@@ -15,40 +15,34 @@ Phase 2 fills in app/core/ with the actual ephemeris work.
 """
 
 import logging
-import sys
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
+from app import middleware
 from app.api import health
+from app.observability import configure as configure_logging
 from app.settings import settings
 
 __version__ = "0.1.0"
 
 
-def _configure_logging() -> None:
-    """Structured logging to stdout, matching the Go service's shape."""
-    logging.basicConfig(
-        level=settings.log_level.upper(),
-        stream=sys.stdout,
-        format='{"ts":"%(asctime)s","level":"%(levelname)s","service":"astro","msg":"%(message)s"}',
-    )
-
-
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
-    _configure_logging()
+    configure_logging(service="astro", level=settings.log_level)
     log = logging.getLogger("astro")
+
     log.info(
-        "starting astro-service env=%s ayanamsa=%s houses=%s ephemeris=%s",
-        settings.env,
-        settings.default_ayanamsa,
-        settings.default_house_system,
-        settings.ephemeris_flag,
+        "starting astro-service",
+        extra={
+            "env": settings.env,
+            "ayanamsa": settings.default_ayanamsa,
+            "house_system": settings.default_house_system,
+            "ephemeris": settings.ephemeris_flag,
+        },
     )
-    # Phase 2 loads the Swiss Ephemeris here, once, rather than per
-    # request.
+    # Phase 2 loads the Swiss Ephemeris here, once, rather than per request.
     yield
     log.info("astro-service shutdown complete")
 
@@ -58,11 +52,12 @@ app = FastAPI(
     version=__version__,
     description="Deterministic Vedic astrology computation. Internal only.",
     lifespan=lifespan,
-    # No docs in production: this service is internal, and its schema
-    # is a map of the system for anyone who reaches it.
+    # No docs in production: this service is internal, and its schema is
+    # a map of the system for anyone who reaches it.
     docs_url=None if settings.is_production else "/docs",
     redoc_url=None,
     openapi_url="/openapi.json",
 )
 
+middleware.install(app, internal_token=settings.internal_token)
 app.include_router(health.router)

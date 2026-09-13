@@ -64,7 +64,7 @@ export function Wordmark({ className = '' }: { className?: string }) {
     <div className={`flex items-center gap-2.5 ${className}`}>
       <Logo size={28} />
       <span className="font-serif text-lg tracking-tight text-ink">
-        Antara
+        Ayana
       </span>
     </div>
   )

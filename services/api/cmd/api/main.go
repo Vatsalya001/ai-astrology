@@ -68,8 +68,14 @@ func run() error {
 	// The Python services are NOT dialled at startup. They are probed by
 	// /health instead, because this service must keep serving cached
 	// charts and the entire non-AI product when either of them is down.
-	astroClient := clients.New("astro", cfg.AstroServiceURL, cfg.InternalToken, cfg.ServiceTimeout)
-	aiClient := clients.New("ai", cfg.AIServiceURL, cfg.InternalToken, cfg.ServiceTimeout)
+	astroClient, err := clients.NewAstro(cfg.AstroServiceURL, cfg.InternalToken, cfg.ServiceTimeout)
+	if err != nil {
+		return fmt.Errorf("build astro client: %w", err)
+	}
+	aiClient, err := clients.NewAI(cfg.AIServiceURL, cfg.InternalToken, cfg.ServiceTimeout)
+	if err != nil {
+		return fmt.Errorf("build ai client: %w", err)
+	}
 
 	handler := httpapi.NewRouter(httpapi.Deps{
 		Config: cfg,
