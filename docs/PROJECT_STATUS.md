@@ -53,8 +53,14 @@ Evaluated against the running system, not against intent.
 | 0 npm vulnerabilities | `npm audit` |
 | Secret scan clean | gitleaks over full history and working tree |
 
-**Tests:** Go 2 unit suites + 1 integration suite (all `-race`); Python 76.
-`mypy --strict` and `ruff` clean on both services.
+**Tests:** Go 44 functions across 5 packages — config, logging, httpapi, clients, and
+the db integration suite (all `-race`). Python 76. `mypy --strict` and `ruff` clean.
+
+Coverage added after the gate audit: health aggregation (degraded-vs-down, concurrency,
+a hanging probe not stalling the others), the error envelope (a panic must not leak a
+stack trace), trace middleware (inbound adoption, length cap, minting), `statusRecorder`
+forwarding `http.Flusher` (Phase 5's SSE depends on it), and the generated clients
+(token injection, trace propagation, cancellation).
 
 ---
 
