@@ -778,14 +778,27 @@ returns a completion and `nomic-embed-text` returns 768 dimensions matching
 `EMBEDDING_DIM`. The corruption pattern is documented in `docs/PROJECT_STATUS.md` and
 is worth investigating independently of this project.
 
-Two items were reshaped during implementation and are recorded honestly rather than
+One item was reshaped during implementation and is recorded honestly rather than
 ticked loosely:
-- Contract generation initially produced a client for `/health` only. That is thin,
-  but it proved the pipeline end to end and removed the hand-written client the
-  spec forbids, so it stands.
-- `packages/*` shipped as one real package (`@ayana/types`, consumed by the web
-  app) rather than several empty stubs. Empty directories imply work that does not
-  exist.
+- Contract generation produces a client for `/health` only. That is thin, but it
+  proves the pipeline end to end and removes the hand-written client the spec
+  forbids, so it stands.
+
+**Amended 2026-09-13, after auditing §13 separately.** The gate above had passed three
+times while the §13 task list it summarises still had six open items — a summary is not
+evidence. Closing them exposed three defects the gate could not have caught: retry was
+dead code (`http.NoBody`, never `nil`, so no GET was ever retryable), TypeScript had no
+linter at all, and shadcn had shipped 83 hardcoded palette classes past a green `tsc`
+and a green build. `packages/*` is now all six packages rather than the one noted here
+previously. CI is 10 jobs, not five, and the E2E job reached Playwright for the first
+time only after two environment bugs were fixed — an unpullable `minio/minio` and a
+`.env` sourced from the wrong directory.
+
+Deliberate deviations from the spec's literal wording, all documented:
+- npm workspaces, not pnpm (ADR-008 — `corepack enable` needs root on this machine)
+- `tests/test_no_llm_imports.py` rather than import-linter; it walks the real
+  dependency tree, which is stricter than a declared contract
+- ADRs 001–008, not 001–006
 
 - [x] `docker compose up -d` brings up Postgres+pgvector, Redis, MinIO, Mailpit, astro, ai — all healthy
 - [x] `ollama list` shows `llama3.2:3b`, `qwen2.5:7b`, `nomic-embed-text` — inference and 768-dim embeddings both verified
@@ -801,7 +814,7 @@ ticked loosely:
 - [x] Logging an object containing an email produces a redacted line in Go **and** Python
 - [x] **`astro_ro` role cannot write — permission error asserted in a test**
 - [x] **`astro-service` has no LLM dependency — CI import rule proves it**
-- [x] CI green on a PR across all five jobs
+- [x] CI green on a PR across all ten jobs (spec said five; the extra five are integration, determinism, secrets, e2e and env-drift)
 - [x] `.claude/` exists with CLAUDE.md, rules, agents, workflows, state
 - [x] `docs/ARCHITECTURE.md`, `ROADMAP.md`, `DECISIONS.md`, `PROJECT_STATUS.md` written
 - [x] ADRs 001–006 written; ADR-003 records the ephemeris licence question as **open**
