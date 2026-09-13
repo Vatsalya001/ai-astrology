@@ -15,6 +15,11 @@ function Skeleton({
 }: React.HTMLAttributes<HTMLDivElement>) {
   return (
     <div
+      // Decorative by definition. Hiding it here rather than at each call
+      // site means a skeleton cannot be announced by accident — thirty
+      // grey rectangles read out one at a time is worse than no loading
+      // state at all. Real text in a loading view stays announced.
+      aria-hidden="true"
       className={cn(
         'animate-pulse rounded-md bg-elevated motion-reduce:animate-none',
         className,

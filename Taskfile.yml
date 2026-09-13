@@ -181,6 +181,7 @@ tasks:
     cmds:
       - task: test:go
       - task: test:py
+      - task: test:web
 
   test:go:
     dir: '{{.API_DIR}}'
@@ -193,6 +194,12 @@ tasks:
     cmds:
       - uv run --directory {{.ASTRO_DIR}} pytest -q
       - uv run --directory {{.AI_DIR}} pytest -q
+
+  test:web:
+    # Component tests (ADR-009). Covers the gap between `tsc`, which only
+    # sees types, and Playwright, which needs the whole stack running —
+    # notably that error.tsx never renders error.message.
+    cmds: [npm run test --workspace=web]
 
   test:e2e:
     desc: End-to-end browser tests (needs the stack running — task up + task dev)
