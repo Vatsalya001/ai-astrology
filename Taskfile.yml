@@ -26,6 +26,19 @@ tasks:
     cmds: [task --list]
     silent: true
 
+  setup:
+    desc: Install every dependency and create .env (idempotent — safe to re-run)
+    # `task verify` depends on this so that a fresh clone reaches green
+    # with one command. Each step is a near no-op once satisfied:
+    # npm install and uv sync both short-circuit when the lockfile
+    # matches, and go mod download is cached.
+    cmds:
+      - '[ -f .env ] || { cp .env.example .env; echo "created .env from .env.example"; }'
+      - npm install --no-fund --no-audit
+      - uv sync --directory {{.ASTRO_DIR}}
+      - uv sync --directory {{.AI_DIR}}
+      - cd {{.API_DIR}} && go mod download
+
   # ─── Infrastructure ───────────────────────────────────────────────
 
   up:
@@ -186,7 +199,11 @@ tasks:
 
   verify:
     desc: The commit gate — lint, test and build everything
+    # Starts from setup so this passes on a clean clone. That is a gate
+    # requirement, and it failed the first time it was actually tested:
+    # verify assumed node_modules already existed.
     cmds:
+      - task: setup
       - task: contracts
       # NOTE: the "did regeneration change anything?" check lives in CI,
       # not here. `git diff --exit-code` cannot distinguish contract drift
