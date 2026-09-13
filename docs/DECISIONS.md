@@ -18,6 +18,7 @@ answer should be written down, including the options rejected and what they cost
 | [006](decisions/006-sqlc-not-orm.md) | sqlc, not an ORM | ✅ accepted |
 | [007](decisions/007-go-toolchain-pin.md) | Pin the Go toolchain in go.mod | ✅ accepted |
 | [008](decisions/008-npm-workspaces.md) | npm workspaces instead of pnpm | ✅ accepted |
+| [009](decisions/009-vitest-for-component-tests.md) | Vitest for component tests | ✅ accepted |
 
 ---
 

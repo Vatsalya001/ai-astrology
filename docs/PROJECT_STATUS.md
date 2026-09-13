@@ -115,6 +115,7 @@ real time this session chasing a Turbopack segfault that turned out to be a corr
 
 | Issue | Resolution |
 |---|---|
+| Go linker panicked mid-`task verify` — `index out of range [1879048191]` while resolving relocations (corruption event #8) | `go clean -cache`; green immediately after. Same fix as event #7 |
 | Ports 5432 / 6379 / 6380 already in use | Postgres → **5433**, Redis → **6381** |
 | `corepack enable` needs root | npm workspaces (ADR-008) |
 | Go 1.27.1 breaks `govulncheck` | Pin one minor behind: `go1.26.8` (ADR-007) |
@@ -212,16 +213,27 @@ The other four were missing UI states: no branded 404, no error boundary, no
 loading skeleton on the only `force-dynamic` route, and every page reporting
 the landing page's `<title>`.
 
-**Observed, not merely shipped.** The loading skeleton and the error boundary
-were each verified by temporarily breaking `status/page.tsx` and watching them
-fire — the error boundary specifically checked to confirm a thrown connection
-string does not reach the HTML. Procedure recorded in the testing doc. Neither
-has an automated test; that is a deliberate call, not an oversight, because
-the alternative is shipping a route that exists only to throw.
+**Both are now tested** (ADR-009 — Vitest + Testing Library, 15 tests). The one
+that matters asserts `error.tsx` never renders `error.message`: a server-render
+failure routinely carries a connection string, and the error page is public.
+Verified negatively — adding `{error.message}` to the component, the change a
+developer makes while debugging and forgets to revert, fails four tests
+immediately.
 
-**Known limitation:** the error page returns HTTP 200, not 500 — the App
-Router commits the status before a streamed Server Component throws. Uptime
-monitors watching status codes will not see it.
+Writing those tests found a flaw in the skeleton: the `System status` heading
+sat inside an `aria-hidden` wrapper, so a screen reader lost the page structure
+during load. `Skeleton` now carries `aria-hidden` itself — decorative by
+definition — and real text stays announced.
+
+`task test` previously ran Go and Python but nothing for TypeScript, the same
+shape as the missing linter. Now wired into `task verify` and CI.
+
+**Known limitation:** the error page returns HTTP 200, not 500 — the App Router
+commits the status before a streamed Server Component throws. The consequence
+is that an uptime check asserting on status codes calls the page healthy, so
+**assert on content**. `ayana smoke` does, and was confirmed to fail and exit 1
+while the page was erroring. `/health` still returns a truthful 503 for backend
+problems; it is only the rendered page that cannot signal this way.
 
 ---
 

@@ -26,10 +26,12 @@ export default function StatusLoading() {
         aria-busy="true"
         aria-live="polite"
       >
-        {/* Screen readers get a sentence; the skeleton itself is decorative. */}
+        {/* Announces the wait. Each Skeleton is aria-hidden on its own,
+            so the real headings below stay in the accessibility tree and
+            the page keeps its structure while data is pending. */}
         <span className="sr-only">Loading system status…</span>
 
-        <div aria-hidden="true">
+        <div>
           <div className="mb-10">
             <SectionLabel>Operations</SectionLabel>
             <h1 className="font-serif text-4xl tracking-tight">System status</h1>

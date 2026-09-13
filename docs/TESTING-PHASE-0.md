@@ -184,10 +184,16 @@ Restart the API before continuing.
 
 ## 7b. Loading and error states
 
-Neither has an automated test, because both need the page to misbehave and
-neither is worth shipping a fake throwing route for. They are verified by
-temporarily breaking `status/page.tsx`, observing, and reverting — the
-procedure below. Both were observed on 2026-09-13.
+Both components are now covered by component tests (ADR-009) —
+`npm run test --workspace=web`, or `task test:web`. Those assert the
+contract: that `error.tsx` never renders `error.message`, that the skeleton
+reserves a row per dependency, that the placeholders stay out of the
+accessibility tree.
+
+What they cannot assert is that Next actually *mounts* the boundary on a
+server throw — that is framework behaviour, and reaching it needs a route
+whose only job is to crash. The procedure below covers that seam, by hand.
+Last walked 2026-09-14.
 
 **Loading skeleton.** Add a delay before the fetch:
 
@@ -212,11 +218,32 @@ button, and a `Reference:` digest. **The connection string must not appear
 anywhere in the HTML** — that is the whole point of not rendering
 `error.message`, since a server-render failure routinely carries one.
 
-> **Known limitation.** The error page returns **HTTP 200**, not 500. The
-> App Router has already committed the response status by the time a
-> streamed Server Component throws, so the boundary cannot change it. An
-> uptime monitor watching status codes will therefore not notice this
-> failure — watch for the log line instead.
+Confirm the digest ties back to the server log:
+
+```bash
+grep -A2 '⨯ Error' .run/web.log
+#   ⨯ Error: TEMP: postgres://ayana:hunter2@localhost:5433/ayana
+#       at b (.next/server/chunks/ssr/_1iae6y5._.js:1:119) {
+#     digest: '4042727749'
+#   }
+```
+
+The digest on that line is the `Reference:` shown on the page. The user can
+read the code aloud; the operator finds the stack.
+
+> **Known limitation, and what to do about it.** The error page returns
+> **HTTP 200**, not 500 — the App Router commits the response status before
+> a streamed Server Component throws, so the boundary cannot change it.
+>
+> The consequence is narrow but real: *an uptime check that asserts on
+> status codes will call this page healthy.* Assert on content instead.
+> `ayana smoke` already does — its status-page check greps for "All systems
+> operational", so it fails while the page is erroring. Verified: with the
+> throw in place, smoke reports `✗ status page reads live API` and exits 1.
+>
+> For backend problems the status code is trustworthy: `/health` returns
+> 503 when a critical dependency is down. It is only the rendered page that
+> cannot signal failure this way.
 
 Revert the edit and rebuild before continuing.
 
