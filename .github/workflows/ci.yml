@@ -183,6 +183,12 @@ jobs:
       - run: uv run mypy --strict app
       - run: uv run pytest -q
 
+      # Python's half of the dependency-audit requirement. Go has
+      # govulncheck and the web has npm audit; without this the Python
+      # services were the only unaudited part of the stack.
+      - name: Audit Python dependencies
+        run: uvx pip-audit --strict --progress-spinner=off
+
   # A dedicated job, because this is the single most important structural
   # guarantee in the system and it deserves to fail visibly and by name
   # rather than being buried in a test matrix.

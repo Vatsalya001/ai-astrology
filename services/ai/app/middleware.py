@@ -7,6 +7,7 @@ app/observability.py for why.
 from __future__ import annotations
 
 import logging
+import re
 import time
 import uuid
 
@@ -18,6 +19,15 @@ from starlette.types import ASGIApp
 from app.observability import set_trace_id
 
 TRACE_HEADER = "X-Trace-Id"
+
+# The only shape an inbound trace ID may take.
+#
+# Length alone is not enough: the header is attacker-controlled and is
+# written into every log line for the request, so an unconstrained value
+# is a channel for putting arbitrary content — an email address, a
+# token, a log-injection payload — into logs that are otherwise
+# carefully PII-free.
+SAFE_TRACE_ID = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
 INTERNAL_TOKEN_HEADER = "X-Internal-Token"
 
 # Paths reachable without the internal token. /health must stay open so
@@ -38,7 +48,7 @@ class TraceMiddleware(BaseHTTPMiddleware):
 
     async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
         incoming = request.headers.get(TRACE_HEADER, "")
-        trace = incoming if 0 < len(incoming) <= 64 else str(uuid.uuid4())
+        trace = incoming if SAFE_TRACE_ID.match(incoming) else str(uuid.uuid4())
 
         set_trace_id(trace)
         request.state.trace_id = trace

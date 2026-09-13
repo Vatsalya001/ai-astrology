@@ -20,7 +20,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
-from app import middleware
+from app import middleware, telemetry
 from app.api import health
 from app.env_check import assert_no_typos
 from app.guards import run_all_startup_guards
@@ -31,7 +31,7 @@ __version__ = "0.1.0"
 
 
 @asynccontextmanager
-async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     configure_logging(service="ai", level=settings.log_level)
     log = logging.getLogger("ai")
 
@@ -40,6 +40,7 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     # being able to.
     assert_no_typos(settings)
     run_all_startup_guards()
+    telemetry.init(app, "ai", __version__, settings.env)
 
     log.info(
         "starting ai-service",

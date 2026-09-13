@@ -21,6 +21,7 @@ import (
 	"github.com/Vatsalya001/ai-astrology/services/api/internal/platform/clients"
 	"github.com/Vatsalya001/ai-astrology/services/api/internal/platform/db"
 	"github.com/Vatsalya001/ai-astrology/services/api/internal/platform/logging"
+	"github.com/Vatsalya001/ai-astrology/services/api/internal/platform/observability"
 	"github.com/Vatsalya001/ai-astrology/services/api/internal/platform/redis"
 )
 
@@ -50,6 +51,37 @@ func run() error {
 	// Signal-aware root context: Ctrl-C and SIGTERM both begin shutdown.
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+
+	// Observability first, so anything that fails afterwards is captured.
+	// Both are no-ops when unconfigured, which is the normal case in
+	// development — the instrumentation still runs, so these paths cannot
+	// rot between releases.
+	obsCfg := observability.Config{
+		ServiceName:  "api",
+		Version:      httpapi.Version,
+		Environment:  cfg.Env,
+		OTLPEndpoint: cfg.OTLPEndpoint,
+		SampleRatio:  cfg.OTLPSampleRatio,
+	}
+
+	shutdownTracing, err := observability.Init(ctx, obsCfg)
+	if err != nil {
+		return fmt.Errorf("init tracing: %w", err)
+	}
+	defer func() { _ = shutdownTracing(context.Background()) }()
+
+	shutdownSentry, err := observability.InitSentry(obsCfg, cfg.SentryDSN)
+	if err != nil {
+		return fmt.Errorf("init sentry: %w", err)
+	}
+	defer func() { _ = shutdownSentry(context.Background()) }()
+
+	if cfg.OTLPEndpoint != "" {
+		log.Info("tracing enabled", slog.String("otlp_endpoint", cfg.OTLPEndpoint))
+	}
+	if cfg.SentryDSN != "" {
+		log.Info("error reporting enabled")
+	}
 
 	database, err := db.Connect(ctx, cfg.DatabaseURL, cfg.DatabaseMaxConns)
 	if err != nil {

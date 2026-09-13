@@ -47,9 +47,74 @@ func TestTraceIDMintsWhenAbsent(t *testing.T) {
 	}
 }
 
-// TestTraceIDRejectsOverlongInbound: the header is attacker-controlled
-// and ends up in every log line for the request. Without a cap, a caller
-// could inflate log volume at will.
+// TestTraceIDRejectsUnsafeContent is the important one.
+//
+// The header is attacker-controlled and lands in every log line for the
+// request. Length-capping alone still lets a caller write an email
+// address, a token or a log-injection payload into logs that are
+// otherwise carefully PII-free.
+func TestTraceIDRejectsUnsafeContent(t *testing.T) {
+	unsafe := []struct {
+		name  string
+		value string
+	}{
+		{"email address", "victim@example.com"},
+		{"whitespace", "trace with spaces"},
+		{"newline injection", "abc\nlevel=ERROR msg=fake"},
+		{"json breakout", `abc","pii":"leaked`},
+		{"path traversal", "../../etc/passwd"},
+		{"ansi escape", "abc\x1b[31mred"},
+		{"empty", ""},
+	}
+
+	for _, tc := range unsafe {
+		t.Run(tc.name, func(t *testing.T) {
+			var seen string
+			h := TraceID(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+				seen = logging.TraceIDFrom(r.Context())
+			}))
+
+			rec := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodGet, "/", nil)
+			req.Header.Set(headerTraceID, tc.value)
+			h.ServeHTTP(rec, req)
+
+			if seen == tc.value {
+				t.Errorf("unsafe trace ID %q was accepted verbatim", tc.value)
+			}
+			if !safeTraceID.MatchString(seen) {
+				t.Errorf("replacement %q is itself not well-formed", seen)
+			}
+		})
+	}
+}
+
+// TestTraceIDAcceptsCommonFormats: the constraint must not break
+// interoperability with real tracing systems.
+func TestTraceIDAcceptsCommonFormats(t *testing.T) {
+	valid := []string{
+		"550e8400-e29b-41d4-a716-446655440000", // UUID
+		"4bf92f3577b34da6a3ce929d0e0e4736",     // W3C trace-context
+		"req_01HQ8Z",                           // prefixed ID
+		"a.b.c",                                // dotted
+	}
+
+	for _, v := range valid {
+		var seen string
+		h := TraceID(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+			seen = logging.TraceIDFrom(r.Context())
+		}))
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req.Header.Set(headerTraceID, v)
+		h.ServeHTTP(rec, req)
+
+		if seen != v {
+			t.Errorf("valid trace ID %q was rejected (got %q)", v, seen)
+		}
+	}
+}
+
 func TestTraceIDRejectsOverlongInbound(t *testing.T) {
 	overlong := strings.Repeat("A", 65)
 

@@ -42,10 +42,27 @@ BANNED_MODULE_PREFIXES = (
     "vertexai",
 )
 
-# Packages that would let this service make arbitrary outbound calls.
-# It is supposed to be offline; allowing an HTTP client back in is how
-# the first barrier quietly erodes.
+# General-purpose HTTP clients. Allowing one back in is how the first
+# barrier quietly erodes: today it fetches a timezone database, tomorrow
+# someone points it at a model endpoint.
 BANNED_NETWORK_PREFIXES = ("httpx", "requests", "aiohttp", "urllib3")
+
+# The ONE permitted egress path, and the reasoning for it.
+#
+# The invariant that matters is that this service cannot call a language
+# model. "Offline" is the means, not the end. Exporting spans to a
+# collector you operate is categorically different from calling a
+# third-party model API: the destination is your own infrastructure, it
+# carries no request content, and it is disabled unless
+# OTEL_EXPORTER_OTLP_ENDPOINT is set.
+#
+# Excluding this service from tracing would leave a hole in exactly the
+# cross-process visibility tracing exists to provide.
+#
+# This allowance is narrow on purpose. It permits the OTLP exporter and
+# nothing else — not the `requests` library the exporter happens to use
+# internally, which remains banned from app/ above.
+PERMITTED_EGRESS_PREFIXES = ("opentelemetry",)
 
 
 def _imported_modules(path: Path) -> set[str]:
@@ -107,14 +124,38 @@ def test_no_llm_sdk_imports() -> None:
 
 
 def test_no_outbound_http_clients() -> None:
-    """astro-service is offline. No general-purpose HTTP clients in app/."""
+    """No general-purpose HTTP client may be imported in app/.
+
+    The narrow exception for telemetry export is asserted separately
+    below, so that widening it requires editing a test that says out
+    loud what is being widened.
+    """
     offenders = _scan(BANNED_NETWORK_PREFIXES)
 
     assert not offenders, (
-        "astro-service imported an HTTP client:\n  "
+        "astro-service imported a general-purpose HTTP client:\n  "
         + "\n  ".join(offenders)
-        + "\n\nThis service is stateless and offline by design. "
-        "(httpx is a dev dependency for the test client only.)"
+        + "\n\nThis service performs no outbound requests except optional "
+        "telemetry export. (httpx is a dev dependency for the test client only.)"
+    )
+
+
+def test_telemetry_is_the_only_egress() -> None:
+    """Pin the exception so it cannot silently widen.
+
+    If a second egress path is ever added, this test fails and whoever
+    added it has to state the justification here rather than quietly
+    relying on the HTTP-client ban not covering their choice.
+    """
+    egress_modules: set[str] = set()
+    for path in _app_files():
+        for module in _imported_modules(path):
+            if _matches(module, PERMITTED_EGRESS_PREFIXES):
+                egress_modules.add(module.split(".")[0])
+
+    assert egress_modules <= {"opentelemetry"}, (
+        f"unexpected egress-capable imports: {sorted(egress_modules)}. "
+        "astro-service may reach a telemetry collector and nothing else."
     )
 
 

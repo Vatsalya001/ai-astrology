@@ -3,25 +3,50 @@ package httpapi
 import (
 	"log/slog"
 	"net/http"
+	"regexp"
 	"runtime/debug"
 	"time"
 
 	"github.com/Vatsalya001/ai-astrology/services/api/internal/platform/logging"
+	"github.com/Vatsalya001/ai-astrology/services/api/internal/platform/observability"
 	"github.com/google/uuid"
 )
 
 const headerTraceID = "X-Trace-Id"
 
+// safeTraceID matches the only shape an inbound trace ID may take.
+//
+// Length alone is not enough. The header is attacker-controlled and is
+// written into every log line for the request, so an unconstrained value
+// is a channel for putting arbitrary content — an email address, a
+// session token, a log-injection payload — into logs that are otherwise
+// carefully PII-free.
+//
+// This charset covers every ID format worth interoperating with: UUIDs,
+// W3C trace-context IDs, and the hex/alphanumeric IDs emitted by common
+// tracing systems.
+var safeTraceID = regexp.MustCompile(`^[A-Za-z0-9._-]{1,64}$`)
+
 // TraceID assigns a trace ID to every request and puts it on the context.
 //
 // An inbound X-Trace-Id is honoured so a trace started elsewhere (the web
-// app, or a future gateway) stays intact. It is length-capped because it
-// is attacker-controlled input that ends up in log lines.
+// app, or a future gateway) stays intact — but only if it is well-formed.
+// Anything else is replaced rather than rejected: a malformed trace header
+// is not worth failing a request over, and silently substituting a fresh
+// ID keeps the request traceable.
 func TraceID(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		id := r.Header.Get(headerTraceID)
-		if id == "" || len(id) > 64 {
-			id = uuid.NewString()
+		// Prefer the OpenTelemetry trace ID when a span is recording, so
+		// a log line and a span carry the SAME identifier. Two parallel
+		// correlation schemes are worse than one, because neither ends up
+		// covering the whole request.
+		id := observability.TraceIDFromContext(r.Context())
+
+		if id == "" {
+			id = r.Header.Get(headerTraceID)
+			if !safeTraceID.MatchString(id) {
+				id = uuid.NewString()
+			}
 		}
 
 		ctx := logging.WithTraceID(r.Context(), id)

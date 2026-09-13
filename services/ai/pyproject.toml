@@ -19,6 +19,18 @@ dependencies = [
     # Phase 5 adds: asyncpg, pgvector
 ]
 
+[project.optional-dependencies]
+# Optional. Install with: uv sync --extra observability
+#
+# Kept out of the default dependency set so development and CI stay
+# lean, and so the absence of a collector is never a startup error.
+observability = [
+    "opentelemetry-sdk>=1.29",
+    "opentelemetry-instrumentation-fastapi>=0.50b0",
+    "opentelemetry-exporter-otlp-proto-http>=1.29",
+    "sentry-sdk>=2.19",
+]
+
 [dependency-groups]
 dev = [
     "pytest>=8.3",
@@ -38,6 +50,14 @@ select = ["E", "F", "I", "N", "UP", "B", "SIM", "RUF"]
 python_version = "3.12"
 strict = true
 warn_unreachable = true
+
+# The observability extras are optional and deliberately not installed by
+# default, so mypy cannot resolve them in a normal checkout. Scoped to
+# these modules only — a blanket ignore_missing_imports would hide real
+# missing-stub problems in every other dependency.
+[[tool.mypy.overrides]]
+module = ["opentelemetry.*", "sentry_sdk.*"]
+ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

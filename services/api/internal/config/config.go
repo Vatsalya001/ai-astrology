@@ -50,6 +50,14 @@ type Config struct {
 	AIServiceURL    string        `env:"AI_SERVICE_URL,required"    validate:"required,url"`
 	ServiceTimeout  time.Duration `env:"SERVICE_TIMEOUT"            envDefault:"10s" validate:"required"`
 
+	// ─── Observability (all optional) ───────────────────────────
+	// Empty values disable the exporter/reporter. The instrumentation
+	// still runs, so these code paths cannot rot between releases, and
+	// enabling them in staging is a config change not a code change.
+	OTLPEndpoint    string  `env:"OTEL_EXPORTER_OTLP_ENDPOINT" envDefault:""`
+	OTLPSampleRatio float64 `env:"OTEL_TRACES_SAMPLER_ARG" envDefault:"1.0" validate:"min=0,max=1"`
+	SentryDSN       string  `env:"SENTRY_DSN" envDefault:""`
+
 	// ─── Optional health probes ─────────────────────────────────
 	// Object storage and mail are reported by /health when a probe URL
 	// is configured, and silently omitted when it is not. Optional

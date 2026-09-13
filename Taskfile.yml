@@ -35,9 +35,13 @@ tasks:
     cmds:
       - '[ -f .env ] || { cp .env.example .env; echo "created .env from .env.example"; }'
       - npm install --no-fund --no-audit
-      - uv sync --directory {{.ASTRO_DIR}}
-      - uv sync --directory {{.AI_DIR}}
+      # --all-extras matches CI. Without it, mypy locally falls back to
+      # Any for the optional observability packages and a type error is
+      # only caught after pushing.
+      - uv sync --directory {{.ASTRO_DIR}} --all-extras
+      - uv sync --directory {{.AI_DIR}} --all-extras
       - cd {{.API_DIR}} && go mod download
+      - task: hooks
 
   # ─── Infrastructure ───────────────────────────────────────────────
 
@@ -185,6 +189,21 @@ tasks:
       TESTCONTAINERS_RYUK_DISABLED: "true"
     cmds:
       - go test ./... -tags=integration -race -count=1
+
+  hooks:
+    desc: Install git hooks (pre-commit secret scan)
+    cmds:
+      - cp scripts/pre-commit .git/hooks/pre-commit
+      - chmod +x .git/hooks/pre-commit
+      - echo "installed .git/hooks/pre-commit"
+
+  audit:
+    desc: Audit dependencies in all three languages for known vulnerabilities
+    cmds:
+      - cd {{.API_DIR}} && govulncheck ./...
+      - uvx pip-audit --strict --progress-spinner=off --path {{.ASTRO_DIR}}/.venv
+      - uvx pip-audit --strict --progress-spinner=off --path {{.AI_DIR}}/.venv
+      - npm audit --audit-level=high
 
   secrets:
     desc: Scan the working tree and full git history for secrets
