@@ -250,7 +250,10 @@ jobs:
 
       - name: Start the Go API
         run: |
-          set -a; . ./.env; set +a
+          # $GITHUB_WORKSPACE, not ./ — this step runs in services/api
+          # while the .env written by the previous step is at the repo
+          # root, so `. ./.env` looked for a file that is never there.
+          set -a; . "$GITHUB_WORKSPACE/.env"; set +a
           go build -o /tmp/api ./cmd/api
           /tmp/api > /tmp/api.log 2>&1 &
           for i in $(seq 1 30); do
