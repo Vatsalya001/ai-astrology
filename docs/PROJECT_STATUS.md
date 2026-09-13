@@ -51,7 +51,10 @@ Evaluated against the running system, not against intent.
 | Health fan-out | six dependencies, 1–4 ms each |
 | 0 Go vulnerabilities | `govulncheck` — was 33 |
 | 0 npm vulnerabilities | `npm audit` |
-| Secret scan clean | gitleaks over full history and working tree |
+| Secret scan clean | gitleaks over full history and working tree, plus a pre-commit hook |
+| Attacker-supplied header cannot inject PII | `X-Trace-Id: victim@example.com` is rejected and replaced |
+| Internal services not network-reachable | every published port bound to `127.0.0.1` |
+| Dependencies audited in all three languages | `govulncheck` · `pip-audit` · `npm audit` |
 | Free local models work | `qwen2.5:7b` returns a completion; `nomic-embed-text` returns 768 dimensions, matching `EMBEDDING_DIM` |
 | Clean clone reaches green | Cloned to a temp dir with no `.env`, no `node_modules`, no virtualenvs → `task verify` passed |
 | Typo'd env var aborts startup | `DEFAULT_AYANMSA=lahiri` → `SuspectedTypoError`, naming the intended field |
@@ -116,6 +119,24 @@ real time this session chasing a Turbopack segfault that turned out to be a corr
 | `corepack enable` needs root | npm workspaces (ADR-008) |
 | Go 1.27.1 breaks `govulncheck` | Pin one minor behind: `go1.26.8` (ADR-007) |
 | System Go 1.22 stdlib corrupted | Toolchain pin sidesteps it. Optional host repair: `sudo apt-get install --reinstall golang-1.22-src` |
+
+---
+
+## Spec §15/§16 checklists
+
+The 20-item gate summarises these; auditing them separately found seven gaps that the
+gate did not surface.
+
+| Item | State |
+|---|---|
+| gitleaks pre-commit hook | ✅ `scripts/pre-commit`, installed by `task setup` |
+| `.env.example` per service | ✅ root + astro + ai |
+| `pip-audit` in CI | ✅ added to the Python matrix |
+| Python services internal-only | ✅ all ports bound to loopback |
+| Trace ID never carries PII | ✅ charset-constrained in all three services |
+| OpenTelemetry wired | ✅ Go + both Python; no-op without an endpoint |
+| Sentry wired | ✅ Go + both Python; no-op without a DSN, with scrubbing |
+| `packages/analytics` typed events | ✅ payload type forbids nested objects |
 
 ---
 

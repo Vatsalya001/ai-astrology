@@ -26,7 +26,7 @@ services:
     # Host port 5433, not 5432: this machine already runs a PostgreSQL
     # instance. Binding the standard port would either fail or, worse,
     # silently shadow it. Container-internal port is unchanged.
-    ports: ["5433:5432"]
+    ports: ["127.0.0.1:5433:5432"]
     volumes:
       - pgdata:/var/lib/postgresql/data
       - ./infrastructure/docker/init:/docker-entrypoint-initdb.d:ro
@@ -40,7 +40,7 @@ services:
     image: redis:7-alpine
     container_name: ayana-redis
     # Host port 6381: 6379 and 6380 are both already taken on this machine.
-    ports: ["6381:6379"]
+    ports: ["127.0.0.1:6381:6379"]
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -55,8 +55,8 @@ services:
       MINIO_ROOT_USER: minioadmin
       MINIO_ROOT_PASSWORD: minioadmin
     ports:
-      - "9000:9000"   # S3 API
-      - "9001:9001"   # web console
+      - "127.0.0.1:9000:9000"   # S3 API
+      - "127.0.0.1:9001:9001"   # web console
     volumes:
       - miniodata:/data
     healthcheck:
@@ -69,8 +69,8 @@ services:
     image: axllent/mailpit
     container_name: ayana-mailpit
     ports:
-      - "1025:1025"   # SMTP
-      - "8025:8025"   # web UI
+      - "127.0.0.1:1025:1025"   # SMTP
+      - "127.0.0.1:8025:8025"   # web UI
     healthcheck:
       test: ["CMD", "/mailpit", "readyz"]
       interval: 5s
@@ -81,7 +81,14 @@ services:
     build:
       context: ./services/astro
     container_name: ayana-astro
-    ports: ["8100:8100"]
+    # Bound to the loopback interface only. `ports: ["8100:8100"]` would
+    # publish on 0.0.0.0 — reachable from anything on the same network.
+    #
+    # astro-service and ai-service must never be reachable from outside
+    # the host; api-service is the only public surface. The port is still
+    # published at all so `task dev:api` (running from source, outside the
+    # compose network) can reach them.
+    ports: ["127.0.0.1:8100:8100"]
     environment:
       ENV: development
       LOG_LEVEL: ${LOG_LEVEL:-info}
@@ -99,7 +106,8 @@ services:
     build:
       context: ./services/ai
     container_name: ayana-ai
-    ports: ["8200:8200"]
+    # Loopback only — see the note on astro above.
+    ports: ["127.0.0.1:8200:8200"]
     environment:
       ENV: development
       LOG_LEVEL: ${LOG_LEVEL:-info}

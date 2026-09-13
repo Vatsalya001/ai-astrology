@@ -4,7 +4,7 @@ This service turns birth data into a chart. It is:
 
   * stateless  — no database, no cache, no session
   * pure       — same input always produces the same output
-  * offline    — no outbound network calls of any kind
+  * offline    — no outbound calls except optional telemetry export
   * AI-free    — structurally incapable of calling a language model
 
 That last property is the point. An LLM must never compute a planetary
@@ -20,7 +20,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
-from app import middleware
+from app import middleware, telemetry
 from app.api import health
 from app.env_check import assert_no_typos
 from app.observability import configure as configure_logging
@@ -30,7 +30,7 @@ __version__ = "0.1.0"
 
 
 @asynccontextmanager
-async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     configure_logging(service="astro", level=settings.log_level)
     log = logging.getLogger("astro")
 
@@ -38,6 +38,7 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     # leaving the setting at its default. For DEFAULT_AYANAMSA that
     # would mean every chart computed against the wrong zodiac.
     assert_no_typos(settings)
+    telemetry.init(app, "astro", __version__, settings.env)
 
     log.info(
         "starting astro-service",

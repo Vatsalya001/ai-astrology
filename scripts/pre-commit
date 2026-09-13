@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+# Pre-commit hook: block secrets before they reach history.
+#
+# Install with:  task hooks
+#
+# CI scans too, but CI runs after the push. Once a secret is in a pushed
+# commit, rotating the credential is the only real remedy — removing it
+# from history does not help, because it was already published. Catching
+# it here is the difference between "oops, amend" and "rotate everything".
+set -euo pipefail
+
+if ! command -v gitleaks >/dev/null 2>&1; then
+    echo "pre-commit: gitleaks not installed — skipping secret scan." >&2
+    echo "            install: go install github.com/zricethezav/gitleaks/v8@latest" >&2
+    exit 0
+fi
+
+# --staged scans exactly what is about to be committed, not the whole
+# tree: fast, and it cannot be tripped by unrelated local scratch files.
+if ! gitleaks protect --staged --redact --no-banner; then
+    cat >&2 <<'MSG'
+
+pre-commit: a staged change looks like a secret.
+
+If it is a real credential: remove it, and rotate it — assume it is
+already compromised.
+
+If it is a false positive, prefer changing the value to something
+obviously fake ("example-not-a-real-token") over adding an allowlist
+entry. An allowlist blunts the scanner for real secrets too.
+
+To bypass deliberately:  git commit --no-verify
+MSG
+    exit 1
+fi

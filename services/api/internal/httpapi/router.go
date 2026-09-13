@@ -11,6 +11,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
 
 // Version is stamped at build time via -ldflags.
@@ -90,7 +91,23 @@ func NewRouter(d Deps) http.Handler {
 		WriteError(w, r, http.StatusMethodNotAllowed, CodeBadRequest, "Method not allowed.", nil)
 	})
 
-	return r
+	// otelhttp wraps the whole router: it extracts W3C traceparent from
+	// inbound requests and starts a server span. Outermost so the span
+	// covers every middleware below it, and so TraceID can read the span
+	// ID that otelhttp just established.
+	//
+	// A no-op tracer provider is installed when OTEL_EXPORTER_OTLP_ENDPOINT
+	// is unset, so this costs almost nothing in development.
+	return otelhttp.NewHandler(r, "api",
+		otelhttp.WithSpanNameFormatter(func(_ string, r *http.Request) string {
+			// Method + path pattern, never the raw path: a path can carry
+			// an ID, and high-cardinality span names are useless anyway.
+			if rc := chi.RouteContext(r.Context()); rc != nil && rc.RoutePattern() != "" {
+				return r.Method + " " + rc.RoutePattern()
+			}
+			return r.Method
+		}),
+	)
 }
 
 // probers lists every dependency the health endpoint reports on.
