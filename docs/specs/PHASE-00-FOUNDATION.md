@@ -383,8 +383,25 @@ class Settings(BaseSettings):
 settings = Settings()   # raises at import time if anything is missing or wrong
 ```
 
-`extra="forbid"` means a typo'd env var is an error rather than a silently ignored
-setting — worth having.
+`extra="forbid"` makes a typo in a `.env` **file** an error rather than a silently
+ignored setting.
+
+It does **not** cover OS environment variables. Pydantic ignores any variable that
+matches no field, because the whole environment would otherwise be "extra" — which
+means the protection is absent exactly where it matters most, since production config
+arrives as environment variables rather than a `.env` file:
+
+```
+DEFAULT_AYANMSA=lahiri     # note the missing 'A'
+```
+
+leaves `default_ayanamsa` at its default, and every chart in the system is then
+computed against the wrong zodiac with nothing reporting a problem.
+
+`app/env_check.py` closes that gap: at startup it flags any environment variable whose
+name is within edit distance 2 of a declared field and refuses to boot. It fails rather
+than warns, because a warning in a container log is read by nobody and this failure mode
+otherwise goes unnoticed for months.
 
 `.env.example` is committed per service and stays in sync; a CI job diffs the declared
 keys against the config schema and fails on drift.

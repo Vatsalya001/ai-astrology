@@ -3,7 +3,9 @@
 ## Both services
 - `uv` for dependency management. `ruff` for lint and format. `mypy --strict`.
 - Pydantic v2 models double as the OpenAPI schema; they are the cross-service contract.
-- `extra="forbid"` on settings so a typo'd env var is an error, not a silent default.
+- `extra="forbid"` on settings, plus `app/env_check.py`. The first catches a
+  typo in a `.env` file; the second catches one in an OS environment variable,
+  which `extra="forbid"` does **not** — and which is how production is configured.
 - Structured JSON logging to stdout, matching the Go service's field names.
 
 ## astro-service — additional, non-negotiable

@@ -22,6 +22,7 @@ from fastapi import FastAPI
 
 from app import middleware
 from app.api import health
+from app.env_check import assert_no_typos
 from app.guards import run_all_startup_guards
 from app.observability import configure as configure_logging
 from app.settings import settings
@@ -37,6 +38,7 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     # Guards run before anything else binds or connects. A configuration
     # that must never serve traffic should never reach the point of
     # being able to.
+    assert_no_typos(settings)
     run_all_startup_guards()
 
     log.info(

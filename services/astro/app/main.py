@@ -22,6 +22,7 @@ from fastapi import FastAPI
 
 from app import middleware
 from app.api import health
+from app.env_check import assert_no_typos
 from app.observability import configure as configure_logging
 from app.settings import settings
 
@@ -32,6 +33,11 @@ __version__ = "0.1.0"
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     configure_logging(service="astro", level=settings.log_level)
     log = logging.getLogger("astro")
+
+    # A misspelled env var is silently ignored by pydantic-settings,
+    # leaving the setting at its default. For DEFAULT_AYANAMSA that
+    # would mean every chart computed against the wrong zodiac.
+    assert_no_typos(settings)
 
     log.info(
         "starting astro-service",
