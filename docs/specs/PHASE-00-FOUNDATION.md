@@ -752,12 +752,14 @@ than aspirational.
 
 Every box must be checked before Phase 1 begins.
 
-**Outcome (2026-09-13): 19 of 20 met. Gate closed.**
+**Outcome (2026-09-13): 20 of 20 met. Gate closed.**
 
-Item 2 is blocked by an environment fault rather than by code — the 4.7 GB model
-fails its checksum on download, one of five data-corruption events on this machine.
-Neither Ollama model is used by any code until Phase 4, so Phase 1 is unblocked.
-Full writeup in `docs/PROJECT_STATUS.md`.
+Item 2 took three attempts — the 4.7 GB model failed its checksum twice with two
+different wrong hashes before succeeding, one of five data-corruption events on this
+machine. Both models are now verified working, not merely present: `qwen2.5:7b`
+returns a completion and `nomic-embed-text` returns 768 dimensions matching
+`EMBEDDING_DIM`. The corruption pattern is documented in `docs/PROJECT_STATUS.md` and
+is worth investigating independently of this project.
 
 Two items were reshaped during implementation and are recorded honestly rather than
 ticked loosely:
@@ -769,7 +771,7 @@ ticked loosely:
   exist.
 
 - [x] `docker compose up -d` brings up Postgres+pgvector, Redis, MinIO, Mailpit, astro, ai — all healthy
-- [ ] `ollama list` shows `llama3.2:3b`, `qwen2.5:7b`, `nomic-embed-text`  ⛔ **BLOCKED** — `qwen2.5:7b` fails checksum; hardware fault, see `docs/PROJECT_STATUS.md`
+- [x] `ollama list` shows `llama3.2:3b`, `qwen2.5:7b`, `nomic-embed-text` — inference and 768-dim embeddings both verified
 - [x] `task verify` passes from a clean clone
 - [x] `task dev` starts web (3000), API (4000), astro (8100), ai (8200)
 - [x] Status page shows all six dependencies green

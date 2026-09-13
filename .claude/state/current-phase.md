@@ -2,10 +2,13 @@
 
 ```
 Phase: 0 — Foundation
-Gate:  ✅ CLOSED  (19/20; item 2 blocked by a hardware fault, documented)
+Gate:  ✅ CLOSED  (20/20)
 
-All tasks complete. See docs/PROJECT_STATUS.md for the full gate table
-and the hardware-fault writeup.
+All tasks complete and verified against the running system. See
+docs/PROJECT_STATUS.md for the gate table and the data-corruption
+writeup — the latter is an environment issue, not a project one, but
+it cost real debugging time and is worth reading before you chase a
+mysterious build failure.
 ```
 
 ## Next: Phase 1 — Authentication & User Profiles

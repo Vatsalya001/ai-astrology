@@ -2,7 +2,7 @@
 
 **Updated:** 2026-09-13
 **Current phase:** 0 — Foundation
-**Gate:** ✅ **CLOSED** — 19 of 20 met; 1 blocked by a hardware fault, documented below
+**Gate:** ✅ **CLOSED — 20 of 20**
 **Repo:** https://github.com/Vatsalya001/ai-astrology (private)
 
 ---
@@ -14,7 +14,7 @@ Evaluated against the running system, not against intent.
 | # | Item | State |
 |---|---|---|
 | 1 | `docker compose up -d` brings up all six services healthy | ✅ |
-| 2 | Ollama models: `llama3.2:3b`, `qwen2.5:7b`, `nomic-embed-text` | ⛔ **blocked** — see §Hardware |
+| 2 | Ollama models: `llama3.2:3b`, `qwen2.5:7b`, `nomic-embed-text` | ✅ all three; inference and embeddings verified |
 | 3 | `task verify` passes | ✅ |
 | 4 | `task dev` starts web, API, astro, ai | ✅ |
 | 5 | Status page shows six dependencies | ✅ |
@@ -52,6 +52,7 @@ Evaluated against the running system, not against intent.
 | 0 Go vulnerabilities | `govulncheck` — was 33 |
 | 0 npm vulnerabilities | `npm audit` |
 | Secret scan clean | gitleaks over full history and working tree |
+| Free local models work | `qwen2.5:7b` returns a completion; `nomic-embed-text` returns 768 dimensions, matching `EMBEDDING_DIM` |
 
 **Tests:** Go 44 functions across 5 packages — config, logging, httpapi, clients, and
 the db integration suite (all `-race`). Python 76. `mypy --strict` and `ruff` clean.
@@ -64,16 +65,17 @@ forwarding `http.Flusher` (Phase 5's SSE depends on it), and the generated clien
 
 ---
 
-## ⛔ Hardware fault — this needs your attention
+## ⚠️ Data corruption on this machine — still worth investigating
 
-**Five data-corruption events occurred during this session.** This is not normal and it
-will corrupt your work, not just this project.
+**Five data-corruption events occurred while building Phase 0.** None of them are
+caused by this project's code, and all were worked around, but the pattern is not
+normal and it can corrupt your work.
 
 | # | What | Evidence |
 |---|---|---|
 | 1 | Go stdlib `src/time/time.go` | `0x09` → `0x08` — single bit flip. Broke every build importing `time`. |
 | 2 | uv cache, mypy typeshed `inspect.pyi` | `0x70` → `0x60`, `Mapping` → `` Ma`ping ``. Broke `mypy --strict`. |
-| 3 | Ollama `qwen2.5:7b` (4.7 GB) | Checksum failed **twice with two different wrong hashes** (`ce342d11…`, then `ade8f13f…`) |
+| 3 | Ollama `qwen2.5:7b` (4.7 GB) | Checksum failed **twice with two different wrong hashes** (`ce342d11…`, then `ade8f13f…`). Succeeded on a later attempt — so the corruption is intermittent, not a bad upstream file. |
 | 4 | Go build cache, `go/types` | `0x6E` → `0x6A`, `constDecl` → `cojstDecl`. Broke linking. |
 | 5 | `next-swc.linux-x64-gnu.node` | Corrupted native binary → deterministic segfault on every `next build`. Fixed by reinstalling. |
 
@@ -85,16 +87,22 @@ being written to disk. Kernel logs show no MCE, no disk errors, and ECC counters
 zero — but the machine uses Wi-Fi (`wlp0s20f3`) with no VPN active, and the NIC's own
 error counters are clean, so the corruption is happening past the driver.
 
+**That the same download later succeeded is itself informative:** an intermittent
+fault that corrupts large transfers some of the time fits failing memory or a flaky
+wireless path far better than it fits a bad mirror or a bad cache.
+
 **Suggested next steps, cheapest first:**
 
-1. Retry the 4.7 GB download over **ethernet** rather than Wi-Fi. If it succeeds, the
-   problem is the wireless path. This is the decisive test.
-2. `sudo memtest86+` (or boot the memtest entry) — an overnight run.
-3. `sudo smartctl -a /dev/nvme0n1` for disk health.
+1. `sudo memtest86+` — an overnight run. This is now the highest-value test, since the
+   network hypothesis is weakened by the eventual success.
+2. `sudo smartctl -a /dev/nvme0n1` for disk health.
+3. If large downloads corrupt again, retry over **ethernet** to isolate the wireless
+   path.
 
-Until then, **gate item 2 is blocked by the environment, not by the code.**
-`nomic-embed-text` (274 MB) downloaded fine; only the large file fails. Neither model
-is used by any code until Phase 4, so this does not block Phase 1.
+Nothing here blocks development. But expect the occasional inexplicable build failure,
+and treat a corrupted dependency as the first hypothesis rather than the last — it cost
+real time this session chasing a Turbopack segfault that turned out to be a corrupted
+`.node` binary, not a code bug.
 
 ---
 
