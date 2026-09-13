@@ -12,10 +12,22 @@
 /** Health status, shared by every service in the system. */
 export type CheckStatus = 'ok' | 'error' | 'degraded'
 
+/**
+ * Why a dependency probe failed.
+ *
+ * A closed vocabulary, never the underlying error text. `/health` is
+ * unauthenticated by necessity — a load balancer cannot present a
+ * credential — so anything it returns is public, and a raw probe error
+ * reads `dial tcp 127.0.0.1:8025: connect: connection refused`, which is
+ * the internal topology. The detail goes to the API's log, keyed by
+ * trace ID.
+ */
+export type ProbeReason = 'timeout' | 'unreachable' | 'unavailable'
+
 export interface Check {
   status: CheckStatus
   latency_ms: number
-  error?: string
+  reason?: ProbeReason
 }
 
 /**

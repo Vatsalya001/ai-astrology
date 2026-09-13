@@ -1,0 +1,399 @@
+#!/usr/bin/env bash
+#
+# ayana — start, check and stop the whole stack.
+#
+#   ./scripts/ayana up       bring everything up, wait until it answers
+#   ./scripts/ayana status   what is running, and on which port
+#   ./scripts/ayana test     the full gate: verify + e2e against the live stack
+#   ./scripts/ayana smoke    fast end-to-end check, no build
+#   ./scripts/ayana logs     tail every service
+#   ./scripts/ayana down     stop everything this script started
+#
+# Written because "run task up, then task dev:api in another terminal,
+# then npm run dev in a third" is four terminals and an ordering
+# constraint, and the ordering is not obvious: the API refuses to start
+# until Postgres accepts connections.
+
+set -euo pipefail
+
+REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$REPO"
+
+RUN_DIR="$REPO/.run"
+API_LOG="$RUN_DIR/api.log"
+WEB_LOG="$RUN_DIR/web.log"
+API_PID="$RUN_DIR/api.pid"
+WEB_PID="$RUN_DIR/web.pid"
+
+API_PORT=4000
+WEB_PORT=3000
+
+mkdir -p "$RUN_DIR"
+
+# ─── output ──────────────────────────────────────────────────────────
+# Colour only when attached to a terminal, so piping to a file or CI
+# does not produce escape-code soup.
+if [[ -t 1 ]]; then
+  BOLD=$'\033[1m'; DIM=$'\033[2m'; RED=$'\033[31m'; GREEN=$'\033[32m'
+  YELLOW=$'\033[33m'; BLUE=$'\033[34m'; RESET=$'\033[0m'
+else
+  BOLD=''; DIM=''; RED=''; GREEN=''; YELLOW=''; BLUE=''; RESET=''
+fi
+
+say()  { printf '%s\n' "${BOLD}$*${RESET}"; }
+ok()   { printf '  %s✓%s %s\n' "$GREEN" "$RESET" "$*"; }
+bad()  { printf '  %s✗%s %s\n' "$RED" "$RESET" "$*"; }
+warn() { printf '  %s!%s %s\n' "$YELLOW" "$RESET" "$*"; }
+info() { printf '  %s%s%s\n' "$DIM" "$*" "$RESET"; }
+
+die() { bad "$*"; exit 1; }
+
+# ─── helpers ─────────────────────────────────────────────────────────
+
+# Wait for a URL to answer 2xx/3xx. Returns non-zero on timeout so the
+# caller decides whether that is fatal.
+wait_for() {
+  local url=$1 name=$2 attempts=${3:-45}
+  for ((i = 1; i <= attempts; i++)); do
+    if curl -sf --max-time 2 "$url" > /dev/null 2>&1; then
+      return 0
+    fi
+    sleep 1
+  done
+  return 1
+}
+
+# The port is the source of truth for "is it up?", not the PID file.
+#
+# `npm run start` is three processes — npm, then `sh -c next start`, then
+# next-server — so the PID we record is a wrapper, and asking whether
+# *that* is alive answers the wrong question. Asking who holds the port
+# answers the right one, and survives a stale or missing PID file.
+port_pid() {
+  ss -ltnp 2>/dev/null \
+    | awk -v want=":$1\$" '$4 ~ want' \
+    | grep -o 'pid=[0-9]*' | head -1 | cut -d= -f2
+}
+
+listening() { [[ -n "$(port_pid "$1")" ]]; }
+
+# Kill a process and everything it spawned, children first.
+#
+# Killing only the recorded PID orphans the grandchildren: `npm run
+# start` dies, next-server keeps the port, and the next `up` fails on a
+# port collision with a process nothing is tracking. Depth-first so a
+# parent cannot respawn a child mid-teardown.
+kill_tree() {
+  local pid=$1 sig=${2:-TERM} child
+  [[ -n "$pid" ]] || return 0
+  for child in $(pgrep -P "$pid" 2>/dev/null); do
+    kill_tree "$child" "$sig"
+  done
+  kill "-$sig" "$pid" 2>/dev/null || true
+}
+
+# SIGTERM, then SIGKILL only for whatever is still holding the port.
+stop_port() {
+  local port=$1 pidfile=$2 label=$3
+  local pid
+
+  if [[ -f "$pidfile" ]]; then
+    kill_tree "$(cat "$pidfile" 2>/dev/null)" TERM
+    rm -f "$pidfile"
+  fi
+
+  for _ in {1..6}; do
+    listening "$port" || { ok "$label stopped"; return 0; }
+    sleep 1
+  done
+
+  # Still there: something escaped the tree, or was started by hand.
+  pid=$(port_pid "$port")
+  if [[ -n "$pid" ]]; then
+    kill_tree "$pid" KILL
+    sleep 1
+    if listening "$port"; then
+      bad "$label is still holding :$port (pid $pid)"
+      return 1
+    fi
+    ok "$label stopped (needed SIGKILL)"
+  else
+    ok "$label stopped"
+  fi
+}
+
+require() {
+  command -v "$1" > /dev/null 2>&1 || die "$1 is not installed. Run: task setup"
+}
+
+# ─── up ──────────────────────────────────────────────────────────────
+
+cmd_up() {
+  require docker
+  require curl
+
+  say "Ayana — starting"
+  echo
+
+  # 0. Environment
+  if [[ ! -f .env ]]; then
+    cp .env.example .env
+    ok ".env created from .env.example"
+  else
+    info ".env already present"
+  fi
+
+  # 1. Node dependencies. The build needs them and a clean clone has none.
+  if [[ ! -d node_modules ]]; then
+    say "Installing node dependencies (first run only)"
+    npm ci > "$RUN_DIR/npm-ci.log" 2>&1 || die "npm ci failed — see $RUN_DIR/npm-ci.log"
+    ok "node_modules installed"
+  fi
+
+  # 2. Infrastructure. --wait blocks on the healthchecks in
+  #    docker-compose.yml, which is what makes step 3 safe: the API
+  #    exits rather than retrying if Postgres is not accepting yet.
+  say "Infrastructure"
+  docker compose up -d --wait > "$RUN_DIR/compose.log" 2>&1 \
+    || { tail -20 "$RUN_DIR/compose.log"; die "docker compose failed"; }
+
+  while read -r name status; do
+    if [[ "$status" == *healthy* ]]; then ok "$name"; else bad "$name — $status"; fi
+  done < <(docker compose ps --format '{{.Name}} {{.Status}}')
+
+  # 3. Go API
+  say "api-service"
+  if listening "$API_PORT"; then
+    ok "already running (pid $(port_pid "$API_PORT"))"
+  else
+    # -C: the Go module is services/api, but the process is launched
+    # from the repo root because that is where its .env lives.
+    go build -C services/api -o "$RUN_DIR/ayana-api" ./cmd/api 2>&1 \
+      | sed 's/^/    /' || die "go build failed"
+    # shellcheck disable=SC1091
+    set -a; . ./.env; set +a
+    "$RUN_DIR/ayana-api" > "$API_LOG" 2>&1 &
+    echo $! > "$API_PID"
+
+    if wait_for "http://localhost:$API_PORT/health" api-service; then
+      ok "listening on :$API_PORT"
+    else
+      tail -20 "$API_LOG"
+      die "api-service never became healthy — see $API_LOG"
+    fi
+  fi
+
+  # 4. Web
+  say "web"
+  if listening "$WEB_PORT"; then
+    ok "already running (pid $(port_pid "$WEB_PORT"))"
+  else
+    npm run build --workspace=web > "$RUN_DIR/web-build.log" 2>&1 \
+      || { tail -20 "$RUN_DIR/web-build.log"; die "web build failed"; }
+    npm run start --workspace=web > "$WEB_LOG" 2>&1 &
+    echo $! > "$WEB_PID"
+
+    if wait_for "http://localhost:$WEB_PORT" web; then
+      ok "listening on :$WEB_PORT"
+    else
+      tail -20 "$WEB_LOG"
+      die "web never came up — see $WEB_LOG"
+    fi
+  fi
+
+  echo
+  cmd_status
+}
+
+# ─── status ──────────────────────────────────────────────────────────
+
+cmd_status() {
+  say "Open in a browser"
+  printf '  %s%-34s%s  %s\n' "$BLUE" "http://localhost:$WEB_PORT"         "$RESET" "landing page"
+  printf '  %s%-34s%s  %s\n' "$BLUE" "http://localhost:$WEB_PORT/status"  "$RESET" "system status — live health of all six dependencies"
+  echo
+  printf '  %s%-34s%s  %s\n' "$BLUE" "http://localhost:8025"              "$RESET" "Mailpit — every outbound email lands here, none are sent"
+  printf '  %s%-34s%s  %s\n' "$BLUE" "http://localhost:9001"              "$RESET" "MinIO console — object storage (minioadmin / minioadmin)"
+  echo
+
+  say "APIs"
+  printf '  %s%-34s%s  %s\n' "$BLUE" "http://localhost:$API_PORT/health"  "$RESET" "api-service — the only public surface"
+  printf '  %s%-34s%s  %s\n' "$BLUE" "http://localhost:$API_PORT/api/v1/meta" "$RESET" "phase and feature flags"
+  printf '  %s%-34s%s  %s\n' "$DIM"  "http://localhost:8100/docs"         "$RESET" "astro-service — internal, never internet-facing"
+  printf '  %s%-34s%s  %s\n' "$DIM"  "http://localhost:8200/docs"         "$RESET" "ai-service — internal, never internet-facing"
+  echo
+
+  say "Data stores"
+  printf '  %s%-34s%s  %s\n' "$DIM" "postgres://localhost:5433" "$RESET" "user: ayana  db: ayana  (5432 is taken on this machine)"
+  printf '  %s%-34s%s  %s\n' "$DIM" "redis://localhost:6381"    "$RESET" "(6379 and 6380 are taken)"
+  printf '  %s%-34s%s  %s\n' "$DIM" "http://localhost:11434"    "$RESET" "Ollama — free local models, no API key"
+  echo
+
+  say "Health"
+  local out
+  if out=$(curl -sf --max-time 5 "http://localhost:$API_PORT/health" 2>/dev/null); then
+    # JSON via the environment, script via a quoted heredoc: nothing is
+    # substituted by the shell, so neither the JSON nor the Python has to
+    # survive a round of quoting.
+    HEALTH_JSON="$out" python3 <<'PY' || printf '%s\n' "$out"
+import json, os
+
+d = json.loads(os.environ["HEALTH_JSON"])
+mark = {"ok": "\033[32m✓\033[0m", "error": "\033[31m✗\033[0m",
+        "degraded": "\033[33m!\033[0m"}
+
+print("  overall: {}".format(d["status"]))
+for name, c in sorted(d["checks"].items()):
+    reason = "  ({})".format(c["reason"]) if c.get("reason") else ""
+    print("  {} {:<10} {}ms{}".format(
+        mark.get(c["status"], "?"), name, c["latency_ms"], reason))
+PY
+  else
+    bad "api-service is not answering on :$API_PORT — run: ./scripts/ayana up"
+  fi
+}
+
+# ─── smoke ───────────────────────────────────────────────────────────
+# Fast assertions against whatever is currently running. No build, no
+# container restarts. This is the one to run after a code change.
+
+cmd_smoke() {
+  local failures=0
+  check() { if eval "$2" > /dev/null 2>&1; then ok "$1"; else bad "$1"; failures=$((failures + 1)); fi; }
+
+  say "Smoke"
+
+  check "api /health answers" \
+    "curl -sf --max-time 5 http://localhost:$API_PORT/health"
+  check "api reports status ok" \
+    "curl -sf --max-time 5 http://localhost:$API_PORT/health | grep -q '\"status\":\"ok\"'"
+  check "all six dependencies present" \
+    "[ \$(curl -sf --max-time 5 http://localhost:$API_PORT/health | grep -o '\"latency_ms\"' | wc -l) -eq 6 ]"
+  check "landing page renders" \
+    "curl -sf --max-time 5 http://localhost:$WEB_PORT | grep -q 'knows your astrology'"
+  check "status page reads live API" \
+    "curl -sf --max-time 10 http://localhost:$WEB_PORT/status | grep -q 'All systems operational'"
+  check "unknown route returns 404" \
+    "[ \$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 http://localhost:$WEB_PORT/nope) = 404 ]"
+  check "404 page is branded, not Next's default" \
+    "curl -s --max-time 5 http://localhost:$WEB_PORT/nope | grep -q \"isn&#x27;t written yet\""
+  check "design tokens resolved (gold CTA in CSS)" \
+    "curl -sf --max-time 5 http://localhost:$WEB_PORT | grep -q 'bg-primary'"
+
+  # The invariant that matters most: /health is unauthenticated, so it
+  # must never carry internal hostnames, ports or error text.
+  check "/health leaks no internal topology" \
+    "! curl -sf --max-time 5 http://localhost:$API_PORT/health | grep -qE 'dial tcp|127\.0\.0\.1|localhost:[0-9]'"
+
+  # One request, one trace ID, three services.
+  local tid="smoke-$$-$(date +%s)"
+  curl -sf --max-time 5 -H "X-Trace-Id: $tid" "http://localhost:$API_PORT/health" > /dev/null 2>&1 || true
+  sleep 1
+  check "trace id reaches api-service log" "grep -q '$tid' '$API_LOG'"
+  check "trace id reaches astro-service"   "docker compose logs astro --since 30s 2>/dev/null | grep -q '$tid'"
+  check "trace id reaches ai-service"      "docker compose logs ai    --since 30s 2>/dev/null | grep -q '$tid'"
+
+  # A poisoned trace ID must be rejected, not logged — birth details and
+  # email addresses have both turned up in trace headers before.
+  curl -sf --max-time 5 -H 'X-Trace-Id: victim@example.com' \
+    "http://localhost:$API_PORT/health" > /dev/null 2>&1 || true
+  sleep 1
+  check "PII in a trace header is refused, not logged" \
+    "! grep -q 'victim@example.com' '$API_LOG'"
+
+  # Internal services must not be reachable from the network.
+  check "astro-service bound to loopback only" \
+    "! ss -ltn 2>/dev/null | grep -qE '(0\.0\.0\.0|\*):8100'"
+  check "ai-service bound to loopback only" \
+    "! ss -ltn 2>/dev/null | grep -qE '(0\.0\.0\.0|\*):8200'"
+
+  echo
+  if ((failures == 0)); then
+    ok "smoke passed"
+  else
+    bad "$failures check(s) failed"
+    return 1
+  fi
+}
+
+# ─── test ────────────────────────────────────────────────────────────
+
+cmd_test() {
+  require task
+
+  say "Gate — lint, test and build across all three languages"
+  task verify
+
+  echo
+  say "Browser tests against the live stack"
+  curl -sf --max-time 5 "http://localhost:$WEB_PORT" > /dev/null 2>&1 \
+    || die "web is not running — run: ./scripts/ayana up"
+  npx playwright test
+
+  echo
+  cmd_smoke
+}
+
+# ─── logs / down ─────────────────────────────────────────────────────
+
+cmd_logs() {
+  say "Tailing everything — Ctrl-C to stop"
+  docker compose logs -f --tail=20 &
+  local compose_pid=$!
+  # shellcheck disable=SC2064
+  trap "kill $compose_pid 2>/dev/null || true" EXIT
+  tail -f "$API_LOG" "$WEB_LOG" 2>/dev/null
+}
+
+cmd_down() {
+  say "Stopping"
+
+  # Web before the API: the status page renders server-side, so stopping
+  # the API first guarantees a burst of failing fetches on the way down.
+  if listening "$WEB_PORT"; then
+    stop_port "$WEB_PORT" "$WEB_PID" "web"
+  else
+    info "web was not running"
+    rm -f "$WEB_PID"
+  fi
+
+  if listening "$API_PORT"; then
+    stop_port "$API_PORT" "$API_PID" "api-service"
+  else
+    info "api-service was not running"
+    rm -f "$API_PID"
+  fi
+
+  docker compose down > "$RUN_DIR/compose-down.log" 2>&1 \
+    && ok "containers stopped" \
+    || warn "docker compose down reported a problem — see $RUN_DIR/compose-down.log"
+
+  info "Postgres and MinIO data survive in named volumes."
+  info "To wipe them too: docker compose down -v"
+}
+
+# ─── dispatch ────────────────────────────────────────────────────────
+
+case "${1:-up}" in
+  up)     cmd_up ;;
+  status) cmd_status ;;
+  smoke)  cmd_smoke ;;
+  test)   cmd_test ;;
+  logs)   cmd_logs ;;
+  down)   cmd_down ;;
+  restart) cmd_down; echo; cmd_up ;;
+  *)
+    cat <<EOF
+${BOLD}ayana${RESET} — start, check and stop the whole stack
+
+  ${BOLD}up${RESET}       start everything and wait until it answers  ${DIM}(default)${RESET}
+  ${BOLD}status${RESET}   what is running, on which port, and its health
+  ${BOLD}smoke${RESET}    fast assertions against the running stack
+  ${BOLD}test${RESET}     full gate — task verify + Playwright + smoke
+  ${BOLD}logs${RESET}     tail every service
+  ${BOLD}down${RESET}     stop everything this script started
+  ${BOLD}restart${RESET}  down, then up
+EOF
+    exit 1
+    ;;
+esac

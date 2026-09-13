@@ -100,7 +100,70 @@ test.describe('status page', () => {
   })
 })
 
-test('unknown routes render a 404 page rather than crashing', async ({ page }) => {
-  const response = await page.goto('/no-such-page')
-  expect(response?.status()).toBe(404)
+test.describe('404', () => {
+  test('returns a real 404 status, not a 200 with sad text', async ({ page }) => {
+    const response = await page.goto('/no-such-page')
+    expect(response?.status()).toBe(404)
+  })
+
+  test('is branded and offers a way out', async ({ page }) => {
+    await page.goto('/no-such-page')
+
+    // Without app/not-found.tsx, Next serves its own monochrome default.
+    // That page has no wordmark and no navigation, so a mistyped URL
+    // becomes a dead end that looks nothing like the product.
+    await expect(page).toHaveTitle(/Page not found/)
+    await expect(
+      page.getByRole('heading', { name: /isn't written yet/i }),
+    ).toBeVisible()
+
+    await page.getByRole('link', { name: /back to home/i }).click()
+    await expect(page.getByRole('heading', { level: 1 })).toContainText(
+      'It knows your astrology',
+    )
+  })
+})
+
+test('each page reports its own title', async ({ page }) => {
+  // Every route inherited the root layout's title until /status declared
+  // its own, so an ops dashboard advertised itself as a consumer product.
+  await page.goto('/')
+  const landing = await page.title()
+
+  await page.goto('/status')
+  const status = await page.title()
+
+  expect(status).not.toBe(landing)
+  expect(status).toMatch(/System status/)
+})
+
+test('health never returns internal topology to the browser', async ({
+  request,
+}) => {
+  // /health is unauthenticated by necessity — a load balancer cannot
+  // present a credential — so its body is public. It used to carry
+  // `dial tcp 127.0.0.1:8025: connect: connection refused`, which hands
+  // over the internal host and port. The detail belongs in the log.
+  const res = await request.get(
+    (process.env.API_URL ?? 'http://localhost:4000') + '/health',
+  )
+  expect(res.ok()).toBeTruthy()
+
+  const body = await res.text()
+  for (const forbidden of ['dial tcp', '127.0.0.1', 'connection refused']) {
+    expect(body).not.toContain(forbidden)
+  }
+
+  // Any reason present must come from the closed vocabulary.
+  const parsed = JSON.parse(body) as {
+    checks: Record<string, { reason?: string }>
+  }
+  for (const [name, check] of Object.entries(parsed.checks)) {
+    if (check.reason) {
+      expect(
+        ['timeout', 'unreachable', 'unavailable'],
+        `${name} reported an unrecognised reason`,
+      ).toContain(check.reason)
+    }
+  }
 })
