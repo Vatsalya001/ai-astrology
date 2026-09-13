@@ -1,68 +1,32 @@
 import type { ReactNode } from 'react'
 
-/** Tiny class-name joiner. Avoids pulling in a dependency for this. */
-export function cx(...parts: Array<string | false | null | undefined>): string {
-  return parts.filter(Boolean).join(' ')
-}
+import { cn } from '@/lib/utils'
 
-// ─── Button ──────────────────────────────────────────────────────────
+/**
+ * App-specific presentational components.
+ *
+ * These are deliberately NOT named `Button` or `Card`: those live in
+ * `@/components/ui/*` (shadcn). Having both a `ui.tsx` file and a `ui/`
+ * directory export the same name is a trap — `@/components/ui` resolves
+ * to the file and `@/components/ui/button` into the directory, so an
+ * import can silently pick up the wrong component with no type error.
+ *
+ * The padded surface below is a `Panel` for that reason. shadcn's `Card`
+ * composes with `CardHeader`/`CardContent` and carries no padding of its
+ * own; this one is a single padded block, which is what every Phase 0
+ * page actually wants.
+ */
 
-type ButtonProps = {
-  children: ReactNode
-  variant?: 'primary' | 'secondary' | 'ghost'
-  href?: string
-  className?: string
-  disabled?: boolean
-  title?: string
-}
+// ─── Panel ───────────────────────────────────────────────────────────
 
-const BUTTON_BASE =
-  'inline-flex items-center justify-center gap-2 rounded-xl px-5 py-3 text-sm ' +
-  'font-medium transition-all duration-200 disabled:cursor-not-allowed disabled:opacity-45'
-
-const BUTTON_VARIANTS = {
-  primary:
-    'bg-gold text-base hover:bg-gold-soft hover:shadow-[0_0_28px_-6px_rgba(212,168,87,0.55)]',
-  secondary:
-    'border border-border bg-surface text-ink hover:border-accent-soft hover:bg-elevated',
-  ghost: 'text-ink-muted hover:text-ink hover:bg-surface',
-} as const
-
-export function Button({
-  children,
-  variant = 'primary',
-  href,
-  className,
-  disabled,
-  title,
-}: ButtonProps) {
-  const classes = cx(BUTTON_BASE, BUTTON_VARIANTS[variant], className)
-
-  if (href && !disabled) {
-    return (
-      <a href={href} className={classes} title={title}>
-        {children}
-      </a>
-    )
-  }
-
-  return (
-    <button type="button" className={classes} disabled={disabled} title={title}>
-      {children}
-    </button>
-  )
-}
-
-// ─── Card ────────────────────────────────────────────────────────────
-
-export function Card({
+export function Panel({
   children,
   className,
 }: {
   children: ReactNode
   className?: string
 }) {
-  return <div className={cx('card p-6', className)}>{children}</div>
+  return <div className={cn('card p-6', className)}>{children}</div>
 }
 
 // ─── Badge ───────────────────────────────────────────────────────────
@@ -87,7 +51,7 @@ export function Badge({
 }) {
   return (
     <span
-      className={cx(
+      className={cn(
         'inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium',
         BADGE_TONES[tone],
         className,
@@ -123,11 +87,11 @@ export function StatusDot({
     <span className="relative inline-flex h-2.5 w-2.5 shrink-0" aria-hidden="true">
       {status === 'ok' && (
         <span
-          className={cx('absolute inline-flex h-full w-full rounded-full opacity-60', tone)}
+          className={cn('absolute inline-flex h-full w-full rounded-full opacity-60', tone)}
           style={{ animation: 'pulse-ring 2s cubic-bezier(0.4,0,0.6,1) infinite' }}
         />
       )}
-      <span className={cx('relative inline-flex h-2.5 w-2.5 rounded-full', tone)} />
+      <span className={cn('relative inline-flex h-2.5 w-2.5 rounded-full', tone)} />
     </span>
   )
 }

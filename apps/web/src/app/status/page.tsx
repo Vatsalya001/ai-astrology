@@ -1,6 +1,7 @@
 import Link from 'next/link'
 import { Wordmark } from '@/components/Logo'
-import { Badge, Card, SectionLabel, StatusDot, cx } from '@/components/ui'
+import { Badge, Panel, SectionLabel, StatusDot } from '@/components/ui'
+import { cn } from '@/lib/utils'
 import {
   api,
   ApiUnreachableError,
@@ -76,7 +77,7 @@ export default async function StatusPage() {
 function OverallBanner({ health }: { health: Fetched<HealthResponse> }) {
   if (!health.ok) {
     return (
-      <Card className="mb-8 border-danger/35 bg-danger/[0.06]">
+      <Panel className="mb-8 border-danger/35 bg-danger/[0.06]">
         <div className="flex items-start gap-3">
           <StatusDot status="error" />
           <div>
@@ -97,7 +98,7 @@ function OverallBanner({ health }: { health: Fetched<HealthResponse> }) {
             </p>
           </div>
         </div>
-      </Card>
+      </Panel>
     )
   }
 
@@ -110,12 +111,12 @@ function OverallBanner({ health }: { health: Fetched<HealthResponse> }) {
         : { border: 'border-danger/35 bg-danger/[0.06]', text: 'text-danger', label: 'Outage — a critical dependency is down' }
 
   return (
-    <Card className={cx('mb-8', tone.border)}>
+    <Panel className={cn('mb-8', tone.border)}>
       <div className="flex items-center gap-3">
         <StatusDot status={status} />
-        <h2 className={cx('font-serif text-xl', tone.text)}>{tone.label}</h2>
+        <h2 className={cn('font-serif text-xl', tone.text)}>{tone.label}</h2>
       </div>
-    </Card>
+    </Panel>
   )
 }
 
@@ -166,9 +167,9 @@ function Dependencies({ health }: { health: Fetched<HealthResponse> }) {
 
   if (entries.length === 0) {
     return (
-      <Card className="mb-8">
+      <Panel className="mb-8">
         <p className="text-sm text-ink-muted">No dependency checks reported.</p>
-      </Card>
+      </Panel>
     )
   }
 
@@ -184,7 +185,7 @@ function Dependencies({ health }: { health: Fetched<HealthResponse> }) {
           }
 
           return (
-            <Card key={name} className="p-4">
+            <Panel key={name} className="p-4">
               <div className="flex items-start justify-between gap-4">
                 <div className="flex min-w-0 items-start gap-3">
                   <span className="mt-1.5">
@@ -214,7 +215,7 @@ function Dependencies({ health }: { health: Fetched<HealthResponse> }) {
 
                 <div className="shrink-0 text-right">
                   <p
-                    className={cx(
+                    className={cn(
                       'text-sm font-medium',
                       check.status === 'ok' ? 'text-ok' : 'text-danger',
                     )}
@@ -226,7 +227,7 @@ function Dependencies({ health }: { health: Fetched<HealthResponse> }) {
                   </p>
                 </div>
               </div>
-            </Card>
+            </Panel>
           )
         })}
       </div>
@@ -250,7 +251,7 @@ function BuildInfo({ meta }: { meta: Fetched<MetaResponse> }) {
   return (
     <section>
       <SectionLabel>Build</SectionLabel>
-      <Card>
+      <Panel>
         <dl className="grid gap-4 sm:grid-cols-3">
           {[
             ['Service', data.service],
@@ -283,7 +284,7 @@ function BuildInfo({ meta }: { meta: Fetched<MetaResponse> }) {
             gate passes.
           </p>
         </div>
-      </Card>
+      </Panel>
     </section>
   )
 }

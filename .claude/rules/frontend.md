@@ -9,6 +9,19 @@ Defined once in `apps/web/tailwind.config.ts`. **Never hardcode a hex value in a
 component.** The palette is midnight navy / deep purple / gold, and it should read as a
 premium technology product that happens to be about astrology — not a cheap astrology app.
 
+Nothing in the build catches a violation. Tailwind drops a class naming a colour it
+doesn't know **silently**: `tsc` sees a valid string, `next build` succeeds, and the
+element renders with no background. The only gate that notices is a computed-style
+assertion in `tests/e2e/smoke.spec.ts`. Add one for any component whose colour matters.
+
+### After `npx shadcn add`
+The CLI bakes its `baseColor` in as literal classes — `bg-slate-900`, `text-slate-50`,
+`bg-white` — which is a light-grey control on a midnight-navy page, and routes around
+this file entirely. **Rewrite every generated component onto the semantic tokens**
+(`bg-primary`, `text-muted-foreground`, `border-input`, …) before committing it, and
+drop the `dark:` variants: the app is dark-only, so a light mode nobody can reach is
+dead weight that still has to be kept correct.
+
 ## Every screen needs four states
 Loading, error, empty, and populated. A skeleton that looks like the eventual content
 beats a spinner on a blank page. This is in the Definition of Done and it is enforced at

@@ -1,7 +1,8 @@
 import Link from 'next/link'
 import { Starfield } from '@/components/Starfield'
 import { Wordmark } from '@/components/Logo'
-import { Badge, Button, Card, SectionLabel } from '@/components/ui'
+import { Badge, Panel, SectionLabel } from '@/components/ui'
+import { Button } from '@/components/ui/button'
 
 export default function LandingPage() {
   return (
@@ -32,7 +33,7 @@ function SiteHeader() {
           >
             System status
           </Link>
-          <Button variant="secondary" className="px-4 py-2" disabled title="Arrives in Phase 1">
+          <Button variant="secondary" size="sm" disabled title="Arrives in Phase 1">
             Sign in
           </Button>
         </nav>
@@ -82,11 +83,15 @@ function Hero() {
             className="mt-10 flex animate-fade-up flex-col items-center justify-center gap-3 sm:flex-row"
             style={{ animationDelay: '240ms' }}
           >
-            <Button disabled title="Birth chart onboarding arrives in Phase 2">
+            <Button
+              size="lg"
+              disabled
+              title="Birth chart onboarding arrives in Phase 2"
+            >
               Get your free Kundli
             </Button>
-            <Button variant="secondary" href="/status">
-              View system status
+            <Button size="lg" variant="secondary" asChild>
+              <Link href="/status">View system status</Link>
             </Button>
           </div>
 
@@ -144,7 +149,7 @@ function HowItWorks() {
       <ol className="grid gap-5 md:grid-cols-2 lg:grid-cols-4">
         {STEPS.map((step) => (
           <li key={step.n}>
-            <Card className="group h-full transition-colors duration-300 hover:border-accent/45">
+            <Panel className="group h-full transition-colors duration-300 hover:border-accent/45">
               <div className="mb-4 flex items-start justify-between">
                 <span className="font-mono text-sm text-gold">{step.n}</span>
                 <Badge tone="neutral" className="text-[10px]">
@@ -153,7 +158,7 @@ function HowItWorks() {
               </div>
               <h3 className="mb-2 font-serif text-xl">{step.title}</h3>
               <p className="text-sm leading-relaxed text-ink-muted">{step.body}</p>
-            </Card>
+            </Panel>
           </li>
         ))}
       </ol>
@@ -193,7 +198,7 @@ function Principles() {
 
         <div className="grid gap-5 md:grid-cols-2">
           {PRINCIPLES.map((p) => (
-            <Card key={p.title} className="border-border/70">
+            <Panel key={p.title} className="border-border/70">
               <div className="mb-3 flex items-center gap-2.5">
                 <span className="text-gold" aria-hidden="true">
                   ✦
@@ -201,7 +206,7 @@ function Principles() {
                 <h3 className="font-serif text-xl">{p.title}</h3>
               </div>
               <p className="text-sm leading-relaxed text-ink-muted">{p.body}</p>
-            </Card>
+            </Panel>
           ))}
         </div>
       </div>

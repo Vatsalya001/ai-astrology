@@ -1,4 +1,5 @@
 import type { Config } from 'tailwindcss'
+import animate from 'tailwindcss-animate'
 
 /**
  * Design tokens for the AI Astrology Companion.
@@ -25,6 +26,8 @@ const config: Config = {
           DEFAULT: '#6B4FBB', // deep purple
           soft: '#8B6FD8',
           dim: '#4A3580',
+          // shadcn components pair `bg-accent` with `text-accent-foreground`.
+          foreground: '#F2F3F8',
         },
         gold: {
           DEFAULT: '#D4A857',
@@ -41,12 +44,44 @@ const config: Config = {
         ok: '#4ADE80',
         warn: '#FBBF24',
         danger: '#F87171',
+
+        // ─── shadcn/ui semantic layer ─────────────────────────────
+        // shadcn components are written against semantic names
+        // (bg-primary, text-muted-foreground, ...). These are mapped onto
+        // the palette above rather than being a second set of colours, so
+        // one token change reaches both vocabularies.
+        //
+        // Without this layer, `npx shadcn add` produces components with
+        // the slate palette hardcoded as literal classes — a light-grey
+        // control on a midnight-navy page, invisible to `tsc` and to the
+        // build, and routing around this file entirely.
+        background: '#0B1026',        // base
+        foreground: '#F2F3F8',        // ink
+
+        card: { DEFAULT: '#141B35', foreground: '#F2F3F8' },
+        popover: { DEFAULT: '#1C2545', foreground: '#F2F3F8' },
+
+        // Gold is the call-to-action colour, so it is `primary`.
+        primary: { DEFAULT: '#D4A857', foreground: '#0B1026' },
+        secondary: { DEFAULT: '#141B35', foreground: '#F2F3F8' },
+
+        muted: { DEFAULT: '#1C2545', foreground: '#9AA3C0' },
+        destructive: { DEFAULT: '#F87171', foreground: '#0B1026' },
+
+        input: '#252F52',
+        ring: '#D4A857',              // matches the focus ring in globals.css
       },
 
       fontFamily: {
         sans: ['var(--font-sans)', 'system-ui', 'sans-serif'],
         serif: ['var(--font-serif)', 'Georgia', 'serif'],
         mono: ['var(--font-mono)', 'ui-monospace', 'monospace'],
+      },
+
+      borderRadius: {
+        lg: '0.75rem',
+        md: '0.5rem',
+        sm: '0.375rem',
       },
 
       backgroundImage: {
@@ -83,7 +118,7 @@ const config: Config = {
       },
     },
   },
-  plugins: [],
+  plugins: [animate],
 }
 
 export default config

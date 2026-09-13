@@ -155,7 +155,13 @@ tasks:
       - uv run --directory {{.AI_DIR}} mypy --strict app
 
   lint:web:
-    cmds: [npm run typecheck --workspace=web]
+    # Both, not either. `tsc` is a type checker and ESLint is a linter;
+    # they catch disjoint sets of bug. This task used to run typecheck
+    # alone, which meant the TypeScript half of the repo had no linter
+    # while Go had golangci-lint and Python had ruff.
+    cmds:
+      - npm run typecheck --workspaces --if-present
+      - npm run lint --workspace=web
 
   fmt:
     desc: Auto-format everything
@@ -181,6 +187,11 @@ tasks:
     cmds:
       - uv run --directory {{.ASTRO_DIR}} pytest -q
       - uv run --directory {{.AI_DIR}} pytest -q
+
+  test:e2e:
+    desc: End-to-end browser tests (needs the stack running — task up + task dev)
+    cmds:
+      - npx playwright test
 
   test:integration:
     desc: Integration tests against real containers (needs Docker)
