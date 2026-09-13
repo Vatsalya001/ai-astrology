@@ -48,7 +48,13 @@ services:
       retries: 10
 
   minio:
-    image: minio/minio
+    # quay.io, not Docker Hub: `minio/minio` there is no longer
+    # anonymously pullable, which passes locally off a warm cache and
+    # fails every CI run on a cold one.
+    #
+    # Pinned, like every other image here. `:latest` means a green build
+    # today and a red one tomorrow with an unchanged commit.
+    image: quay.io/minio/minio:RELEASE.2025-04-22T22-12-26Z
     container_name: ayana-minio
     command: server /data --console-address ":9001"
     environment:
@@ -66,7 +72,7 @@ services:
       retries: 10
 
   mailpit:
-    image: axllent/mailpit
+    image: axllent/mailpit:v1.22
     container_name: ayana-mailpit
     ports:
       - "127.0.0.1:1025:1025"   # SMTP

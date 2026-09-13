@@ -54,9 +54,8 @@ class TestEditDistanceIsAMetric:
     @settings(max_examples=200)
     def test_triangle_inequality(self, a: str, b: str, c: str) -> None:
         """d(a, c) <= d(a, b) + d(b, c)."""
-        assert (
-            _edit_distance(a, c, LIMIT)
-            <= _edit_distance(a, b, LIMIT) + _edit_distance(b, c, LIMIT)
+        assert _edit_distance(a, c, LIMIT) <= _edit_distance(a, b, LIMIT) + _edit_distance(
+            b, c, LIMIT
         )
 
     @given(a=env_names, b=env_names)
