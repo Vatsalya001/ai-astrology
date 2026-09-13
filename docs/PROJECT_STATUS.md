@@ -15,7 +15,7 @@ Evaluated against the running system, not against intent.
 |---|---|---|
 | 1 | `docker compose up -d` brings up all six services healthy | ✅ |
 | 2 | Ollama models: `llama3.2:3b`, `qwen2.5:7b`, `nomic-embed-text` | ✅ all three; inference and embeddings verified |
-| 3 | `task verify` passes | ✅ |
+| 3 | `task verify` passes **from a clean clone** | ✅ verified by actually cloning to a temp dir |
 | 4 | `task dev` starts web, API, astro, ai | ✅ |
 | 5 | Status page shows six dependencies | ✅ |
 | 6 | `task migrate` applies; extensions enabled | ✅ up **and** down verified |
@@ -23,11 +23,11 @@ Evaluated against the running system, not against intent.
 | 8 | `task contracts` idempotent; CI diff check | ✅ |
 | 9 | Go calls Python via **generated** clients | ✅ hand-written client deleted |
 | 10 | One request → correlated `trace_id` in all three services | ✅ |
-| 11 | Missing env var → named startup failure | ✅ |
+| 11 | Missing/invalid env var → named startup failure | ✅ Go and Python; plus a typo guard for OS env vars |
 | 12 | PII redaction in Go **and** Python | ✅ |
 | 13 | `astro_ro` cannot write — **asserted in a test** | ✅ |
 | 14 | `astro-service` has no LLM dependency — CI rule | ✅ |
-| 15 | CI green across all jobs | ✅ 8 jobs |
+| 15 | CI green **on a pull request** | ✅ 9 jobs, verified on PR #1 and #2 |
 | 16 | `.claude/` with CLAUDE.md, rules, agents, workflows, state | ✅ |
 | 17 | ARCHITECTURE, ROADMAP, DECISIONS, PROJECT_STATUS | ✅ |
 | 18 | ADRs written; ADR-003 records the licence question as open | ✅ 8 ADRs |
@@ -53,8 +53,10 @@ Evaluated against the running system, not against intent.
 | 0 npm vulnerabilities | `npm audit` |
 | Secret scan clean | gitleaks over full history and working tree |
 | Free local models work | `qwen2.5:7b` returns a completion; `nomic-embed-text` returns 768 dimensions, matching `EMBEDDING_DIM` |
+| Clean clone reaches green | Cloned to a temp dir with no `.env`, no `node_modules`, no virtualenvs → `task verify` passed |
+| Typo'd env var aborts startup | `DEFAULT_AYANMSA=lahiri` → `SuspectedTypoError`, naming the intended field |
 
-**Tests:** Go 44 functions across 5 packages — config, logging, httpapi, clients, and
+**Tests:** Python 121 (55 astro, 66 ai). Go 44 functions across 5 packages — config, logging, httpapi, clients, and
 the db integration suite (all `-race`). Python 76. `mypy --strict` and `ruff` clean.
 
 Coverage added after the gate audit: health aggregation (degraded-vs-down, concurrency,
