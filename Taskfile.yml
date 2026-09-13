@@ -35,8 +35,11 @@ tasks:
     cmds:
       - '[ -f .env ] || { cp .env.example .env; echo "created .env from .env.example"; }'
       - npm install --no-fund --no-audit
-      - uv sync --directory {{.ASTRO_DIR}}
-      - uv sync --directory {{.AI_DIR}}
+      # --all-extras matches CI. Without it, mypy locally falls back to
+      # Any for the optional observability packages and a type error is
+      # only caught after pushing.
+      - uv sync --directory {{.ASTRO_DIR}} --all-extras
+      - uv sync --directory {{.AI_DIR}} --all-extras
       - cd {{.API_DIR}} && go mod download
       - task: hooks
 

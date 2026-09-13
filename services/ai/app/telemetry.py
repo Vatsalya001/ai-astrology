@@ -15,10 +15,17 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from fastapi import FastAPI
+
+    # sentry_sdk is an optional extra, so these are type-only imports.
+    # CI installs --all-extras and therefore type-checks against the real
+    # signatures; a local checkout without the extra falls back to Any
+    # via the mypy override in pyproject.toml. CI is the stricter of the
+    # two, which is the right way round.
+    from sentry_sdk.types import Event, Hint
 
 log = logging.getLogger(__name__)
 
@@ -37,7 +44,7 @@ _SENSITIVE_HEADERS = frozenset(
 )
 
 
-def _scrub_event(event: dict[str, Any], _hint: dict[str, Any]) -> dict[str, Any] | None:
+def _scrub_event(event: Event, _hint: Hint) -> Event | None:
     """Strip credentials and PII before an event leaves the process."""
     request = event.get("request")
     if isinstance(request, dict):
@@ -53,10 +60,12 @@ def _scrub_event(event: dict[str, Any], _hint: dict[str, Any]) -> dict[str, Any]
         request.pop("data", None)
         request.pop("cookies", None)
 
-    # The user object is an ID and nothing else.
+    # The user object is an ID and nothing else. Sentry's UI will happily
+    # display an email if it is given one.
     user = event.get("user")
     if isinstance(user, dict):
-        event["user"] = {"id": user.get("id")} if user.get("id") else {}
+        user_id = user.get("id")
+        event["user"] = {"id": user_id} if user_id else {}
 
     return event
 
