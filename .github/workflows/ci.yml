@@ -1,0 +1,153 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # CI MUST NEVER CALL A LANGUAGE MODEL.
+  # Tests that depend on a real model are slow, flaky, non-deterministic
+  # and eventually expensive. Phase 4 ships a MockProvider returning
+  # fixtures; real-model evals run on demand in Phase 6, never here.
+  LLM_PROVIDER: mock
+  LLM_PROVIDER_TIER: local
+
+jobs:
+  go:
+    name: Go — api-service
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: astro
+          POSTGRES_PASSWORD: astro
+          POSTGRES_DB: astro_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U astro"
+          --health-interval 5s --health-timeout 3s --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports: ['6379:6379']
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 3s --health-retries 10
+
+    defaults:
+      run:
+        working-directory: services/api
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          # The toolchain directive in go.mod pins the actual compiler
+          # used; this just needs to be new enough to honour it.
+          go-version: '1.23'
+          cache-dependency-path: services/api/go.sum
+
+      - name: Verify formatting
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "::error::gofmt found unformatted files:"; echo "$unformatted"; exit 1
+          fi
+
+      - run: go vet ./...
+
+      - run: go build ./...
+
+      # -race is not optional: this service does concurrent billing from
+      # Phase 7 onward, and the race detector is how those bugs get found
+      # before users find them.
+      - run: go test ./... -race -count=1 -coverprofile=coverage.out
+
+      - name: Check for vulnerable dependencies
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          govulncheck ./...
+
+  python:
+    name: Python — ${{ matrix.service }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        service: [astro, ai]
+
+    defaults:
+      run:
+        working-directory: services/${{ matrix.service }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+
+      - run: uv sync --all-extras --dev
+
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
+      - run: uv run mypy --strict app
+      - run: uv run pytest -q
+
+  # A dedicated job, because this is the single most important structural
+  # guarantee in the system and it deserves to fail visibly and by name
+  # rather than being buried in a test matrix.
+  determinism-guard:
+    name: astro-service is AI-free
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/astro
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+      - run: uv sync --dev
+      - name: Assert no LLM SDK can be reached from astro-service
+        run: uv run pytest tests/test_no_llm_imports.py -v
+
+  web:
+    name: Web
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - run: npm ci
+      - run: npm run typecheck --workspace=web
+      - run: npm run build --workspace=web
+      - name: Audit dependencies
+        run: npm audit --audit-level=high
+
+  env-drift:
+    name: .env.example matches config
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Every env var read by Go must exist in .env.example
+        run: |
+          missing=0
+          # Extract `env:"NAME"` tags from the Go config struct.
+          grep -oP 'env:"\K[A-Z0-9_]+' services/api/internal/config/config.go | sort -u > /tmp/declared.txt
+          while read -r var; do
+            if ! grep -qE "^${var}=" .env.example; then
+              echo "::error::${var} is read by config.go but absent from .env.example"
+              missing=1
+            fi
+          done < /tmp/declared.txt
+          exit $missing

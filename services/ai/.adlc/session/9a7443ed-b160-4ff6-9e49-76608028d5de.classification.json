@@ -1,0 +1,17 @@
+{
+  "tier": "0",
+  "mode": "design_review_only",
+  "confidence": 0.7,
+  "source": "classifier-rules.json",
+  "timestamp": "2026-09-13T06:42:18Z",
+  "classification_id": "cls_1789281738_a376b4e9",
+  "active_task_id": "cls_1789281738_a376b4e9",
+  "prompt_hash": "a376b4e9",
+  "task_origin_prompt_hash": "a376b4e9",
+  "last_prompt_hash": "a376b4e9",
+  "last_prompt_event": "task",
+  "last_prompt_ts": "2026-09-13T06:42:18Z",
+  "reasoning": [
+    "no mode keyword matched — defaulted to design_review_only per workflow rule"
+  ]
+}

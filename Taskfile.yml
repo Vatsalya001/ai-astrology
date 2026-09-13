@@ -1,0 +1,178 @@
+# One command surface across three toolchains.
+#
+# Go, Python and TypeScript each have their own idea of how to build,
+# lint and test. Without this file every developer has to remember nine
+# commands; with it they remember four.
+#
+# Requires: https://taskfile.dev  (go install github.com/go-task/task/v3/cmd/task@latest)
+
+version: '3'
+
+dotenv: ['.env']
+
+vars:
+  API_DIR: services/api
+  ASTRO_DIR: services/astro
+  AI_DIR: services/ai
+  GOBIN:
+    sh: go env GOPATH
+
+env:
+  PATH: '{{.GOBIN}}/bin:{{.PATH}}'
+
+tasks:
+  default:
+    desc: List available tasks
+    cmds: [task --list]
+    silent: true
+
+  # ─── Infrastructure ───────────────────────────────────────────────
+
+  up:
+    desc: Start Postgres, Redis, MinIO and Mailpit
+    cmds:
+      - docker compose up -d
+      - echo "Postgres :5433 · Redis :6381 · MinIO :9001 · Mailpit :8025"
+
+  down:
+    desc: Stop all containers
+    cmds: [docker compose down]
+
+  nuke:
+    desc: Stop containers AND delete all volumes (destroys local data)
+    prompt: This deletes your local database and object storage. Continue?
+    cmds: [docker compose down -v]
+
+  # ─── Development ──────────────────────────────────────────────────
+
+  dev:
+    desc: Run every service (use separate terminals, or `task --parallel dev`)
+    deps: [dev:api, dev:astro, dev:ai, dev:web]
+
+  dev:api:
+    desc: Run the Go API with live reload
+    dir: '{{.API_DIR}}'
+    cmds: [go run ./cmd/api]
+
+  dev:worker:
+    desc: Run the Go background worker
+    dir: '{{.API_DIR}}'
+    cmds: [go run ./cmd/worker]
+
+  dev:astro:
+    desc: Run astro-service (Python)
+    dir: '{{.ASTRO_DIR}}'
+    cmds: [uv run uvicorn app.main:app --reload --port 8100]
+
+  dev:ai:
+    desc: Run ai-service (Python)
+    dir: '{{.AI_DIR}}'
+    cmds: [uv run uvicorn app.main:app --reload --port 8200]
+
+  dev:web:
+    desc: Run the Next.js web app
+    cmds: [npm run dev --workspace=web]
+
+  # ─── Database ─────────────────────────────────────────────────────
+
+  migrate:
+    desc: Apply all pending migrations
+    cmds:
+      - migrate -path {{.API_DIR}}/db/migrations -database "$DATABASE_URL" up
+
+  migrate:down:
+    desc: Roll back the most recent migration
+    cmds:
+      - migrate -path {{.API_DIR}}/db/migrations -database "$DATABASE_URL" down 1
+
+  migrate:new:
+    desc: 'Create a migration pair — usage: task migrate:new -- add_users'
+    cmds:
+      - migrate create -ext sql -dir {{.API_DIR}}/db/migrations -seq {{.CLI_ARGS}}
+
+  sqlc:
+    desc: Regenerate type-safe Go from db/queries/*.sql
+    dir: '{{.API_DIR}}'
+    cmds: [sqlc generate]
+
+  psql:
+    desc: Open a psql shell against the dev database
+    cmds: [docker compose exec postgres psql -U astro -d astro_dev]
+
+  # ─── Quality gates ────────────────────────────────────────────────
+
+  lint:
+    desc: Lint every language
+    cmds:
+      - task: lint:go
+      - task: lint:py
+      - task: lint:web
+
+  lint:go:
+    dir: '{{.API_DIR}}'
+    cmds:
+      - go vet ./...
+      - test -z "$(gofmt -l .)" || { echo "unformatted files:"; gofmt -l .; exit 1; }
+
+  lint:py:
+    cmds:
+      - uv run --directory {{.ASTRO_DIR}} ruff check .
+      - uv run --directory {{.ASTRO_DIR}} mypy --strict app
+      - uv run --directory {{.AI_DIR}} ruff check .
+      - uv run --directory {{.AI_DIR}} mypy --strict app
+
+  lint:web:
+    cmds: [npm run typecheck --workspace=web]
+
+  fmt:
+    desc: Auto-format everything
+    cmds:
+      - cd {{.API_DIR}} && gofmt -w .
+      - uv run --directory {{.ASTRO_DIR}} ruff format .
+      - uv run --directory {{.AI_DIR}} ruff format .
+
+  test:
+    desc: Run every test suite
+    cmds:
+      - task: test:go
+      - task: test:py
+
+  test:go:
+    dir: '{{.API_DIR}}'
+    # -race is not optional: this service does concurrent billing from
+    # Phase 7 onward, and the race detector is how those bugs are found
+    # before users find them.
+    cmds: [go test ./... -race -count=1]
+
+  test:py:
+    cmds:
+      - uv run --directory {{.ASTRO_DIR}} pytest -q
+      - uv run --directory {{.AI_DIR}} pytest -q
+
+  build:
+    desc: Build all production artefacts
+    cmds:
+      - cd {{.API_DIR}} && go build -o bin/api ./cmd/api && go build -o bin/worker ./cmd/worker
+      - npm run build --workspace=web
+
+  verify:
+    desc: The commit gate — lint, test and build everything
+    cmds:
+      - task: lint
+      - task: test
+      - task: build
+      - echo "✓ verify passed"
+
+  # ─── Operations ───────────────────────────────────────────────────
+
+  health:
+    desc: Print the aggregate health of the running stack
+    cmds:
+      - curl -s http://localhost:4000/health | python3 -m json.tool
+
+  ollama:
+    desc: Pull the free local models used for development
+    cmds:
+      - ollama pull llama3.2:3b
+      - ollama pull qwen2.5:7b
+      - ollama pull nomic-embed-text

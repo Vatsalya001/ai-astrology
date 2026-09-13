@@ -1,0 +1,51 @@
+[project]
+name = "ai-service"
+version = "0.1.0"
+description = "LLM orchestration, RAG, safety and evaluation. Read-only against the database."
+requires-python = ">=3.12"
+
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
+    "pydantic>=2.9",
+    "pydantic-settings>=2.6",
+    "httpx>=0.27",
+    # The official OpenAI SDK is used as a *client for Ollama*, which
+    # serves an OpenAI-compatible endpoint at /v1. One adapter therefore
+    # covers Ollama, LM Studio, Groq, OpenRouter and Cerebras — all of
+    # which are free for development. See ADR-004.
+    "openai>=1.54",
+    # Phase 4 adds: anthropic (production provider)
+    # Phase 5 adds: asyncpg, pgvector
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "pytest-asyncio>=0.24",
+    "ruff>=0.7",
+    "mypy>=1.13",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "UP", "B", "SIM", "RUF"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+warn_unreachable = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["app"]

@@ -1,0 +1,57 @@
+# ─── Secrets ────────────────────────────────────────
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# ─── Go ─────────────────────────────────────────────
+/services/api/bin/
+/services/api/tmp/
+*.test
+*.out
+coverage.txt
+
+# ─── Python ─────────────────────────────────────────
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+dist/
+.coverage
+htmlcov/
+
+# ─── Node ───────────────────────────────────────────
+node_modules/
+.next/
+out/
+build/
+.turbo/
+*.tsbuildinfo
+.pnpm-store/
+
+# ─── Editors / OS ───────────────────────────────────
+.DS_Store
+Thumbs.db
+*.swp
+.idea/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+
+# ─── Local data ─────────────────────────────────────
+/data/
+*.db
+*.sqlite
+
+# ─── ADLC session state (per-developer, not shared) ──
+.adlc/session/
+
+# ─── Local agent settings (per-developer) ────────────
+# .claude/CLAUDE.md and .claude/rules/ ARE shared — they are the
+# project's constitution. Only per-machine permission state is local.
+.claude/settings.local.json

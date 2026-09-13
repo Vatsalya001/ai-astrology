@@ -1,0 +1,146 @@
+package config
+
+import (
+	"strings"
+	"testing"
+	"time"
+)
+
+// validEnv is the minimum set of variables required to start.
+func validEnv() map[string]string {
+	return map[string]string{
+		"DATABASE_URL":      "postgresql://astro:astro@localhost:5433/astro_dev",
+		"REDIS_URL":         "redis://localhost:6381",
+		"ASTRO_SERVICE_URL": "http://localhost:8100",
+		"AI_SERVICE_URL":    "http://localhost:8200",
+		"INTERNAL_TOKEN":    "a-sufficiently-long-token",
+	}
+}
+
+func setEnv(t *testing.T, env map[string]string) {
+	t.Helper()
+	for k, v := range env {
+		t.Setenv(k, v)
+	}
+}
+
+func TestLoadSucceedsWithValidEnvironment(t *testing.T) {
+	setEnv(t, validEnv())
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() returned an unexpected error: %v", err)
+	}
+
+	if cfg.Port != 4000 {
+		t.Errorf("Port = %d, want default 4000", cfg.Port)
+	}
+	if cfg.Env != EnvDevelopment {
+		t.Errorf("Env = %q, want %q", cfg.Env, EnvDevelopment)
+	}
+	if cfg.ServiceTimeout != 10*time.Second {
+		t.Errorf("ServiceTimeout = %v, want 10s", cfg.ServiceTimeout)
+	}
+	// Every feature flag must default to off. Phase 0 ships no features,
+	// and a flag that defaults on is a feature shipped by accident.
+	if cfg.FeatureAIChat || cfg.FeaturePayments || cfg.FeatureVoice ||
+		cfg.FeatureAstrologers || cfg.FeatureCompatibility || cfg.FeaturePDF {
+		t.Error("a feature flag defaulted to enabled; all must default to false")
+	}
+}
+
+// TestLoadFailsOnMissingRequired is the important one: a missing variable
+// must be a named startup failure, not a nil dereference in a handler
+// three hours into a deploy.
+func TestLoadFailsOnMissingRequired(t *testing.T) {
+	required := []string{
+		"DATABASE_URL",
+		"REDIS_URL",
+		"ASTRO_SERVICE_URL",
+		"AI_SERVICE_URL",
+		"INTERNAL_TOKEN",
+	}
+
+	for _, missing := range required {
+		t.Run("missing_"+missing, func(t *testing.T) {
+			env := validEnv()
+			delete(env, missing)
+			setEnv(t, env)
+			// t.Setenv cannot unset, so explicitly blank it.
+			t.Setenv(missing, "")
+
+			_, err := Load()
+			if err == nil {
+				t.Fatalf("Load() succeeded with %s unset; it must fail", missing)
+			}
+			if !strings.Contains(err.Error(), missing) &&
+				!strings.Contains(strings.ToLower(err.Error()), "validate") {
+				t.Errorf("error does not identify the problem: %v", err)
+			}
+		})
+	}
+}
+
+func TestLoadRejectsInvalidValues(t *testing.T) {
+	cases := []struct {
+		name  string
+		key   string
+		value string
+	}{
+		{"unknown environment", "ENV", "staging-two"},
+		{"port out of range", "PORT", "70000"},
+		{"non-postgres database url", "DATABASE_URL", "mysql://localhost/db"},
+		{"non-redis cache url", "REDIS_URL", "memcached://localhost"},
+		{"short internal token", "INTERNAL_TOKEN", "tooshort"},
+		{"malformed service url", "ASTRO_SERVICE_URL", "not-a-url"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			setEnv(t, validEnv())
+			t.Setenv(tc.key, tc.value)
+
+			if _, err := Load(); err == nil {
+				t.Fatalf("Load() accepted %s=%q; it must be rejected", tc.key, tc.value)
+			}
+		})
+	}
+}
+
+// TestProductionRefusesDevelopmentToken covers the fail-loud pattern:
+// a configuration that is fine locally but dangerous in production must
+// be a startup crash, not a policy document.
+func TestProductionRefusesDevelopmentToken(t *testing.T) {
+	setEnv(t, validEnv())
+	t.Setenv("ENV", EnvProduction)
+	t.Setenv("INTERNAL_TOKEN", "dev-internal-token-change-me")
+
+	_, err := Load()
+	if err == nil {
+		t.Fatal("Load() accepted the development token in production")
+	}
+	if !strings.Contains(err.Error(), "INTERNAL_TOKEN") {
+		t.Errorf("error should name INTERNAL_TOKEN, got: %v", err)
+	}
+}
+
+func TestProductionAcceptsRealToken(t *testing.T) {
+	setEnv(t, validEnv())
+	t.Setenv("ENV", EnvProduction)
+	t.Setenv("INTERNAL_TOKEN", "9f2c4a7e11b8d3650fa2")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() rejected a valid production config: %v", err)
+	}
+	if !cfg.IsProduction() {
+		t.Error("IsProduction() = false for ENV=production")
+	}
+}
+
+func TestAddr(t *testing.T) {
+	cfg := &Config{Port: 8080}
+	if got := cfg.Addr(); got != ":8080" {
+		t.Errorf("Addr() = %q, want \":8080\"", got)
+	}
+}

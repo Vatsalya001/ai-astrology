@@ -1,0 +1,59 @@
+[project]
+name = "astro-service"
+version = "0.1.0"
+description = "Deterministic Vedic astrology computation. No AI, ever."
+requires-python = ">=3.12"
+
+# ══════════════════════════════════════════════════════════════════
+#  DEPENDENCY POLICY — read before adding anything here.
+#
+#  This service must never be able to reach a language model. That is
+#  not a guideline; it is the mechanism that makes the determinism
+#  principle real (see docs/specs/00-OVERVIEW.md, Principle 1).
+#
+#  BANNED, permanently:  anthropic, openai, google-generativeai,
+#                        litellm, langchain, transformers, ollama
+#
+#  tests/test_no_llm_imports.py enforces this. If you find yourself
+#  wanting one of these here, the work belongs in ai-service.
+# ══════════════════════════════════════════════════════════════════
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
+    "pydantic>=2.9",
+    "pydantic-settings>=2.6",
+    # Phase 2 adds: pyswisseph, timezonefinder
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "pytest-asyncio>=0.24",
+    "httpx>=0.27",          # test client only — not used by app code
+    "hypothesis>=6.115",    # Phase 2: property tests for dasha arithmetic
+    "ruff>=0.7",
+    "mypy>=1.13",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "UP", "B", "SIM", "RUF"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+warn_unreachable = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["app"]
