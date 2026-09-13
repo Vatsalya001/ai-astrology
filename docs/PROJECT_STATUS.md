@@ -140,6 +140,46 @@ gate did not surface.
 
 ---
 
+## Spec §13 checklist (frontend foundation)
+
+Auditing §13 separately from the gate found six more gaps. All are now closed.
+
+| Item | State |
+|---|---|
+| Retry/backoff on internal service calls | ✅ `clients/retry.go` — RoundTripper, idempotent methods only |
+| Property-based tests wired up | ✅ `services/astro/tests/test_properties.py` (hypothesis, 8 tests) |
+| Browser tests against the real stack | ✅ `tests/e2e/smoke.spec.ts` (Playwright, 8 tests) |
+| E2E job in CI | ✅ 10 jobs total |
+| Shared `packages/*` | ✅ `types`, `analytics`, `config`, `content`, `api-client`, `ui` |
+| shadcn/ui installed | ✅ 6 components, rewritten onto the design tokens |
+
+### Three defects these found
+
+The value was not the checklist items themselves — it was what building them exposed.
+
+1. **Retry was dead code.** `canRetry` tested `req.Body == nil`, but `net/http` and
+   `httptest` represent an empty body as `http.NoBody`, not `nil`. Every bodyless GET —
+   which is every call this service makes — was classified non-retryable. The retry
+   transport was installed and had never once retried. Caught by `retry_test.go`.
+
+2. **TypeScript had no linter.** Go had golangci-lint and Python had ruff; `task
+   lint:web` re-ran `tsc`, which is a type checker. `next lint` had also been removed in
+   Next 16, so the `lint` script had been failing on invocation. Now ESLint 9 flat
+   config with `next/core-web-vitals` + `jsx-a11y/strict`, wired into both `task verify`
+   and CI.
+
+3. **shadcn shipped a second palette.** `npx shadcn add` bakes its `baseColor` in as
+   literal classes (`bg-slate-900`, `bg-white`) — 83 of them across six components. That
+   renders a light-grey control on a midnight-navy page while `tsc` and `next build`
+   both stay green. All six were rewritten onto the design tokens.
+
+**The gate that catches this class of bug is a computed-style assertion.** Tailwind
+drops a class naming an unknown colour silently, so neither typecheck nor build can see
+it. `smoke.spec.ts` now asserts the hero CTA computes to `rgb(212, 168, 87)`. Verified
+negatively: removing the `primary` token still builds clean, and fails that test.
+
+---
+
 ## Open decisions
 
 | ADR | Question | Due |

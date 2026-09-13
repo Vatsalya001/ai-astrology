@@ -2,7 +2,7 @@
 
 ```
 Phase: 0 — Foundation
-Gate:  ✅ CLOSED  (20/20)
+Gate:  ✅ CLOSED  (20/20 gate + §13, §15, §16 checklists)
 
 All tasks complete and verified against the running system. See
 docs/PROJECT_STATUS.md for the gate table and the data-corruption
@@ -10,6 +10,12 @@ writeup — the latter is an environment issue, not a project one, but
 it cost real debugging time and is worth reading before you chase a
 mysterious build failure.
 ```
+
+**Read this before trusting a green gate.** The 20-item gate passed three times while
+the §13, §15 and §16 checklists it summarises still had thirteen open items between
+them. A summary is not evidence. Audit the underlying checklist, and prefer a check
+that runs to one that is asserted — `retry.go` looked correct for as long as nobody
+executed it.
 
 ## Next: Phase 1 — Authentication & User Profiles
 

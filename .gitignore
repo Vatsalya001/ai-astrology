@@ -55,3 +55,9 @@ Thumbs.db
 # .claude/CLAUDE.md and .claude/rules/ ARE shared — they are the
 # project's constitution. Only per-machine permission state is local.
 .claude/settings.local.json
+
+# Playwright
+/test-results/
+/playwright-report/
+/blob-report/
+/playwright/.cache/

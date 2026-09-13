@@ -217,10 +217,76 @@ jobs:
           cache: npm
 
       - run: npm ci
-      - run: npm run typecheck --workspace=web
+      - run: npm run typecheck --workspaces --if-present
+      - run: npm run lint --workspace=web
       - run: npm run build --workspace=web
       - name: Audit dependencies
         run: npm audit --audit-level=high
+
+  e2e:
+    name: E2E (browser against the real stack)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+          cache-dependency-path: services/api/go.sum
+
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+
+      # The full backend, exactly as a developer runs it.
+      - name: Start infrastructure and Python services
+        run: |
+          cp .env.example .env
+          docker compose up -d --wait
+          docker compose ps
+
+      - name: Start the Go API
+        run: |
+          set -a; . ./.env; set +a
+          go build -o /tmp/api ./cmd/api
+          /tmp/api > /tmp/api.log 2>&1 &
+          for i in $(seq 1 30); do
+            curl -sf http://localhost:4000/health >/dev/null && break
+            sleep 1
+          done
+          curl -sf http://localhost:4000/health || { echo "API never became healthy"; cat /tmp/api.log; exit 1; }
+        working-directory: services/api
+
+      - name: Build and start the web app
+        run: |
+          npm run build --workspace=web
+          npm run start --workspace=web > /tmp/web.log 2>&1 &
+          for i in $(seq 1 30); do
+            curl -sf http://localhost:3000 >/dev/null && break
+            sleep 1
+          done
+          curl -sf http://localhost:3000 >/dev/null || { echo "web never came up"; cat /tmp/web.log; exit 1; }
+
+      # The only test that exercises browser -> Go API -> Python. Every
+      # other suite stubs at a boundary.
+      - run: npx playwright test
+
+      - name: Service logs on failure
+        if: failure()
+        run: |
+          echo "--- api ---";  tail -50 /tmp/api.log || true
+          echo "--- web ---";  tail -50 /tmp/web.log || true
+          docker compose logs --tail=50
+
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 7
 
   env-drift:
     name: .env.example matches config

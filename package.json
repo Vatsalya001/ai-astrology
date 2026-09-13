@@ -2,7 +2,7 @@
   "name": "ai-astrology",
   "version": "0.1.0",
   "private": true,
-  "description": "AI Astrology Companion — monorepo root",
+  "description": "AI Astrology Companion \u2014 monorepo root",
   "workspaces": [
     "apps/*",
     "packages/*"
@@ -12,9 +12,13 @@
     "build": "npm run build --workspace=web",
     "lint": "npm run lint --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present",
-    "test": "npm run test --workspaces --if-present"
+    "test": "npm run test --workspaces --if-present",
+    "test:e2e": "playwright test"
   },
   "engines": {
     "node": ">=20"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.63.0"
   }
 }

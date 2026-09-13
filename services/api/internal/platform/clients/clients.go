@@ -45,13 +45,20 @@ func headerInjector(token string) func(context.Context, *http.Request) error {
 	}
 }
 
-func httpClient(timeout time.Duration) *http.Client {
+// httpClient builds the transport stack shared by both clients.
+//
+// Timeout is the budget for the WHOLE call including retries, not per
+// attempt. A caller that asked for 10s should wait 10s, not 30.
+func httpClient(timeout time.Duration, name string) *http.Client {
 	return &http.Client{
 		Timeout: timeout,
-		Transport: &http.Transport{
-			MaxIdleConns:        100,
-			MaxIdleConnsPerHost: 10,
-			IdleConnTimeout:     90 * time.Second,
+		Transport: &retryTransport{
+			name: name,
+			base: &http.Transport{
+				MaxIdleConns:        100,
+				MaxIdleConnsPerHost: 10,
+				IdleConnTimeout:     90 * time.Second,
+			},
 		},
 	}
 }
@@ -65,7 +72,7 @@ type Astro struct {
 func NewAstro(baseURL, token string, timeout time.Duration) (*Astro, error) {
 	api, err := astroclient.NewClientWithResponses(
 		strings.TrimRight(baseURL, "/"),
-		astroclient.WithHTTPClient(httpClient(timeout)),
+		astroclient.WithHTTPClient(httpClient(timeout, "astro")),
 		astroclient.WithRequestEditorFn(headerInjector(token)),
 	)
 	if err != nil {
@@ -98,7 +105,7 @@ type AI struct {
 func NewAI(baseURL, token string, timeout time.Duration) (*AI, error) {
 	api, err := aiclient.NewClientWithResponses(
 		strings.TrimRight(baseURL, "/"),
-		aiclient.WithHTTPClient(httpClient(timeout)),
+		aiclient.WithHTTPClient(httpClient(timeout, "ai")),
 		aiclient.WithRequestEditorFn(headerInjector(token)),
 	)
 	if err != nil {
