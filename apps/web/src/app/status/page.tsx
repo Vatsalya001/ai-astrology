@@ -2,15 +2,39 @@ import Link from 'next/link'
 import { Wordmark } from '@/components/Logo'
 import { Badge, Panel, SectionLabel, StatusDot } from '@/components/ui'
 import { cn } from '@/lib/utils'
+import type { Metadata } from 'next'
 import {
   api,
   ApiUnreachableError,
   type HealthResponse,
   type MetaResponse,
+  type ProbeReason,
 } from '@/lib/api'
 
 // Always render fresh. A cached status page is a lying status page.
 export const dynamic = 'force-dynamic'
+
+export const metadata: Metadata = {
+  title: 'System status — Ayana',
+  description:
+    'Live health of every Ayana dependency, reported independently.',
+  // An ops page has no business in search results, and it names the
+  // service topology.
+  robots: { index: false, follow: false },
+}
+
+/**
+ * Human wording for the API's closed reason vocabulary.
+ *
+ * The API deliberately returns a code rather than the underlying error,
+ * because /health is unauthenticated and the raw text carries internal
+ * hostnames and ports. Expanding the code is the frontend's job.
+ */
+const PROBE_REASONS: Record<ProbeReason, string> = {
+  timeout: 'Did not respond in time.',
+  unreachable: 'Could not be reached.',
+  unavailable: 'Responded, but reported itself unhealthy.',
+}
 
 type Fetched<T> = { ok: true; data: T } | { ok: false; error: string }
 
@@ -205,9 +229,12 @@ function Dependencies({ health }: { health: Fetched<HealthResponse> }) {
                         {info.detail}
                       </p>
                     )}
-                    {check.error && (
-                      <p className="mt-2 break-words font-mono text-xs text-danger">
-                        {check.error}
+                    {check.reason && (
+                      <p className="mt-2 text-xs text-danger">
+                        {PROBE_REASONS[check.reason]}{' '}
+                        <span className="text-ink-faint">
+                          Full detail is in the api-service log, keyed by trace ID.
+                        </span>
                       </p>
                     )}
                   </div>

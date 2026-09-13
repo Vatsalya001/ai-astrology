@@ -1,12 +1,17 @@
 package httpapi
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -72,8 +77,76 @@ func TestHealthNonCriticalFailureDegrades(t *testing.T) {
 	if body.Checks["postgres"].Status != StatusOK {
 		t.Error("a healthy dependency was marked unhealthy")
 	}
-	if body.Checks["astro"].Error == "" {
-		t.Error("failing check carries no error message; operators need to know why")
+	if body.Checks["astro"].Reason == "" {
+		t.Error("failing check carries no reason; operators need to know why")
+	}
+}
+
+// The negative case for the reason vocabulary.
+//
+// `/health` is unauthenticated by necessity, so its body is public. A
+// probe error carrying the internal host and port would hand out the
+// topology. This asserts the leak is actually refused rather than
+// trusting that nobody pastes err.Error() back in.
+func TestHealthNeverLeaksProbeErrorDetail(t *testing.T) {
+	secret := "dial tcp 127.0.0.1:8025: connect: connection refused"
+	leaky := func(context.Context) error {
+		return fmt.Errorf("Get %q: %s", "http://internal-mail.svc:8025/readyz", secret)
+	}
+
+	_, body := doHealth(t, []Prober{
+		{Name: "postgres", Critical: true, Probe: okProbe},
+		{Name: "mail", Critical: false, Probe: leaky},
+	})
+
+	raw, err := json.Marshal(body)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+
+	for _, forbidden := range []string{
+		secret,
+		"internal-mail.svc",
+		"8025",
+		"readyz",
+		"127.0.0.1",
+	} {
+		if bytes.Contains(raw, []byte(forbidden)) {
+			t.Errorf("health response leaks %q to an unauthenticated caller:\n%s", forbidden, raw)
+		}
+	}
+
+	if got := body.Checks["mail"].Reason; got != ReasonUnavailable {
+		t.Errorf("reason = %q, want %q", got, ReasonUnavailable)
+	}
+}
+
+func TestClassifyProbeError(t *testing.T) {
+	refused := &net.OpError{
+		Op:  "dial",
+		Net: "tcp",
+		Err: &os.SyscallError{Syscall: "connect", Err: syscall.ECONNREFUSED},
+	}
+
+	cases := []struct {
+		name string
+		err  error
+		want ProbeReason
+	}{
+		{"deadline", context.DeadlineExceeded, ReasonTimeout},
+		{"wrapped deadline", fmt.Errorf("probe: %w", context.DeadlineExceeded), ReasonTimeout},
+		{"connection refused", refused, ReasonUnreachable},
+		{"wrapped refused", fmt.Errorf("get: %w", refused), ReasonUnreachable},
+		{"dns failure", &net.DNSError{Err: "no such host", Name: "astro"}, ReasonUnreachable},
+		{"non-200 body", errors.New("unexpected status 500"), ReasonUnavailable},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := classifyProbeError(tc.err); got != tc.want {
+				t.Errorf("classifyProbeError(%v) = %q, want %q", tc.err, got, tc.want)
+			}
+		})
 	}
 }
 

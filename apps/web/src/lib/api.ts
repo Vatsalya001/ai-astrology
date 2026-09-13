@@ -13,7 +13,13 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000'
 
 // Response shapes live in @ayana/types so the mobile app (Phase 10) uses
 // the identical definitions rather than a drifting copy.
-export type { Check, CheckStatus, HealthResponse, MetaResponse } from '@ayana/types'
+export type {
+  Check,
+  CheckStatus,
+  HealthResponse,
+  MetaResponse,
+  ProbeReason,
+} from '@ayana/types'
 
 /**
  * Distinguishes "the API said no" from "the API was unreachable".

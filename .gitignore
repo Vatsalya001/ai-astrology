@@ -61,3 +61,6 @@ Thumbs.db
 /playwright-report/
 /blob-report/
 /playwright/.cache/
+
+# Local process state from scripts/ayana
+/.run/
