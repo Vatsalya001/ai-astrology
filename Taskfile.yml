@@ -148,10 +148,16 @@ tasks:
       - test -z "$(gofmt -l .)" || { echo "unformatted files:"; gofmt -l .; exit 1; }
 
   lint:py:
+    # `ruff format --check` as well as `ruff check`: they are different
+    # tools sharing a binary, and CI runs both. Without the format check
+    # here, a formatting-only failure is invisible until the PR is
+    # already open — which is exactly how it was found.
     cmds:
       - uv run --directory {{.ASTRO_DIR}} ruff check .
+      - uv run --directory {{.ASTRO_DIR}} ruff format --check .
       - uv run --directory {{.ASTRO_DIR}} mypy --strict app
       - uv run --directory {{.AI_DIR}} ruff check .
+      - uv run --directory {{.AI_DIR}} ruff format --check .
       - uv run --directory {{.AI_DIR}} mypy --strict app
 
   lint:web:
