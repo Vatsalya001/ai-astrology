@@ -1,0 +1,152 @@
+{
+  "$comment": "SYNTHETIC DATA ONLY. Every profile here is invented. See README.md.",
+  "schema_version": 1,
+  "profiles": [
+    {
+      "id": "001-delhi-1990-morning",
+      "note": "Baseline case. Nothing unusual.",
+      "birth_date": "1990-03-14",
+      "birth_time": "07:42",
+      "time_accuracy": "exact",
+      "birth_place": "New Delhi, Delhi, India",
+      "latitude": 28.6139,
+      "longitude": 77.209,
+      "timezone": "Asia/Kolkata",
+      "expected_utc_offset_min": 330
+    },
+    {
+      "id": "002-mumbai-1985-midnight",
+      "note": "Twelve minutes past midnight. Julian day boundary.",
+      "birth_date": "1985-11-02",
+      "birth_time": "00:12",
+      "time_accuracy": "exact",
+      "birth_place": "Mumbai, Maharashtra, India",
+      "latitude": 19.076,
+      "longitude": 72.8777,
+      "timezone": "Asia/Kolkata",
+      "expected_utc_offset_min": 330
+    },
+    {
+      "id": "003-kolkata-1943-wartime-dst",
+      "note": "India observed UTC+06:30 during WWII. Assuming +05:30 shifts the ascendant by roughly 15 degrees.",
+      "birth_date": "1943-06-21",
+      "birth_time": "16:20",
+      "time_accuracy": "exact",
+      "birth_place": "Kolkata, West Bengal, India",
+      "latitude": 22.5726,
+      "longitude": 88.3639,
+      "timezone": "Asia/Kolkata",
+      "expected_utc_offset_min": 390
+    },
+    {
+      "id": "004-london-1995",
+      "note": "Non-Indian timezone with British Summer Time in effect.",
+      "birth_date": "1995-07-08",
+      "birth_time": "13:05",
+      "time_accuracy": "exact",
+      "birth_place": "London, England, United Kingdom",
+      "latitude": 51.5074,
+      "longitude": -0.1278,
+      "timezone": "Europe/London",
+      "expected_utc_offset_min": 60
+    },
+    {
+      "id": "005-anchorage-2000-high-latitude",
+      "note": "61 degrees north. Quadrant house systems degenerate near the poles; whole-sign does not.",
+      "birth_date": "2000-12-05",
+      "birth_time": "10:30",
+      "time_accuracy": "exact",
+      "birth_place": "Anchorage, Alaska, United States",
+      "latitude": 61.2181,
+      "longitude": -149.9003,
+      "timezone": "America/Anchorage",
+      "expected_utc_offset_min": -540
+    },
+    {
+      "id": "006-quito-1988-equator",
+      "note": "Effectively on the equator. The opposite degenerate case to 005.",
+      "birth_date": "1988-09-17",
+      "birth_time": "18:55",
+      "time_accuracy": "exact",
+      "birth_place": "Quito, Pichincha, Ecuador",
+      "latitude": -0.1807,
+      "longitude": -78.4678,
+      "timezone": "America/Guayaquil",
+      "expected_utc_offset_min": -300
+    },
+    {
+      "id": "007-pune-1998-time-unknown",
+      "note": "Birth time genuinely unknown. Ascendant, houses and dashas MUST be null, not guessed. The Moon can change nakshatra within a day, so Vimshottari cannot be computed honestly.",
+      "birth_date": "1998-04-23",
+      "birth_time": null,
+      "time_accuracy": "unknown",
+      "birth_place": "Pune, Maharashtra, India",
+      "latitude": 18.5204,
+      "longitude": 73.8567,
+      "timezone": "Asia/Kolkata",
+      "expected_utc_offset_min": 330,
+      "expect_null_fields": ["ascendant", "houses", "dashas"]
+    },
+    {
+      "id": "008-chennai-2000-leap-day",
+      "note": "29 February 2000. A leap year that is also a century year.",
+      "birth_date": "2000-02-29",
+      "birth_time": "21:47",
+      "time_accuracy": "exact",
+      "birth_place": "Chennai, Tamil Nadu, India",
+      "latitude": 13.0827,
+      "longitude": 80.2707,
+      "timezone": "Asia/Kolkata",
+      "expected_utc_offset_min": 330
+    },
+    {
+      "id": "009-kolkata-1901-local-mean-time",
+      "note": "Before IST existed. Local mean time, derived from longitude.",
+      "birth_date": "1901-05-30",
+      "birth_time": "09:15",
+      "time_accuracy": "exact",
+      "birth_place": "Kolkata, West Bengal, India",
+      "latitude": 22.5726,
+      "longitude": 88.3639,
+      "timezone": "Asia/Kolkata",
+      "expected_utc_offset_min": 353
+    },
+    {
+      "id": "010-jaipur-1994-ascendant-cusp",
+      "note": "Ascendant lands within half a degree of a sign boundary. A four-minute time error changes the rising sign and therefore every house placement.",
+      "birth_date": "1994-08-17",
+      "birth_time": "14:35",
+      "time_accuracy": "exact",
+      "birth_place": "Jaipur, Rajasthan, India",
+      "latitude": 26.9124,
+      "longitude": 75.7873,
+      "timezone": "Asia/Kolkata",
+      "expected_utc_offset_min": 330
+    },
+    {
+      "id": "011-sydney-1979-southern-dst",
+      "note": "Southern hemisphere, daylight saving active in January.",
+      "birth_date": "1979-01-11",
+      "birth_time": "05:20",
+      "time_accuracy": "exact",
+      "birth_place": "Sydney, New South Wales, Australia",
+      "latitude": -33.8688,
+      "longitude": 151.2093,
+      "timezone": "Australia/Sydney",
+      "expected_utc_offset_min": 660
+    },
+    {
+      "id": "012-village-manual-coordinates",
+      "note": "A village too small for the GeoNames cities500 dataset. Coordinates entered manually via the map picker — the common real-world case the place-search flow must not block.",
+      "birth_date": "1992-10-03",
+      "birth_time": "11:08",
+      "time_accuracy": "approximate",
+      "birth_place": "Rampur (village), Uttar Pradesh, India",
+      "latitude": 28.8386,
+      "longitude": 79.0256,
+      "timezone": "Asia/Kolkata",
+      "expected_utc_offset_min": 330,
+      "source": "manual"
+    }
+  ]
+}
