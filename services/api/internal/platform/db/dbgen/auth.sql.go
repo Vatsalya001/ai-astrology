@@ -432,6 +432,39 @@ func (q *Queries) ListAuditLogsForUser(ctx context.Context, arg ListAuditLogsFor
 	return items, nil
 }
 
+const listIdentitiesForUser = `-- name: ListIdentitiesForUser :many
+SELECT id, user_id, provider, provider_user_id, created_at FROM auth_identities WHERE user_id = $1 ORDER BY created_at
+`
+
+// Needed by the data export. Without it the export declares an
+// auth_identities field and always returns [], which is worse than
+// omitting it: it tells the user there are none.
+func (q *Queries) ListIdentitiesForUser(ctx context.Context, userID pgtype.UUID) ([]AuthIdentity, error) {
+	rows, err := q.db.Query(ctx, listIdentitiesForUser, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []AuthIdentity{}
+	for rows.Next() {
+		var i AuthIdentity
+		if err := rows.Scan(
+			&i.ID,
+			&i.UserID,
+			&i.Provider,
+			&i.ProviderUserID,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listUsersPastDeletionGrace = `-- name: ListUsersPastDeletionGrace :many
 SELECT id, email, email_verified, phone, phone_verified, name, gender, role, status, last_login_at, deletion_requested_at, created_at, updated_at FROM users
 WHERE deletion_requested_at IS NOT NULL
