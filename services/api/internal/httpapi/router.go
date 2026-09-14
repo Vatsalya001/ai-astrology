@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/Vatsalya001/ai-astrology/services/api/internal/auth"
 	"github.com/Vatsalya001/ai-astrology/services/api/internal/config"
 	"github.com/Vatsalya001/ai-astrology/services/api/internal/platform/clients"
 	"github.com/Vatsalya001/ai-astrology/services/api/internal/platform/db"
@@ -27,6 +28,12 @@ type Deps struct {
 	Redis  *redis.Client
 	Astro  *clients.Astro
 	AI     *clients.AI
+
+	// Auth is nil only in tests that exercise the operational endpoints.
+	// When nil the /auth routes are simply not mounted, which is honest:
+	// a route that exists and 500s is worse than one that 404s.
+	Auth       *auth.Handler
+	AuthIssuer *auth.Issuer
 }
 
 // NewRouter builds the HTTP handler.
@@ -78,7 +85,10 @@ func NewRouter(d Deps) http.Handler {
 	r.Route("/api/v1", func(r chi.Router) {
 		r.Get("/meta", metaHandler(d.Config))
 
-		// Phase 1 mounts /auth and /users here.
+		if d.Auth != nil {
+			mountAuth(r, d)
+		}
+
 		// Phase 2 mounts /birth-profiles, /charts, /places.
 		// Phase 5 mounts /ai and /conversations.
 	})
@@ -177,3 +187,35 @@ func metaHandler(cfg *config.Config) http.HandlerFunc {
 		})
 	}
 }
+
+// mountAuth registers the authentication routes.
+//
+// Split out so the route table is readable in one screen — which is where
+// a route accidentally mounted outside the authenticated group would be
+// spotted.
+func mountAuth(r chi.Router, d Deps) {
+	r.Route("/auth", func(r chi.Router) {
+		// Public. These are how someone who has no token gets one, so
+		// they cannot sit behind Authenticate. Rate limiting is applied
+		// inside each handler rather than as middleware, because the
+		// subject differs per route — identifier here, token there.
+		r.Post("/otp/request", d.Auth.RequestOTP)
+		r.Post("/otp/verify", d.Auth.VerifyOTP)
+		r.Post("/refresh", d.Auth.Refresh)
+	})
+}
+
+// authErrorWriter adapts WriteError to the signature the auth package
+// declares, so that package does not import httpapi.
+func authErrorWriter(w http.ResponseWriter, r *http.Request, status int, code, message string, cause error) {
+	WriteError(w, r, status, ErrorCode(code), message, cause)
+}
+
+// AuthMiddlewareErrorWriter is the same adapter for the middleware, whose
+// signature carries no cause.
+func AuthMiddlewareErrorWriter(w http.ResponseWriter, r *http.Request, status int, code, message string) {
+	WriteError(w, r, status, ErrorCode(code), message, nil)
+}
+
+// AuthErrorWriter is exported for wiring in main.
+var AuthErrorWriter = authErrorWriter

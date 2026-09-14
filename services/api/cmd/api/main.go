@@ -16,13 +16,18 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/Vatsalya001/ai-astrology/services/api/internal/auth"
 	"github.com/Vatsalya001/ai-astrology/services/api/internal/config"
 	"github.com/Vatsalya001/ai-astrology/services/api/internal/httpapi"
+	"github.com/Vatsalya001/ai-astrology/services/api/internal/platform/audit"
 	"github.com/Vatsalya001/ai-astrology/services/api/internal/platform/clients"
 	"github.com/Vatsalya001/ai-astrology/services/api/internal/platform/db"
+	"github.com/Vatsalya001/ai-astrology/services/api/internal/platform/db/dbgen"
 	"github.com/Vatsalya001/ai-astrology/services/api/internal/platform/logging"
 	"github.com/Vatsalya001/ai-astrology/services/api/internal/platform/observability"
 	"github.com/Vatsalya001/ai-astrology/services/api/internal/platform/redis"
+	"github.com/Vatsalya001/ai-astrology/services/api/internal/platform/redis/ratelimit"
+	"github.com/Vatsalya001/ai-astrology/services/api/internal/users"
 )
 
 func main() {
@@ -109,12 +114,63 @@ func run() error {
 		return fmt.Errorf("build ai client: %w", err)
 	}
 
+	// ─── Auth (Phase 1) ──────────────────────────────────────────
+	//
+	// Constructed here rather than inside the router so a misconfigured
+	// secret or an unusable channel is a startup failure with a named
+	// cause, not a 500 on the first login attempt.
+	issuer, err := auth.NewIssuer(cfg.JWTSecret, cfg.JWTAccessTTL, cfg.JWTRefreshTTL)
+	if err != nil {
+		return fmt.Errorf("build token issuer: %w", err)
+	}
+
+	channel, err := auth.NewChannel(auth.ChannelConfig{
+		Channel:  cfg.AuthChannel,
+		IsProd:   cfg.IsProduction(),
+		SMTPHost: cfg.SMTPHost,
+		SMTPPort: cfg.SMTPPort,
+		SMTPFrom: cfg.SMTPFrom,
+	}, log)
+	if err != nil {
+		return fmt.Errorf("build auth channel: %w", err)
+	}
+	log.Info("auth channel ready", slog.String("channel", channel.ID()))
+
+	queries := dbgen.New(database.Pool)
+	recorder := audit.NewRecorder(queries, log)
+
+	authService := auth.NewService(auth.ServiceConfig{
+		OTP:       auth.NewOTPStore(cache.Client, cfg.OTPTTL, cfg.OTPMaxAttempts),
+		Channel:   channel,
+		Rotator:   auth.NewRotator(issuer, auth.NewPostgresSessionStore(queries)),
+		Users:     users.NewService(queries),
+		Audit:     recorder,
+		Logger:    log,
+		OTPLength: cfg.OTPLength,
+	})
+
+	authHandler := auth.NewHandler(auth.HandlerConfig{
+		Service: authService,
+		Limiter: ratelimit.New(cache.Client),
+		IPSalt:  cfg.IPHashSalt,
+		// Not behind a trusted proxy in development. X-Forwarded-For is
+		// client-supplied, and this phase rate-limits per IP — see
+		// auth.ClientIP.
+		TrustProxy: false,
+		// The refresh cookie is Secure in anything but local plain HTTP.
+		Secure:     !cfg.IsDevelopment(),
+		RefreshTTL: cfg.JWTRefreshTTL,
+		WriteError: httpapi.AuthErrorWriter,
+	})
+
 	handler := httpapi.NewRouter(httpapi.Deps{
-		Config: cfg,
-		DB:     database,
-		Redis:  cache,
-		Astro:  astroClient,
-		AI:     aiClient,
+		Config:     cfg,
+		DB:         database,
+		Redis:      cache,
+		Astro:      astroClient,
+		AI:         aiClient,
+		Auth:       authHandler,
+		AuthIssuer: issuer,
 	})
 
 	srv := &http.Server{

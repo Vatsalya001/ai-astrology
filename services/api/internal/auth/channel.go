@@ -3,39 +3,51 @@ package auth
 import (
 	"context"
 	"fmt"
-	"log/slog"
+	"io"
 	"net/mail"
 	"net/smtp"
+	"os"
 	"strings"
 )
 
-// ConsoleChannel writes the code to the log.
+// ConsoleChannel prints the code to stderr.
 //
 // Development only. `checkProductionInvariants` refuses to start with
 // AUTH_CHANNEL=console when ENV=production, because a production log
 // containing live credentials is readable by everyone with log access
 // and retained for as long as logs are.
+//
+// Deliberately NOT written through slog. The project's logger redacts
+// `code` as a sensitive key — correctly, since an OTP is a secret — so
+// routing this through it printed `"code":"[REDACTED]"` and made the
+// development channel useless. The fix is to bypass the logger, not to
+// exempt the key: an exemption would blunt the redactor for every other
+// call site, including production ones.
+//
+// This is a developer affordance, not a log line, and writing it as
+// obviously-unstructured text says so.
 type ConsoleChannel struct {
-	Logger *slog.Logger
+	// Out defaults to os.Stderr. Injectable for tests.
+	Out io.Writer
 }
 
 func (c *ConsoleChannel) ID() string { return "console" }
 
-func (c *ConsoleChannel) Send(ctx context.Context, identifier, code, _ string) error {
-	logger := c.Logger
-	if logger == nil {
-		logger = slog.Default()
+func (c *ConsoleChannel) Send(_ context.Context, identifier, code, _ string) error {
+	out := c.Out
+	if out == nil {
+		out = os.Stderr
 	}
 
 	// The identifier is masked even here. A developer's terminal is not
-	// production, but dev logs get pasted into issues and shared in
-	// screenshots, and a phone number is PII wherever it lands. The code
-	// is the part that needs to be readable.
-	logger.InfoContext(ctx, "otp issued (development channel)",
-		slog.String("channel", c.ID()),
-		slog.String("identifier", maskIdentifier(identifier)),
-		slog.String("code", code),
-	)
+	// production, but dev output gets pasted into issues and shared in
+	// screenshots, and an email address is PII wherever it lands. The
+	// code is the only part that needs to be readable.
+	_, err := fmt.Fprintf(out, "\n  ── OTP for %s: %s  (expires in 5 minutes) ──\n\n",
+		maskIdentifier(identifier), code)
+	if err != nil {
+		return fmt.Errorf("auth: write console otp: %w", err)
+	}
 	return nil
 }
 
