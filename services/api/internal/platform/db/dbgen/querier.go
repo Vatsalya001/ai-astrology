@@ -6,16 +6,81 @@ package dbgen
 
 import (
 	"context"
+
+	"github.com/jackc/pgx/v5/pgtype"
+	"time"
 )
 
 type Querier interface {
+	CancelUserDeletion(ctx context.Context, id pgtype.UUID) (User, error)
+	// ─── Preferences ─────────────────────────────────────────────────────
+	CreateDefaultPreferences(ctx context.Context, userID pgtype.UUID) (UserPreference, error)
+	// ─── Sessions ────────────────────────────────────────────────────────
+	CreateSession(ctx context.Context, arg CreateSessionParams) (Session, error)
+	CreateUserWithEmail(ctx context.Context, email *string) (User, error)
+	CreateUserWithPhone(ctx context.Context, phone *string) (User, error)
+	// Housekeeping for the worker. Expired rows prove nothing and grow
+	// forever.
+	DeleteExpiredSessions(ctx context.Context) error
+	// ─── Identities ──────────────────────────────────────────────────────
+	FindIdentity(ctx context.Context, arg FindIdentityParams) (AuthIdentity, error)
+	// Used only on the reuse path, to find which family to revoke. Deliberately
+	// ignores used_at/revoked_at: the whole point is to locate a token that
+	// has already been spent.
+	FindSessionByHash(ctx context.Context, refreshHash []byte) (Session, error)
+	// Auth queries. See docs/specs/PHASE-01-AUTH-AND-USERS.md §3.
+	FindUserByEmail(ctx context.Context, email *string) (User, error)
+	FindUserByID(ctx context.Context, id pgtype.UUID) (User, error)
+	FindUserByPhone(ctx context.Context, phone *string) (User, error)
+	GetPreferences(ctx context.Context, userID pgtype.UUID) (UserPreference, error)
 	// Queries against schema_meta.
 	//
 	// Small on purpose: Phase 0 has no domain tables. This exists so the
 	// sqlc pipeline is wired and proven end to end before Phase 1 needs it,
 	// rather than being set up under time pressure alongside auth.
 	GetSchemaMeta(ctx context.Context) (SchemaMetum, error)
+	// Real deletion, not a flag. Every user-owned table declares ON DELETE
+	// CASCADE, so this removes the lot — which is what the Phase 1 gate
+	// means by "no row anywhere references the user".
+	//
+	// audit_logs is the deliberate exception: its user_id is not a foreign
+	// key, so the record that a deletion happened survives the deletion. It
+	// holds IDs and enums only, never PII.
+	HardDeleteUser(ctx context.Context, id pgtype.UUID) error
+	// ON CONFLICT DO UPDATE rather than DO NOTHING: DO NOTHING returns no
+	// row, so the caller cannot tell "already linked" from "insert failed"
+	// without a second query.
+	LinkIdentity(ctx context.Context, arg LinkIdentityParams) (AuthIdentity, error)
+	ListActiveSessions(ctx context.Context, userID pgtype.UUID) ([]Session, error)
+	ListAuditLogsForUser(ctx context.Context, arg ListAuditLogsForUserParams) ([]AuditLog, error)
+	ListUsersPastDeletionGrace(ctx context.Context, deletionRequestedAt **time.Time) ([]User, error)
+	// ─── Deletion ────────────────────────────────────────────────────────
+	RequestUserDeletion(ctx context.Context, id pgtype.UUID) (User, error)
+	RevokeAllUserSessions(ctx context.Context, userID pgtype.UUID) error
+	RevokeSession(ctx context.Context, arg RevokeSessionParams) error
+	// One leaked token invalidates every descendant of it. Cheap to run and
+	// it turns a silent compromise into a forced re-authentication.
+	RevokeTokenFamily(ctx context.Context, familyID pgtype.UUID) error
+	// The single most important statement in this phase.
+	//
+	// Check and update in ONE statement. Two concurrent refreshes presenting
+	// the same token: Postgres serialises the UPDATE, so exactly one matches
+	// `used_at IS NULL` and gets a row back. The other gets no rows, which
+	// the caller treats as reuse and revokes the family.
+	//
+	// A read-then-write in Go would let both pass the check before either
+	// wrote — the classic TOCTOU that makes a leaked token usable twice. No
+	// application lock is needed, and a mocked database cannot test this.
+	RotateRefreshToken(ctx context.Context, refreshHash []byte) (Session, error)
 	SetSchemaPhase(ctx context.Context, phase string) (SchemaMetum, error)
+	TouchLastLogin(ctx context.Context, id pgtype.UUID) error
+	UpdatePreferences(ctx context.Context, arg UpdatePreferencesParams) (UserPreference, error)
+	// COALESCE so a PATCH omitting a field leaves it alone rather than
+	// nulling it. Only name and gender are writable here; email and phone
+	// change through a verification flow, never a profile edit.
+	UpdateUserProfile(ctx context.Context, arg UpdateUserProfileParams) (User, error)
+	// ─── Audit ───────────────────────────────────────────────────────────
+	WriteAuditLog(ctx context.Context, arg WriteAuditLogParams) error
 }
 
 var _ Querier = (*Queries)(nil)

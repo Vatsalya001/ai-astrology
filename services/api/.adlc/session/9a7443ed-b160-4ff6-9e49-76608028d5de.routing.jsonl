@@ -1,1 +1,2 @@
 {"event_id":"28bbbea0d4743588","ts":"2026-09-13T07:17:39Z","kind":"escalation","from_tier":0,"to_tier":1,"trigger":"path_pattern","reason":"tier1_infra","phase":"implement"}
+{"event_id":"19d02dae70ee8568","ts":"2026-09-14T05:25:45Z","kind":"escalation","from_tier":0,"to_tier":2,"trigger":"path_pattern","reason":"database migration","phase":"implement"}

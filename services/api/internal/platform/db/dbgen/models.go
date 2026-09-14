@@ -5,8 +5,117 @@
 package dbgen
 
 import (
+	"database/sql/driver"
+	"fmt"
 	"time"
+
+	"github.com/jackc/pgx/v5/pgtype"
 )
+
+type AuthProvider string
+
+const (
+	AuthProviderPhone  AuthProvider = "phone"
+	AuthProviderEmail  AuthProvider = "email"
+	AuthProviderGoogle AuthProvider = "google"
+	AuthProviderApple  AuthProvider = "apple"
+)
+
+func (e *AuthProvider) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = AuthProvider(s)
+	case string:
+		*e = AuthProvider(s)
+	default:
+		return fmt.Errorf("unsupported scan type for AuthProvider: %T", src)
+	}
+	return nil
+}
+
+type NullAuthProvider struct {
+	AuthProvider AuthProvider
+	Valid        bool // Valid is true if AuthProvider is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullAuthProvider) Scan(value interface{}) error {
+	if value == nil {
+		ns.AuthProvider, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.AuthProvider.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullAuthProvider) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.AuthProvider), nil
+}
+
+type UserRole string
+
+const (
+	UserRoleUser       UserRole = "user"
+	UserRoleAstrologer UserRole = "astrologer"
+	UserRoleAdmin      UserRole = "admin"
+	UserRoleSuperAdmin UserRole = "super_admin"
+)
+
+func (e *UserRole) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = UserRole(s)
+	case string:
+		*e = UserRole(s)
+	default:
+		return fmt.Errorf("unsupported scan type for UserRole: %T", src)
+	}
+	return nil
+}
+
+type NullUserRole struct {
+	UserRole UserRole
+	Valid    bool // Valid is true if UserRole is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullUserRole) Scan(value interface{}) error {
+	if value == nil {
+		ns.UserRole, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.UserRole.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullUserRole) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.UserRole), nil
+}
+
+type AuditLog struct {
+	ID        pgtype.UUID
+	UserID    pgtype.UUID
+	Action    string
+	Metadata  []byte
+	IpHash    []byte
+	CreatedAt time.Time
+}
+
+type AuthIdentity struct {
+	ID             pgtype.UUID
+	UserID         pgtype.UUID
+	Provider       AuthProvider
+	ProviderUserID string
+	CreatedAt      time.Time
+}
 
 type SchemaMetum struct {
 	ID             int16
@@ -14,4 +123,44 @@ type SchemaMetum struct {
 	Phase          string
 	BootstrappedAt time.Time
 	UpdatedAt      time.Time
+}
+
+type Session struct {
+	ID          pgtype.UUID
+	UserID      pgtype.UUID
+	FamilyID    pgtype.UUID
+	RefreshHash []byte
+	UserAgent   *string
+	IpHash      []byte
+	ExpiresAt   time.Time
+	UsedAt      **time.Time
+	RevokedAt   **time.Time
+	CreatedAt   time.Time
+}
+
+type User struct {
+	ID                  pgtype.UUID
+	Email               *string
+	EmailVerified       bool
+	Phone               *string
+	PhoneVerified       bool
+	Name                *string
+	Gender              *string
+	Role                UserRole
+	Status              string
+	LastLoginAt         **time.Time
+	DeletionRequestedAt **time.Time
+	CreatedAt           time.Time
+	UpdatedAt           time.Time
+}
+
+type UserPreference struct {
+	ID                       pgtype.UUID
+	UserID                   pgtype.UUID
+	PreferredLanguage        string
+	AstrologySystem          string
+	ChartStyle               string
+	Theme                    string
+	NotificationPreferences  []byte
+	CommunicationPreferences []byte
 }

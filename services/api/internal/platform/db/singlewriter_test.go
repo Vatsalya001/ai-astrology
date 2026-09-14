@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"testing"
 	"time"
 
@@ -214,5 +215,137 @@ func mustExec(ctx context.Context, t *testing.T, conn *pgx.Conn, sql string) {
 	t.Helper()
 	if _, err := conn.Exec(ctx, sql); err != nil {
 		t.Fatalf("exec %q: %v", sql, err)
+	}
+}
+
+// TestEveryRealTableRefusesWritesFromReader applies the actual migrations
+// and then discovers the tables rather than listing them.
+//
+// The test above proves default privileges work for a newly created
+// table. It does not prove they were applied to the tables this product
+// actually has — and an enumerated list is exactly the kind of thing that
+// stops being complete the moment someone adds a table and forgets this
+// file. Phase 1 adds five tables; Phase 2 adds more.
+//
+// Discovering from information_schema means a table added later is
+// covered without anyone remembering to come back here. That is the
+// difference between an invariant and a habit.
+func TestEveryRealTableRefusesWritesFromReader(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer cancel()
+
+	writerDSN, readerDSN, terminate := startPostgres(ctx, t)
+	defer terminate()
+
+	writer, err := pgx.Connect(ctx, writerDSN)
+	if err != nil {
+		t.Fatalf("connect as writer: %v", err)
+	}
+	defer writer.Close(ctx)
+
+	applyMigrations(ctx, t, writer)
+
+	reader, err := pgx.Connect(ctx, readerDSN)
+	if err != nil {
+		t.Fatalf("connect as astro_ro: %v", err)
+	}
+	defer reader.Close(ctx)
+
+	rows, err := writer.Query(ctx, `
+		SELECT tablename FROM pg_tables
+		WHERE schemaname = 'public'
+		ORDER BY tablename`)
+	if err != nil {
+		t.Fatalf("list tables: %v", err)
+	}
+	var tables []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			t.Fatalf("scan table name: %v", err)
+		}
+		tables = append(tables, name)
+	}
+	rows.Close()
+
+	// If discovery returns nothing the test would vacuously pass, which is
+	// worse than failing: it would report the invariant as holding while
+	// checking nothing at all.
+	if len(tables) < 5 {
+		t.Fatalf("found only %d tables (%v) — migrations do not appear to have "+
+			"applied, so this test proves nothing", len(tables), tables)
+	}
+	t.Logf("checking %d tables: %v", len(tables), tables)
+
+	for _, table := range tables {
+		t.Run(table, func(t *testing.T) {
+			// DELETE and UPDATE with an always-false predicate: the
+			// privilege check happens before any row is examined, so this
+			// asserts the grant without depending on table contents or
+			// column names.
+			for name, sql := range map[string]string{
+				"UPDATE": fmt.Sprintf(`UPDATE %q SET id = id WHERE false`, table),
+				"DELETE": fmt.Sprintf(`DELETE FROM %q WHERE false`, table),
+			} {
+				_, err := reader.Exec(ctx, sql)
+				if err == nil {
+					t.Fatalf("astro_ro executed %s on %q — the single-writer rule "+
+						"is BROKEN for this table. Check the GRANTs in its migration.",
+						name, table)
+				}
+
+				var pgErr *pgconn.PgError
+				if !errors.As(err, &pgErr) {
+					t.Fatalf("%s on %q failed with a non-Postgres error: %v", name, table, err)
+				}
+				if pgErr.Code != errInsufficientPrivilege {
+					t.Errorf("%s on %q failed with SQLSTATE %s (%s), want %s — "+
+						"it may be failing for the wrong reason, which would mean "+
+						"the grant is untested",
+						name, table, pgErr.Code, pgErr.Message, errInsufficientPrivilege)
+				}
+			}
+		})
+	}
+
+	// The reader must still be able to read every one of them, or the
+	// grants have been tightened past usefulness rather than loosened.
+	t.Run("reader can still SELECT from every table", func(t *testing.T) {
+		for _, table := range tables {
+			if _, err := reader.Exec(ctx, fmt.Sprintf(`SELECT 1 FROM %q LIMIT 1`, table)); err != nil {
+				t.Errorf("astro_ro cannot read %q, but ai-service needs to: %v", table, err)
+			}
+		}
+	})
+}
+
+// applyMigrations runs every *.up.sql in order, as the real deployment
+// does. Reading the files rather than duplicating the schema means this
+// test fails if a future migration forgets its grants.
+func applyMigrations(ctx context.Context, t *testing.T, conn *pgx.Conn) {
+	t.Helper()
+
+	dir, err := filepath.Abs(filepath.Join("..", "..", "..", "db", "migrations"))
+	if err != nil {
+		t.Fatalf("resolve migrations dir: %v", err)
+	}
+
+	files, err := filepath.Glob(filepath.Join(dir, "*.up.sql"))
+	if err != nil {
+		t.Fatalf("glob migrations: %v", err)
+	}
+	if len(files) == 0 {
+		t.Fatalf("no migrations found in %s", dir)
+	}
+	sort.Strings(files) // numeric prefixes make lexical order correct
+
+	for _, file := range files {
+		sqlBytes, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatalf("read %s: %v", file, err)
+		}
+		if _, err := conn.Exec(ctx, string(sqlBytes)); err != nil {
+			t.Fatalf("apply %s: %v", filepath.Base(file), err)
+		}
 	}
 }
