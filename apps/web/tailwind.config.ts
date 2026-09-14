@@ -1,5 +1,6 @@
 import type { Config } from 'tailwindcss'
 import animate from 'tailwindcss-animate'
+import { colors, semanticColors } from '@ayana/ui'
 
 /**
  * Design tokens for the AI Astrology Companion.
@@ -9,67 +10,18 @@ import animate from 'tailwindcss-animate'
  * below is midnight navy with deep purple and gold, which reads as a
  * premium technology product that happens to be about astrology.
  *
- * These values are the single source of truth. Do not hardcode a hex
- * anywhere in a component.
+ * The values themselves live in `packages/ui` and are imported below —
+ * the spec requires them defined once, and mobile (Phase 10) needs the
+ * same palette without a Tailwind dependency. Do not hardcode a hex
+ * anywhere in a component, and do not restate one here.
  */
 const config: Config = {
   content: ['./src/**/*.{ts,tsx}'],
   theme: {
     extend: {
       colors: {
-        base: '#0B1026',      // midnight navy — page background
-        surface: '#141B35',   // raised cards
-        elevated: '#1C2545',  // hover / nested surfaces
-        border: '#252F52',
-
-        accent: {
-          DEFAULT: '#6B4FBB', // deep purple
-          soft: '#8B6FD8',
-          dim: '#4A3580',
-          // shadcn components pair `bg-accent` with `text-accent-foreground`.
-          foreground: '#F2F3F8',
-        },
-        gold: {
-          DEFAULT: '#D4A857',
-          soft: '#E5C078',
-          dim: '#9A7A3E',
-        },
-
-        ink: {
-          DEFAULT: '#F2F3F8', // primary text
-          muted: '#9AA3C0',   // secondary text
-          faint: '#5E6785',   // tertiary / disabled
-        },
-
-        ok: '#4ADE80',
-        warn: '#FBBF24',
-        danger: '#F87171',
-
-        // ─── shadcn/ui semantic layer ─────────────────────────────
-        // shadcn components are written against semantic names
-        // (bg-primary, text-muted-foreground, ...). These are mapped onto
-        // the palette above rather than being a second set of colours, so
-        // one token change reaches both vocabularies.
-        //
-        // Without this layer, `npx shadcn add` produces components with
-        // the slate palette hardcoded as literal classes — a light-grey
-        // control on a midnight-navy page, invisible to `tsc` and to the
-        // build, and routing around this file entirely.
-        background: '#0B1026',        // base
-        foreground: '#F2F3F8',        // ink
-
-        card: { DEFAULT: '#141B35', foreground: '#F2F3F8' },
-        popover: { DEFAULT: '#1C2545', foreground: '#F2F3F8' },
-
-        // Gold is the call-to-action colour, so it is `primary`.
-        primary: { DEFAULT: '#D4A857', foreground: '#0B1026' },
-        secondary: { DEFAULT: '#141B35', foreground: '#F2F3F8' },
-
-        muted: { DEFAULT: '#1C2545', foreground: '#9AA3C0' },
-        destructive: { DEFAULT: '#F87171', foreground: '#0B1026' },
-
-        input: '#252F52',
-        ring: '#D4A857',              // matches the focus ring in globals.css
+        ...colors,
+        ...semanticColors,
       },
 
       fontFamily: {

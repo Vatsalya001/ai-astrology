@@ -16,8 +16,8 @@ import (
 	"time"
 )
 
-func okProbe(context.Context) error  { return nil }
-func badProbe(context.Context) error { return errors.New("dial tcp: connection refused") }
+func okProbe(context.Context) (string, error)  { return "", nil }
+func badProbe(context.Context) (string, error) { return "", errors.New("dial tcp: connection refused") }
 
 func doHealth(t *testing.T, probers []Prober) (int, HealthResponse) {
 	t.Helper()
@@ -90,8 +90,8 @@ func TestHealthNonCriticalFailureDegrades(t *testing.T) {
 // trusting that nobody pastes err.Error() back in.
 func TestHealthNeverLeaksProbeErrorDetail(t *testing.T) {
 	secret := "dial tcp 127.0.0.1:8025: connect: connection refused"
-	leaky := func(context.Context) error {
-		return fmt.Errorf("Get %q: %s", "http://internal-mail.svc:8025/readyz", secret)
+	leaky := func(context.Context) (string, error) {
+		return "", fmt.Errorf("Get %q: %s", "http://internal-mail.svc:8025/readyz", secret)
 	}
 
 	_, body := doHealth(t, []Prober{
@@ -183,9 +183,9 @@ func TestHealthErrorBeatsDegraded(t *testing.T) {
 // TestHealthProbesRunConcurrently guards the property that makes the 2s
 // budget workable. Run serially, three 300ms probes would take 900ms.
 func TestHealthProbesRunConcurrently(t *testing.T) {
-	slow := func(context.Context) error {
+	slow := func(context.Context) (string, error) {
 		time.Sleep(300 * time.Millisecond)
-		return nil
+		return "", nil
 	}
 
 	start := time.Now()
@@ -208,9 +208,9 @@ func TestHealthProbesRunConcurrently(t *testing.T) {
 // make the health endpoint itself hang. That turns one sick dependency
 // into an apparently sick service and can empty a load balancer pool.
 func TestHealthOneSlowProbeDoesNotStallOthers(t *testing.T) {
-	hang := func(ctx context.Context) error {
+	hang := func(ctx context.Context) (string, error) {
 		<-ctx.Done() // blocks until the handler's budget expires
-		return ctx.Err()
+		return "", ctx.Err()
 	}
 
 	start := time.Now()
@@ -233,9 +233,9 @@ func TestHealthOneSlowProbeDoesNotStallOthers(t *testing.T) {
 
 func TestHealthEveryProbeRunsExactlyOnce(t *testing.T) {
 	var calls atomic.Int32
-	counting := func(context.Context) error {
+	counting := func(context.Context) (string, error) {
 		calls.Add(1)
-		return nil
+		return "", nil
 	}
 
 	doHealth(t, []Prober{
@@ -269,5 +269,50 @@ func TestReadyIsIndependentOfDependencies(t *testing.T) {
 	}
 	if len(body.Checks) != 0 {
 		t.Errorf("/ready reported %d dependency checks; it must report none", len(body.Checks))
+	}
+}
+
+// Detail carries operator-facing configuration — currently which model
+// backend ai-service is wired to. It travels the same public, unauthenticated
+// response as everything else here, so it gets the same scrutiny as Reason.
+func TestHealthSurfacesProbeDetail(t *testing.T) {
+	withDetail := func(context.Context) (string, error) {
+		return "openai-compatible · local", nil
+	}
+
+	_, body := doHealth(t, []Prober{
+		{Name: "postgres", Critical: true, Probe: okProbe},
+		{Name: "ai", Critical: false, Probe: withDetail},
+	})
+
+	if got := body.Checks["ai"].Detail; got != "openai-compatible · local" {
+		t.Errorf("ai detail = %q, want the configured provider", got)
+	}
+
+	// Dependencies with nothing to report must omit the field rather than
+	// emit an empty string, so the shape stays honest for consumers.
+	raw, err := json.Marshal(body.Checks["postgres"])
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if bytes.Contains(raw, []byte("detail")) {
+		t.Errorf("a probe with no detail still emitted the key: %s", raw)
+	}
+}
+
+// A failing probe must not report a stale detail alongside its error.
+// "openai-compatible · paid" next to a red dot reads as though the paid
+// provider is confirmed live, which is exactly the wrong inference.
+func TestHealthDetailIsEmptyWhenTheProbeFails(t *testing.T) {
+	failing := func(context.Context) (string, error) {
+		return "", errors.New("unreachable")
+	}
+
+	_, body := doHealth(t, []Prober{
+		{Name: "ai", Critical: false, Probe: failing},
+	})
+
+	if got := body.Checks["ai"].Detail; got != "" {
+		t.Errorf("failing probe reported detail %q; it proves nothing about config", got)
 	}
 }

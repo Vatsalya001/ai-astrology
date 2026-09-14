@@ -88,7 +88,7 @@ func TestNoTraceHeaderWhenContextHasNone(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewAI: %v", err)
 	}
-	if err := ai.Health(context.Background()); err != nil {
+	if _, err := ai.Health(context.Background()); err != nil {
 		t.Fatalf("Health: %v", err)
 	}
 
@@ -119,7 +119,7 @@ func TestHealthFailsOnUnhealthyBody(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewAI: %v", err)
 	}
-	if err := ai.Health(context.Background()); err == nil {
+	if _, err := ai.Health(context.Background()); err == nil {
 		t.Fatal("Health succeeded on a 200 reporting 'degraded'; it must fail")
 	}
 }
@@ -182,5 +182,28 @@ func TestBaseURLTrailingSlashIsTolerated(t *testing.T) {
 	if stub.requestPath != "/health" {
 		t.Errorf("path = %q, want /health — a trailing slash produced a double slash",
 			stub.requestPath)
+	}
+}
+
+func TestProviderDetail(t *testing.T) {
+	cases := []struct {
+		name, provider, tier, want string
+	}{
+		{"both present", "openai-compatible", "local", "openai-compatible · local"},
+		{"paid tier", "anthropic", "paid", "anthropic · paid"},
+		// Half a value is worse than none: "anthropic · " reads as a
+		// truncated string and tells an operator nothing.
+		{"missing tier", "anthropic", "", ""},
+		{"missing provider", "", "paid", ""},
+		{"both missing", "", "", ""},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := providerDetail(tc.provider, tc.tier); got != tc.want {
+				t.Errorf("providerDetail(%q, %q) = %q, want %q",
+					tc.provider, tc.tier, got, tc.want)
+			}
+		})
 	}
 }

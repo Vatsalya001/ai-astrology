@@ -31,6 +31,12 @@ const (
 type Check struct {
 	Status    CheckStatus `json:"status"`
 	LatencyMS int64       `json:"latency_ms"`
+	// Detail is operator-facing configuration the dependency reports
+	// about itself — currently which model backend ai-service is wired
+	// to. Safe to expose: it names a provider and a tier, never a URL,
+	// a key or a host. Anything sensitive belongs in Reason's closed
+	// vocabulary instead.
+	Detail string `json:"detail,omitempty"`
 	// Reason is a closed-vocabulary code, never the underlying error
 	// text. See classifyProbeError.
 	Reason ProbeReason `json:"reason,omitempty"`
@@ -96,7 +102,11 @@ type Prober struct {
 	// A failing critical dependency makes the whole service "error";
 	// a failing non-critical one makes it "degraded".
 	Critical bool
-	Probe    func(context.Context) error
+	// Probe returns an optional operator-facing detail alongside its
+	// error. Returning both from one call keeps the fan-out to a single
+	// round trip per dependency — asking twice would double the latency
+	// of the endpoint whose whole job is to be fast.
+	Probe func(context.Context) (string, error)
 }
 
 // HealthHandler probes every dependency concurrently and reports each
@@ -127,10 +137,10 @@ func HealthHandler(service, version string, probers []Prober) http.HandlerFunc {
 			p := p
 			group.Go(func() error {
 				start := time.Now()
-				err := p.Probe(ctx)
+				detail, err := p.Probe(ctx)
 				latency := time.Since(start).Milliseconds()
 
-				check := Check{Status: StatusOK, LatencyMS: latency}
+				check := Check{Status: StatusOK, LatencyMS: latency, Detail: detail}
 				outcome := StatusOK
 
 				if err != nil {
