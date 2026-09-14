@@ -438,7 +438,7 @@ WHERE deletion_requested_at IS NOT NULL
   AND deletion_requested_at < $1
 `
 
-func (q *Queries) ListUsersPastDeletionGrace(ctx context.Context, deletionRequestedAt **time.Time) ([]User, error) {
+func (q *Queries) ListUsersPastDeletionGrace(ctx context.Context, deletionRequestedAt pgtype.Timestamptz) ([]User, error) {
 	rows, err := q.db.Query(ctx, listUsersPastDeletionGrace, deletionRequestedAt)
 	if err != nil {
 		return nil, err

@@ -133,8 +133,8 @@ type Session struct {
 	UserAgent   *string
 	IpHash      []byte
 	ExpiresAt   time.Time
-	UsedAt      **time.Time
-	RevokedAt   **time.Time
+	UsedAt      pgtype.Timestamptz
+	RevokedAt   pgtype.Timestamptz
 	CreatedAt   time.Time
 }
 
@@ -148,8 +148,8 @@ type User struct {
 	Gender              *string
 	Role                UserRole
 	Status              string
-	LastLoginAt         **time.Time
-	DeletionRequestedAt **time.Time
+	LastLoginAt         pgtype.Timestamptz
+	DeletionRequestedAt pgtype.Timestamptz
 	CreatedAt           time.Time
 	UpdatedAt           time.Time
 }
