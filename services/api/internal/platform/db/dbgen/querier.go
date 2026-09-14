@@ -56,7 +56,11 @@ type Querier interface {
 	// ─── Deletion ────────────────────────────────────────────────────────
 	RequestUserDeletion(ctx context.Context, id pgtype.UUID) (User, error)
 	RevokeAllUserSessions(ctx context.Context, userID pgtype.UUID) error
-	RevokeSession(ctx context.Context, arg RevokeSessionParams) error
+	// :execrows, not :exec. An :exec cannot distinguish "revoked it" from
+	// "matched nothing", so revoking someone else's session — which the
+	// user_id predicate correctly refuses — returned 204 and told the caller
+	// it had worked. The row count is what lets the handler answer 404.
+	RevokeSession(ctx context.Context, arg RevokeSessionParams) (int64, error)
 	// One leaked token invalidates every descendant of it. Cheap to run and
 	// it turns a silent compromise into a forced re-authentication.
 	RevokeTokenFamily(ctx context.Context, familyID pgtype.UUID) error

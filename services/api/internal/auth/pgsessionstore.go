@@ -79,6 +79,25 @@ func (s *PostgresSessionStore) FindByHash(ctx context.Context, hash []byte) (Ses
 	return fromDB(row), nil
 }
 
+// RevokeSession ends one session, scoped by owner.
+//
+// The query carries user_id in its WHERE clause, so a caller cannot
+// revoke a session belonging to someone else even with a valid id.
+func (s *PostgresSessionStore) RevokeSession(ctx context.Context, sessionID, userID uuid.UUID) error {
+	// The row count is ignored here, deliberately. This path is logout:
+	// a session that is already gone is the outcome the caller wanted,
+	// and failing would show an error on a screen that has, for them,
+	// already worked. The users handler DOES check it, because there the
+	// count is the difference between 204 and 404.
+	if _, err := s.q.RevokeSession(ctx, dbgen.RevokeSessionParams{
+		ID:     toPgUUID(sessionID),
+		UserID: toPgUUID(userID),
+	}); err != nil {
+		return fmt.Errorf("auth: revoke session: %w", err)
+	}
+	return nil
+}
+
 func (s *PostgresSessionStore) RevokeFamily(ctx context.Context, familyID uuid.UUID) error {
 	if err := s.q.RevokeTokenFamily(ctx, toPgUUID(familyID)); err != nil {
 		return fmt.Errorf("auth: revoke token family: %w", err)

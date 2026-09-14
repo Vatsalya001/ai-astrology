@@ -278,3 +278,12 @@ func NormaliseIdentifier(channel, identifier string) (string, error) {
 		return "", ErrUnknownChannel
 	}
 }
+
+// RevokeByToken ends the session a refresh token belongs to.
+//
+// Revokes the single session, not the family: logging out is a normal
+// action, and taking the whole lineage down would sign the user out of
+// every device whenever they signed out of one.
+func (s *Service) RevokeByToken(ctx context.Context, presented string) error {
+	return s.rotator.RevokeByToken(ctx, presented)
+}

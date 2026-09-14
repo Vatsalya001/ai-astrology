@@ -9,6 +9,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -164,4 +165,160 @@ func toPgUUID(id uuid.UUID) pgtype.UUID {
 func isUniqueViolation(err error) bool {
 	var pgErr interface{ SQLState() string }
 	return errors.As(err, &pgErr) && pgErr.SQLState() == "23505"
+}
+
+// ─── Profile ─────────────────────────────────────────────────────────
+
+var ErrInvalidPreference = errors.New("users: unsupported preference value")
+
+// Profile returns the account as its owner sees it.
+func (s *Service) Profile(ctx context.Context, id uuid.UUID) (ProfileView, error) {
+	row, err := s.q.FindUserByID(ctx, toPgUUID(id))
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ProfileView{}, ErrNotFound
+		}
+		return ProfileView{}, fmt.Errorf("users: find by id: %w", err)
+	}
+	return toProfileView(row), nil
+}
+
+// UpdateProfile writes the fields a user may change about themselves.
+//
+// Name and gender only. Email and phone are contact methods, not profile
+// fields: changing one has to go through verification, or a stolen access
+// token becomes permanent account takeover by moving the address the
+// codes are sent to.
+func (s *Service) UpdateProfile(ctx context.Context, id uuid.UUID, name, gender *string) (ProfileView, error) {
+	if gender != nil && !validGenders[*gender] {
+		return ProfileView{}, ErrInvalidPreference
+	}
+	if name != nil && len(*name) > 100 {
+		// A length cap rather than a character allowlist. Names contain
+		// apostrophes, hyphens, spaces and every script there is;
+		// rejecting those breaks real people's names for no security
+		// gain, since the value is parameterised and escaped at render.
+		return ProfileView{}, ErrInvalidPreference
+	}
+
+	row, err := s.q.UpdateUserProfile(ctx, dbgen.UpdateUserProfileParams{
+		ID:     toPgUUID(id),
+		Name:   name,
+		Gender: gender,
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ProfileView{}, ErrNotFound
+		}
+		return ProfileView{}, fmt.Errorf("users: update profile: %w", err)
+	}
+	return toProfileView(row), nil
+}
+
+// ─── Preferences ─────────────────────────────────────────────────────
+
+type PreferenceUpdate struct {
+	PreferredLanguage *string
+	AstrologySystem   *string
+	ChartStyle        *string
+	Theme             *string
+}
+
+// Allowed values, validated in the application rather than by a database
+// CHECK constraint: adding a language should not need a migration, and
+// the set changes per phase (chart styles matter from Phase 3).
+var (
+	validLanguages = map[string]bool{"en": true, "hi": true, "hinglish": true}
+	validSystems   = map[string]bool{"vedic": true, "western": true}
+	validStyles    = map[string]bool{"north": true, "south": true, "east": true}
+	validThemes    = map[string]bool{"dark": true, "light": true, "system": true}
+	validGenders   = map[string]bool{"male": true, "female": true, "other": true, "prefer_not_to_say": true}
+)
+
+func (s *Service) Preferences(ctx context.Context, userID uuid.UUID) (PreferencesView, error) {
+	row, err := s.q.GetPreferences(ctx, toPgUUID(userID))
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return PreferencesView{}, ErrNotFound
+		}
+		return PreferencesView{}, fmt.Errorf("users: get preferences: %w", err)
+	}
+	return toPreferencesView(row), nil
+}
+
+func (s *Service) UpdatePreferences(ctx context.Context, userID uuid.UUID, in PreferenceUpdate) (PreferencesView, error) {
+	// Validate every supplied field before writing any of them, so a
+	// partially-applied update is impossible.
+	for _, check := range []struct {
+		value   *string
+		allowed map[string]bool
+	}{
+		{in.PreferredLanguage, validLanguages},
+		{in.AstrologySystem, validSystems},
+		{in.ChartStyle, validStyles},
+		{in.Theme, validThemes},
+	} {
+		if check.value != nil && !check.allowed[*check.value] {
+			return PreferencesView{}, ErrInvalidPreference
+		}
+	}
+
+	row, err := s.q.UpdatePreferences(ctx, dbgen.UpdatePreferencesParams{
+		UserID:            toPgUUID(userID),
+		PreferredLanguage: in.PreferredLanguage,
+		AstrologySystem:   in.AstrologySystem,
+		ChartStyle:        in.ChartStyle,
+		Theme:             in.Theme,
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return PreferencesView{}, ErrNotFound
+		}
+		return PreferencesView{}, fmt.Errorf("users: update preferences: %w", err)
+	}
+	return toPreferencesView(row), nil
+}
+
+// ─── views ───────────────────────────────────────────────────────────
+
+type ProfileView struct {
+	ID            uuid.UUID `json:"id"`
+	Email         *string   `json:"email"`
+	EmailVerified bool      `json:"email_verified"`
+	Phone         *string   `json:"phone"`
+	PhoneVerified bool      `json:"phone_verified"`
+	Name          *string   `json:"name"`
+	Gender        *string   `json:"gender"`
+	Role          string    `json:"role"`
+	CreatedAt     time.Time `json:"created_at"`
+}
+
+type PreferencesView struct {
+	PreferredLanguage string `json:"preferred_language"`
+	AstrologySystem   string `json:"astrology_system"`
+	ChartStyle        string `json:"chart_style"`
+	Theme             string `json:"theme"`
+}
+
+func toProfileView(row dbgen.User) ProfileView {
+	return ProfileView{
+		ID:            uuid.UUID(row.ID.Bytes),
+		Email:         row.Email,
+		EmailVerified: row.EmailVerified,
+		Phone:         row.Phone,
+		PhoneVerified: row.PhoneVerified,
+		Name:          row.Name,
+		Gender:        row.Gender,
+		Role:          string(row.Role),
+		CreatedAt:     row.CreatedAt,
+	}
+}
+
+func toPreferencesView(row dbgen.UserPreference) PreferencesView {
+	return PreferencesView{
+		PreferredLanguage: row.PreferredLanguage,
+		AstrologySystem:   row.AstrologySystem,
+		ChartStyle:        row.ChartStyle,
+		Theme:             row.Theme,
+	}
 }

@@ -9,6 +9,7 @@ import (
 	"github.com/Vatsalya001/ai-astrology/services/api/internal/platform/clients"
 	"github.com/Vatsalya001/ai-astrology/services/api/internal/platform/db"
 	"github.com/Vatsalya001/ai-astrology/services/api/internal/platform/redis"
+	"github.com/Vatsalya001/ai-astrology/services/api/internal/users"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
@@ -34,6 +35,8 @@ type Deps struct {
 	// a route that exists and 500s is worse than one that 404s.
 	Auth       *auth.Handler
 	AuthIssuer *auth.Issuer
+	Users      *users.Handler
+	Sessions   *users.SessionDirectory
 }
 
 // NewRouter builds the HTTP handler.
@@ -194,14 +197,46 @@ func metaHandler(cfg *config.Config) http.HandlerFunc {
 // a route accidentally mounted outside the authenticated group would be
 // spotted.
 func mountAuth(r chi.Router, d Deps) {
+	authenticate := auth.Authenticate(d.AuthIssuer, AuthMiddlewareErrorWriter)
+
 	r.Route("/auth", func(r chi.Router) {
-		// Public. These are how someone who has no token gets one, so
-		// they cannot sit behind Authenticate. Rate limiting is applied
-		// inside each handler rather than as middleware, because the
-		// subject differs per route — identifier here, token there.
+		// Public. These are how someone with no token gets one, so they
+		// cannot sit behind Authenticate. Rate limiting is applied inside
+		// each handler rather than as middleware, because the subject
+		// differs per route — identifier here, token there.
 		r.Post("/otp/request", d.Auth.RequestOTP)
 		r.Post("/otp/verify", d.Auth.VerifyOTP)
 		r.Post("/refresh", d.Auth.Refresh)
+
+		// Logout takes the refresh token, so it does not require a valid
+		// ACCESS token — an expired session must still be closable.
+		r.Post("/logout", d.Auth.Logout)
+
+		// logout-all does require one. It is the "someone has my account"
+		// button and must not be triggerable by whoever holds a single
+		// stolen refresh token.
+		r.Group(func(r chi.Router) {
+			r.Use(authenticate)
+			r.Post("/logout-all", d.Auth.LogoutAll(d.Sessions))
+		})
+	})
+
+	if d.Users == nil {
+		return
+	}
+
+	r.Route("/users", func(r chi.Router) {
+		// Every route below this line requires a valid access token.
+		// Mounted as a group rather than per-route so a new endpoint
+		// cannot be added outside the guard by forgetting a line.
+		r.Use(authenticate)
+
+		r.Get("/me", d.Users.Me)
+		r.Patch("/me", d.Users.PatchMe)
+		r.Get("/me/preferences", d.Users.Preferences)
+		r.Patch("/me/preferences", d.Users.PatchPreferences)
+		r.Get("/me/sessions", d.Users.ListSessions)
+		r.Delete("/me/sessions/{id}", d.Users.RevokeSession)
 	})
 }
 

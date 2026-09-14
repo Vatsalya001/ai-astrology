@@ -63,6 +63,9 @@ type SessionStore interface {
 
 	// Create persists a newly issued refresh token.
 	Create(ctx context.Context, s NewSession) (Session, error)
+
+	// RevokeSession ends one session, scoped by owner.
+	RevokeSession(ctx context.Context, sessionID, userID uuid.UUID) error
 }
 
 // NewSession is the input to Create.
@@ -200,4 +203,19 @@ func (r *Rotator) Rotate(
 
 	// Exists, never used: expired or already revoked. Routine.
 	return TokenPair{}, ErrRefreshInvalid
+}
+
+// RevokeByToken revokes the single session a token belongs to.
+//
+// Deliberately not the family. Logging out is routine; revoking the
+// lineage is what happens when reuse is DETECTED, and conflating the two
+// would sign someone out everywhere each time they signed out anywhere.
+func (r *Rotator) RevokeByToken(ctx context.Context, presented string) error {
+	session, err := r.store.FindByHash(ctx, HashRefreshToken(presented))
+	if err != nil {
+		// An unknown token is not an error worth surfacing: the caller is
+		// logging out, and the outcome they want has already happened.
+		return nil
+	}
+	return r.store.RevokeSession(ctx, session.ID, session.UserID)
 }

@@ -138,12 +138,14 @@ func run() error {
 
 	queries := dbgen.New(database.Pool)
 	recorder := audit.NewRecorder(queries, log)
+	userService := users.NewService(queries)
+	sessionDirectory := users.NewSessionDirectory(queries)
 
 	authService := auth.NewService(auth.ServiceConfig{
 		OTP:       auth.NewOTPStore(cache.Client, cfg.OTPTTL, cfg.OTPMaxAttempts),
 		Channel:   channel,
 		Rotator:   auth.NewRotator(issuer, auth.NewPostgresSessionStore(queries)),
-		Users:     users.NewService(queries),
+		Users:     userService,
 		Audit:     recorder,
 		Logger:    log,
 		OTPLength: cfg.OTPLength,
@@ -171,6 +173,8 @@ func run() error {
 		AI:         aiClient,
 		Auth:       authHandler,
 		AuthIssuer: issuer,
+		Users:      users.NewHandler(userService, sessionDirectory, httpapi.AuthErrorWriter),
+		Sessions:   sessionDirectory,
 	})
 
 	srv := &http.Server{
