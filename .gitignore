@@ -49,7 +49,6 @@ Thumbs.db
 *.sqlite
 
 # ─── ADLC session state (per-developer, not shared) ──
-.adlc/session/
 
 # ─── Local agent settings (per-developer) ────────────
 # .claude/CLAUDE.md and .claude/rules/ ARE shared — they are the
@@ -64,3 +63,14 @@ Thumbs.db
 
 # Local process state from scripts/ayana
 /.run/
+
+# Local operational state for the contract gate: session ids, this
+# machine's classification history, token usage. Never shared.
+
+# ADLC per-developer session state.
+# Local operational state for the contract gate: session ids, this
+# machine's classification history, token usage. Never shared.
+#
+# `**/` is required: a pattern with a mid-path slash is anchored to the
+# repo root, so a bare `.adlc/session/` misses services/api/.adlc/session/.
+**/.adlc/session/
