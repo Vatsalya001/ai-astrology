@@ -72,6 +72,39 @@ type Config struct {
 	// worse than an obviously absent one — it looks configured.
 	InternalToken string `env:"INTERNAL_TOKEN,required" validate:"required,min=16"`
 
+	// ─── Auth (Phase 1) ──────────────────────────────────────────
+	//
+	// JWTSecret and IPHashSalt have NO default and NO fallback. A
+	// generated default would be identical on every deployment, which is
+	// the same as having no secret at all — and the failure is silent,
+	// because everything still works.
+	JWTSecret     string        `env:"JWT_SECRET,required"   validate:"required,min=32"`
+	JWTAccessTTL  time.Duration `env:"JWT_ACCESS_TTL"        envDefault:"15m"  validate:"required"`
+	JWTRefreshTTL time.Duration `env:"JWT_REFRESH_TTL"       envDefault:"720h" validate:"required"`
+
+	// IPs are hashed with this salt before storage. Raw IPs are never
+	// persisted: an IP address is PII, and a rate-limit table full of
+	// them is a breach waiting to be interesting.
+	IPHashSalt string `env:"IP_HASH_SALT,required" validate:"required,min=16"`
+
+	AuthChannel string `env:"AUTH_CHANNEL" envDefault:"console" validate:"required,oneof=console smtp sms"`
+
+	SMTPHost string `env:"SMTP_HOST" envDefault:"localhost"`
+	SMTPPort int    `env:"SMTP_PORT" envDefault:"1025" validate:"min=1,max=65535"`
+	SMTPFrom string `env:"SMTP_FROM" envDefault:"Ayana <noreply@localhost>"`
+
+	OTPLength      int           `env:"OTP_LENGTH"       envDefault:"6"  validate:"required,min=4,max=10"`
+	OTPTTL         time.Duration `env:"OTP_TTL"          envDefault:"5m" validate:"required"`
+	OTPMaxAttempts int           `env:"OTP_MAX_ATTEMPTS" envDefault:"5"  validate:"required,min=1,max=20"`
+
+	// Google OAuth. Empty is legitimate — the routes report "not
+	// configured" rather than failing to boot, so the rest of auth works
+	// without credentials. See docs/adlc/phase-01-plan.md.
+	GoogleClientID     string `env:"GOOGLE_CLIENT_ID"     envDefault:""`
+	GoogleClientSecret string `env:"GOOGLE_CLIENT_SECRET" envDefault:""`
+
+	AccountDeleteGrace time.Duration `env:"ACCOUNT_DELETE_GRACE" envDefault:"168h" validate:"required"`
+
 	// ─── Feature flags ──────────────────────────────────────────
 	FeatureAIChat        bool `env:"FEATURE_AI_CHAT_ENABLED"          envDefault:"false"`
 	FeatureVoice         bool `env:"FEATURE_VOICE_ENABLED"            envDefault:"false"`
@@ -126,5 +159,22 @@ func (c *Config) checkProductionInvariants() error {
 			"refusing to start: INTERNAL_TOKEN is still the development default in production")
 	}
 
+	// ConsoleChannel writes the OTP to the log. In production that is a
+	// log full of live credentials, readable by anyone with log access
+	// and retained for as long as logs are retained.
+	if c.AuthChannel == "console" {
+		return fmt.Errorf(
+			"refusing to start: AUTH_CHANNEL=console in production would print OTP codes to logs")
+	}
+
 	return nil
+}
+
+// OAuthConfigured reports whether Google credentials are present.
+//
+// Absence is a supported state, not an error: the phase ships the full
+// flow and its tests against a stub, and the route returns a clear
+// "not configured" rather than a confusing failure. See the plan.
+func (c *Config) OAuthConfigured() bool {
+	return c.GoogleClientID != "" && c.GoogleClientSecret != ""
 }
