@@ -85,6 +85,19 @@ func (f *fakeSessionStore) FindByHash(_ context.Context, hash []byte) (Session, 
 	return *s, nil
 }
 
+func (f *fakeSessionStore) RevokeSession(_ context.Context, sessionID, userID uuid.UUID) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	revoked := f.now()
+	for _, s := range f.sessions {
+		if s.ID == sessionID && s.UserID == userID && s.RevokedAt == nil {
+			s.RevokedAt = &revoked
+		}
+	}
+	return nil
+}
+
 func (f *fakeSessionStore) RevokeFamily(_ context.Context, familyID uuid.UUID) error {
 	if f.revokeErr != nil {
 		return f.revokeErr

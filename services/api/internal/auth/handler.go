@@ -1,8 +1,10 @@
 package auth
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"time"
@@ -362,4 +364,71 @@ func (h *Handler) writeRateLimited(w http.ResponseWriter, r *http.Request, res r
 	w.Header().Set("Retry-After", strconv.Itoa(seconds))
 	h.writeErr(w, r, http.StatusTooManyRequests, "RATE_LIMITED",
 		"Too many requests. Try again shortly.", nil)
+}
+
+// ─── POST /auth/logout ───────────────────────────────────────────────
+
+// SessionRevoker is what logout needs. Declared by the consumer; the
+// implementation lives with the session storage.
+type SessionRevoker interface {
+	RevokeAll(ctx context.Context, userID uuid.UUID) error
+}
+
+// Logout ends the current session.
+//
+// Revokes by the presented refresh token rather than by user, so logging
+// out on a phone does not sign the same person out on their laptop.
+// Clearing the cookie alone would not do: the token would still be
+// valid, and anyone who had copied it could keep refreshing.
+func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
+	presented := h.presentedRefresh(r)
+	h.clearRefreshCookie(w)
+
+	if presented != "" {
+		if err := h.svc.RevokeByToken(r.Context(), presented); err != nil {
+			// Best-effort: the cookie is already cleared, so the client is
+			// logged out from its own point of view. Failing the request
+			// would leave the user staring at an error on a screen that
+			// has, for them, already worked.
+			h.svc.logger.WarnContext(r.Context(), "revoke session on logout", slog.Any("err", err))
+		}
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// LogoutAll ends every session for the authenticated user.
+//
+// Requires an access token, not just the refresh cookie: this is the
+// "I think someone has my account" button, and it should not be
+// triggerable by whoever holds a single stolen refresh token.
+func (h *Handler) LogoutAll(revoker SessionRevoker) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		principal, ok := PrincipalFrom(r.Context())
+		if !ok {
+			h.writeErr(w, r, http.StatusUnauthorized, "UNAUTHORIZED",
+				"Authentication required.", nil)
+			return
+		}
+
+		if err := revoker.RevokeAll(r.Context(), principal.UserID); err != nil {
+			h.writeErr(w, r, http.StatusInternalServerError, "INTERNAL_ERROR",
+				"Something went wrong. Please try again.", err)
+			return
+		}
+
+		h.clearRefreshCookie(w)
+		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
+func (h *Handler) presentedRefresh(r *http.Request) string {
+	var body refreshBody
+	_ = json.NewDecoder(r.Body).Decode(&body)
+	if body.RefreshToken != "" {
+		return body.RefreshToken
+	}
+	if c, err := r.Cookie(refreshCookieName); err == nil {
+		return c.Value
+	}
+	return ""
 }

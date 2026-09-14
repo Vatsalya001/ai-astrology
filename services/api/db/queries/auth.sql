@@ -103,7 +103,11 @@ SELECT * FROM sessions WHERE refresh_hash = $1;
 UPDATE sessions SET revoked_at = now()
 WHERE family_id = $1 AND revoked_at IS NULL;
 
--- name: RevokeSession :exec
+-- name: RevokeSession :execrows
+-- :execrows, not :exec. An :exec cannot distinguish "revoked it" from
+-- "matched nothing", so revoking someone else's session — which the
+-- user_id predicate correctly refuses — returned 204 and told the caller
+-- it had worked. The row count is what lets the handler answer 404.
 UPDATE sessions SET revoked_at = now()
 WHERE id = $1 AND user_id = $2 AND revoked_at IS NULL;
 
