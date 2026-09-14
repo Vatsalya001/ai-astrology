@@ -8,7 +8,6 @@ import (
 	"context"
 
 	"github.com/jackc/pgx/v5/pgtype"
-	"time"
 )
 
 type Querier interface {
@@ -53,7 +52,7 @@ type Querier interface {
 	LinkIdentity(ctx context.Context, arg LinkIdentityParams) (AuthIdentity, error)
 	ListActiveSessions(ctx context.Context, userID pgtype.UUID) ([]Session, error)
 	ListAuditLogsForUser(ctx context.Context, arg ListAuditLogsForUserParams) ([]AuditLog, error)
-	ListUsersPastDeletionGrace(ctx context.Context, deletionRequestedAt **time.Time) ([]User, error)
+	ListUsersPastDeletionGrace(ctx context.Context, deletionRequestedAt pgtype.Timestamptz) ([]User, error)
 	// ─── Deletion ────────────────────────────────────────────────────────
 	RequestUserDeletion(ctx context.Context, id pgtype.UUID) (User, error)
 	RevokeAllUserSessions(ctx context.Context, userID pgtype.UUID) error

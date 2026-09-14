@@ -32,9 +32,11 @@ sql:
         # Money is int64 paise everywhere (Phase 7). Postgres BIGINT maps
         # to int64 by default, which is what we want — this block exists
         # so the next person sees the intent rather than inferring it.
+        # Only the non-nullable override is declared. `emit_pointers_for_null_types`
+        # above already wraps nullable columns in a pointer, so also
+        # overriding the nullable case with "*time.Time" produces
+        # **time.Time — which compiles, reads as a mistake, and makes
+        # every nil check two levels deep.
         overrides:
           - db_type: "timestamptz"
             go_type: "time.Time"
-          - db_type: "timestamptz"
-            nullable: true
-            go_type: "*time.Time"
