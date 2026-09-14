@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"context"
 	"strings"
 	"testing"
 )
@@ -291,5 +292,38 @@ func TestEnvelopeAddressRejectsMalformed(t *testing.T) {
 		if _, err := envelopeAddress(bad); err == nil {
 			t.Errorf("envelopeAddress(%q) accepted a malformed value", bad)
 		}
+	}
+}
+
+// The development channel must actually show the code.
+//
+// It once did not: routed through slog, the project's redactor replaced
+// it with "[REDACTED]" — correctly, since `code` is a sensitive key.
+// That made the channel useless while looking like it worked. The fix
+// was to bypass the logger rather than exempt the key, because an
+// exemption would blunt the redactor everywhere else.
+func TestConsoleChannelPrintsTheCode(t *testing.T) {
+	var out strings.Builder
+	ch := &ConsoleChannel{Out: &out}
+
+	if err := ch.Send(context.Background(), "user@example.com", "482913", "en"); err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+
+	got := out.String()
+	if !strings.Contains(got, "482913") {
+		t.Errorf("the code is not in the output — the development channel is useless: %q", got)
+	}
+	if strings.Contains(got, "REDACTED") {
+		t.Errorf("the code was redacted: %q", got)
+	}
+
+	// The identifier is still masked. Dev output gets pasted into issues
+	// and shared in screenshots.
+	if strings.Contains(got, "user@example.com") {
+		t.Errorf("the full identifier appears unmasked: %q", got)
+	}
+	if !strings.Contains(got, "u***@example.com") {
+		t.Errorf("the identifier is not masked as expected: %q", got)
 	}
 }

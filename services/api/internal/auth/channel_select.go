@@ -26,14 +26,14 @@ type ChannelConfig struct {
 // here, and the failure it prevents — production logs full of live OTP
 // codes — is not recoverable once it has happened, because the logs are
 // already shipped and retained.
-func NewChannel(cfg ChannelConfig, logger *slog.Logger) (Channel, error) {
+func NewChannel(cfg ChannelConfig, _ *slog.Logger) (Channel, error) {
 	switch cfg.Channel {
 	case "console":
 		if cfg.IsProd {
 			return nil, fmt.Errorf(
 				"auth: refusing to build ConsoleChannel in production — it writes OTP codes to the log")
 		}
-		return &ConsoleChannel{Logger: logger}, nil
+		return &ConsoleChannel{}, nil
 
 	case "smtp":
 		if cfg.SMTPHost == "" {
