@@ -37,6 +37,9 @@ type Deps struct {
 	AuthIssuer *auth.Issuer
 	Users      *users.Handler
 	Sessions   *users.SessionDirectory
+	Deleter    *users.Deleter
+	Exporter   *users.Exporter
+	FreshOTP   *auth.FreshOTP
 }
 
 // NewRouter builds the HTTP handler.
@@ -237,6 +240,19 @@ func mountAuth(r chi.Router, d Deps) {
 		r.Patch("/me/preferences", d.Users.PatchPreferences)
 		r.Get("/me/sessions", d.Users.ListSessions)
 		r.Delete("/me/sessions/{id}", d.Users.RevokeSession)
+
+		// Deletion and export additionally require a FRESH OTP, checked
+		// inside each handler. A valid access token is not enough for
+		// either: fifteen minutes of validity and an unlocked laptop is
+		// not the bar for erasing an account.
+		if d.Deleter != nil && d.FreshOTP != nil {
+			r.Post("/me/challenge", d.Users.Challenge(d.FreshOTP))
+			r.Post("/me/delete", d.Users.RequestDeletion(d.Deleter, d.FreshOTP))
+			r.Post("/me/delete/cancel", d.Users.CancelDeletion(d.Deleter))
+		}
+		if d.Exporter != nil && d.FreshOTP != nil {
+			r.Get("/me/export", d.Users.Export(d.Exporter, d.FreshOTP))
+		}
 	})
 }
 

@@ -234,3 +234,148 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(v)
 }
+
+// ─── deletion and export ─────────────────────────────────────────────
+
+// FreshOTPVerifier re-checks a code at the moment of a dangerous action.
+//
+// Declared by the consumer. Deletion and export both require it on top
+// of a valid access token: an access token lives 15 minutes and an
+// unlocked laptop is enough to use one, which is not the bar for "erase
+// everything" or "hand me a file containing this person's whole
+// history".
+type FreshOTPVerifier interface {
+	VerifyFresh(ctx context.Context, userID uuid.UUID, code string) error
+}
+
+type dangerousActionBody struct {
+	// Code is a currently-valid OTP sent to the account's own verified
+	// contact. It proves possession now, not fifteen minutes ago.
+	Code string `json:"code"`
+	// Confirm must be the literal word, typed by the user. A stray
+	// DELETE from a mis-scoped client is otherwise indistinguishable
+	// from an intentional one.
+	Confirm string `json:"confirm"`
+}
+
+func (h *Handler) RequestDeletion(deleter *Deleter, fresh FreshOTPVerifier) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		principal, ok := auth.PrincipalFrom(r.Context())
+		if !ok {
+			h.writeErr(w, r, http.StatusUnauthorized, "UNAUTHORIZED", "Authentication required.", nil)
+			return
+		}
+
+		var body dangerousActionBody
+		if !decode(w, r, &body, h.writeErr) {
+			return
+		}
+		if body.Confirm != "DELETE" {
+			h.writeErr(w, r, http.StatusBadRequest, "VALIDATION_FAILED",
+				`Type DELETE to confirm.`, nil)
+			return
+		}
+		if err := fresh.VerifyFresh(r.Context(), principal.UserID, body.Code); err != nil {
+			h.writeErr(w, r, http.StatusUnauthorized, "UNAUTHORIZED",
+				"That code is not valid. Request a new one.", nil)
+			return
+		}
+
+		deleteAt, err := deleter.Request(r.Context(), principal.UserID)
+		if err != nil {
+			if errors.Is(err, ErrDeletionAlreadyRequested) {
+				// Idempotent from the caller's point of view: they asked to
+				// be deleted and they are being deleted.
+				w.WriteHeader(http.StatusNoContent)
+				return
+			}
+			h.handleError(w, r, err)
+			return
+		}
+
+		writeJSON(w, http.StatusOK, map[string]any{
+			"deletion_scheduled_at": deleteAt.UTC().Format("2006-01-02T15:04:05Z"),
+			// Stated explicitly so the grace window is a promise the user
+			// can act on rather than a detail in a help page.
+			"cancellable_until": deleteAt.UTC().Format("2006-01-02T15:04:05Z"),
+		})
+	}
+}
+
+func (h *Handler) CancelDeletion(deleter *Deleter) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		principal, ok := auth.PrincipalFrom(r.Context())
+		if !ok {
+			h.writeErr(w, r, http.StatusUnauthorized, "UNAUTHORIZED", "Authentication required.", nil)
+			return
+		}
+
+		if err := deleter.Cancel(r.Context(), principal.UserID); err != nil {
+			if errors.Is(err, ErrNoDeletionPending) {
+				h.writeErr(w, r, http.StatusNotFound, "NOT_FOUND", "No deletion is pending.", nil)
+				return
+			}
+			h.handleError(w, r, err)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
+func (h *Handler) Export(exporter *Exporter, fresh FreshOTPVerifier) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		principal, ok := auth.PrincipalFrom(r.Context())
+		if !ok {
+			h.writeErr(w, r, http.StatusUnauthorized, "UNAUTHORIZED", "Authentication required.", nil)
+			return
+		}
+
+		// The code arrives as a query parameter because this is a GET the
+		// browser downloads. It is single-use and five minutes old at
+		// most, so the usual "never put a secret in a URL" objection —
+		// that it persists in history and access logs — costs little here,
+		// and the alternative is a POST that cannot be a download link.
+		code := r.URL.Query().Get("code")
+		if err := fresh.VerifyFresh(r.Context(), principal.UserID, code); err != nil {
+			h.writeErr(w, r, http.StatusUnauthorized, "UNAUTHORIZED",
+				"That code is not valid. Request a new one.", nil)
+			return
+		}
+
+		export, err := exporter.Export(r.Context(), principal.UserID)
+		if err != nil {
+			h.handleError(w, r, err)
+			return
+		}
+
+		w.Header().Set("Content-Disposition", `attachment; filename="ayana-export.json"`)
+		writeJSON(w, http.StatusOK, export)
+	}
+}
+
+// FreshOTPChallenger sends a re-verification code. Declared here for the
+// same reason as FreshOTPVerifier.
+type FreshOTPChallenger interface {
+	Challenge(ctx context.Context, userID uuid.UUID, locale string) error
+}
+
+// Challenge sends a code to the account's own verified contact.
+//
+// Separate from /auth/otp/request because that one takes an identifier
+// from the caller. This one takes none — the destination comes from the
+// account, so a stolen access token cannot redirect the code.
+func (h *Handler) Challenge(challenger FreshOTPChallenger) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		principal, ok := auth.PrincipalFrom(r.Context())
+		if !ok {
+			h.writeErr(w, r, http.StatusUnauthorized, "UNAUTHORIZED", "Authentication required.", nil)
+			return
+		}
+
+		if err := challenger.Challenge(r.Context(), principal.UserID, r.Header.Get("Accept-Language")); err != nil {
+			h.handleError(w, r, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"sent": true})
+	}
+}

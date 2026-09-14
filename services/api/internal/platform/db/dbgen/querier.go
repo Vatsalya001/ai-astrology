@@ -52,6 +52,10 @@ type Querier interface {
 	LinkIdentity(ctx context.Context, arg LinkIdentityParams) (AuthIdentity, error)
 	ListActiveSessions(ctx context.Context, userID pgtype.UUID) ([]Session, error)
 	ListAuditLogsForUser(ctx context.Context, arg ListAuditLogsForUserParams) ([]AuditLog, error)
+	// Needed by the data export. Without it the export declares an
+	// auth_identities field and always returns [], which is worse than
+	// omitting it: it tells the user there are none.
+	ListIdentitiesForUser(ctx context.Context, userID pgtype.UUID) ([]AuthIdentity, error)
 	ListUsersPastDeletionGrace(ctx context.Context, deletionRequestedAt pgtype.Timestamptz) ([]User, error)
 	// ─── Deletion ────────────────────────────────────────────────────────
 	RequestUserDeletion(ctx context.Context, id pgtype.UUID) (User, error)

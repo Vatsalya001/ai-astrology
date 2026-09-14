@@ -322,3 +322,28 @@ func toPreferencesView(row dbgen.UserPreference) PreferencesView {
 		Theme:             row.Theme,
 	}
 }
+
+// VerifiedContact returns the channel and identifier a user can receive
+// re-verification codes on.
+//
+// Only verified contacts, and only the ones already on the account. A
+// caller cannot nominate a destination — that would let whoever holds a
+// stolen access token point the code at their own inbox.
+func (s *Service) VerifiedContact(ctx context.Context, userID uuid.UUID) (string, string, error) {
+	row, err := s.q.FindUserByID(ctx, toPgUUID(userID))
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return "", "", ErrNotFound
+		}
+		return "", "", fmt.Errorf("users: verified contact: %w", err)
+	}
+
+	// Email first: it is free to send and the channel built first.
+	if row.Email != nil && row.EmailVerified {
+		return "email", *row.Email, nil
+	}
+	if row.Phone != nil && row.PhoneVerified {
+		return "phone", *row.Phone, nil
+	}
+	return "", "", ErrNotFound
+}

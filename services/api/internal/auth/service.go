@@ -287,3 +287,63 @@ func NormaliseIdentifier(channel, identifier string) (string, error) {
 func (s *Service) RevokeByToken(ctx context.Context, presented string) error {
 	return s.rotator.RevokeByToken(ctx, presented)
 }
+
+// ContactLookup returns the verified contact a user can receive codes on.
+//
+// Declared by the consumer. Re-verification must send to the address
+// already on the account, never to one supplied in the request — that
+// would let whoever holds a stolen access token nominate their own
+// inbox and satisfy the check they were meant to fail.
+type ContactLookup interface {
+	VerifiedContact(ctx context.Context, userID uuid.UUID) (channel, identifier string, err error)
+}
+
+// FreshOTP re-verifies possession at the moment of a dangerous action.
+//
+// Account deletion and data export both use it. An access token lives
+// fifteen minutes and an unlocked laptop is enough to use one; that is
+// not the bar for erasing an account or downloading someone's entire
+// history.
+type FreshOTP struct {
+	otp      *OTPStore
+	channel  Channel
+	contacts ContactLookup
+	length   int
+}
+
+func NewFreshOTP(otp *OTPStore, ch Channel, contacts ContactLookup, length int) *FreshOTP {
+	return &FreshOTP{otp: otp, channel: ch, contacts: contacts, length: length}
+}
+
+// Challenge sends a code to the account's own verified contact.
+func (f *FreshOTP) Challenge(ctx context.Context, userID uuid.UUID, locale string) error {
+	channel, identifier, err := f.contacts.VerifiedContact(ctx, userID)
+	if err != nil {
+		return err
+	}
+
+	code, err := f.otp.Issue(ctx, freshScope(channel), identifier, f.length)
+	if err != nil {
+		return err
+	}
+	return f.channel.Send(ctx, identifier, code, locale)
+}
+
+// VerifyFresh consumes a challenge code.
+func (f *FreshOTP) VerifyFresh(ctx context.Context, userID uuid.UUID, code string) error {
+	if code == "" {
+		return ErrCodeNotFound
+	}
+	channel, identifier, err := f.contacts.VerifiedContact(ctx, userID)
+	if err != nil {
+		return err
+	}
+	return f.otp.Verify(ctx, freshScope(channel), identifier, code)
+}
+
+// freshScope namespaces re-verification codes away from login codes.
+//
+// Without it, a code requested to log in would also authorise account
+// deletion — and the two are not the same consent. It also means an
+// in-flight login code is not clobbered by a deletion challenge.
+func freshScope(channel string) string { return "fresh:" + channel }

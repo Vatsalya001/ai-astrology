@@ -151,6 +151,12 @@ func run() error {
 		OTPLength: cfg.OTPLength,
 	})
 
+	freshOTP := auth.NewFreshOTP(
+		auth.NewOTPStore(cache.Client, cfg.OTPTTL, cfg.OTPMaxAttempts),
+		channel, userService, cfg.OTPLength,
+	)
+	deleter := users.NewDeleter(queries, sessionDirectory, cfg.AccountDeleteGrace, log)
+
 	authHandler := auth.NewHandler(auth.HandlerConfig{
 		Service: authService,
 		Limiter: ratelimit.New(cache.Client),
@@ -175,6 +181,9 @@ func run() error {
 		AuthIssuer: issuer,
 		Users:      users.NewHandler(userService, sessionDirectory, httpapi.AuthErrorWriter),
 		Sessions:   sessionDirectory,
+		Deleter:    deleter,
+		Exporter:   users.NewExporter(queries),
+		FreshOTP:   freshOTP,
 	})
 
 	srv := &http.Server{

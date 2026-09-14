@@ -162,3 +162,9 @@ VALUES ($1, $2, $3, $4);
 
 -- name: ListAuditLogsForUser :many
 SELECT * FROM audit_logs WHERE user_id = $1 ORDER BY created_at DESC LIMIT $2;
+
+-- name: ListIdentitiesForUser :many
+-- Needed by the data export. Without it the export declares an
+-- auth_identities field and always returns [], which is worse than
+-- omitting it: it tells the user there are none.
+SELECT * FROM auth_identities WHERE user_id = $1 ORDER BY created_at;
