@@ -804,7 +804,7 @@ Deliberate deviations from the spec's literal wording, all documented:
 - [x] `ollama list` shows `llama3.2:3b`, `qwen2.5:7b`, `nomic-embed-text` — inference and 768-dim embeddings both verified
 - [x] `task verify` passes from a clean clone
 - [x] `task dev` starts web (3000), API (4000), astro (8100), ai (8200)
-- [x] Status page shows all six dependencies green
+- [x] Status page shows all six dependencies green, each with the configured LLM provider surfaced on the ai-service row (§12)
 - [x] `task migrate` applies; `vector` and `pg_trgm` extensions enabled
 - [x] `task sqlc` generates compiling Go from SQL
 - [x] `task contracts` is idempotent; CI diff check passes

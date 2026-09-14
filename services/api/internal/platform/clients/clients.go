@@ -82,6 +82,10 @@ func NewAstro(baseURL, token string, timeout time.Duration) (*Astro, error) {
 }
 
 // Health probes the service. The caller bounds the wait via ctx.
+//
+// No detail to report: astro-service is deterministic by construction,
+// with no provider to choose and nothing configurable that an operator
+// would need to see on a status page.
 func (a *Astro) Health(ctx context.Context) error {
 	resp, err := a.api.HealthHealthGetWithResponse(ctx)
 	if err != nil {
@@ -114,16 +118,41 @@ func NewAI(baseURL, token string, timeout time.Duration) (*AI, error) {
 	return &AI{api: api}, nil
 }
 
-func (a *AI) Health(ctx context.Context) error {
+// Health probes ai-service and reports which model backend it is wired
+// to.
+//
+// That pairing is deliberate. Invariant 3 — no real user data reaches a
+// free model tier — is enforced at ai-service startup by app/guards.py,
+// but an invariant enforced only at boot is invisible afterwards. The
+// status page is where an operator can see, without reading a config
+// file, that production is on a paid tier and development is not.
+//
+// ai-service does NOT probe the provider itself, by design: a health
+// check that calls a language model costs money on every poll and adds
+// seconds to an endpoint that should take milliseconds. So this reports
+// configuration, not reachability, and says so on the page.
+func (a *AI) Health(ctx context.Context) (string, error) {
 	resp, err := a.api.HealthHealthGetWithResponse(ctx)
 	if err != nil {
-		return fmt.Errorf("ai: %w", err)
+		return "", fmt.Errorf("ai: %w", err)
 	}
 	if resp.StatusCode() != http.StatusOK {
-		return fmt.Errorf("ai: unexpected status %d", resp.StatusCode())
+		return "", fmt.Errorf("ai: unexpected status %d", resp.StatusCode())
 	}
 	if resp.JSON200 == nil || resp.JSON200.Status != "ok" {
-		return fmt.Errorf("ai: reported unhealthy")
+		return "", fmt.Errorf("ai: reported unhealthy")
 	}
-	return nil
+	return providerDetail(resp.JSON200.Provider, resp.JSON200.ProviderTier), nil
+}
+
+// providerDetail renders the model backend for display.
+//
+// Empty rather than half-rendered if either field is missing: "openai-
+// compatible · " tells an operator less than showing nothing and is
+// easier to misread as a truncated value.
+func providerDetail(provider, tier string) string {
+	if provider == "" || tier == "" {
+		return ""
+	}
+	return provider + " · " + tier
 }

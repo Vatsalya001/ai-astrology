@@ -229,6 +229,11 @@ function Dependencies({ health }: { health: Fetched<HealthResponse> }) {
                         {info.detail}
                       </p>
                     )}
+                    {check.detail && (
+                      <p className="mt-2 font-mono text-xs text-ink-faint">
+                        {check.detail}
+                      </p>
+                    )}
                     {check.reason && (
                       <p className="mt-2 text-xs text-danger">
                         {PROBE_REASONS[check.reason]}{' '}

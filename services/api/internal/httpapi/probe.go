@@ -19,6 +19,16 @@ var probeClient = &http.Client{Timeout: 2 * time.Second}
 //
 // Used for MinIO and Mailpit, which expose plain liveness endpoints and
 // need no client library just to be pinged.
+// plain adapts a probe that has no configuration to report.
+//
+// Most dependencies have nothing to say beyond up or down. Adapting them
+// here keeps their own signatures free of a detail return they would
+// always leave empty — Ping belongs to the database pool, not to this
+// endpoint's rendering needs.
+func plain(f func(context.Context) error) func(context.Context) (string, error) {
+	return func(ctx context.Context) (string, error) { return "", f(ctx) }
+}
+
 func httpProbe(url string) func(context.Context) error {
 	return func(ctx context.Context) error {
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)

@@ -28,6 +28,15 @@ export interface Check {
   status: CheckStatus
   latency_ms: number
   reason?: ProbeReason
+  /**
+   * Operator-facing configuration the dependency reports about itself —
+   * currently which model backend ai-service is wired to.
+   *
+   * Distinct from `reason`: this is present when the check *succeeds*,
+   * and names a provider and tier rather than describing a failure. It
+   * never carries a URL, a host or a key.
+   */
+  detail?: string
 }
 
 /**

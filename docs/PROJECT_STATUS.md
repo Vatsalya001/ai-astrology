@@ -1,6 +1,6 @@
 # Project Status
 
-**Updated:** 2026-09-13
+**Updated:** 2026-09-14
 **Current phase:** 0 — Foundation
 **Gate:** ✅ **CLOSED — 20 of 20**
 **Repo:** https://github.com/Vatsalya001/ai-astrology (private)
@@ -234,6 +234,49 @@ is that an uptime check asserting on status codes calls the page healthy, so
 **assert on content**. `ayana smoke` does, and was confirmed to fail and exit 1
 while the page was erroring. `/health` still returns a truthful 503 for backend
 problems; it is only the rendered page that cannot signal this way.
+
+---
+
+## Spec §12 + Definition-of-Done audit (2026-09-14)
+
+A sweep of the parts of §12 and the Definition of Done that had never been
+executed, rather than read. Four findings, all closed.
+
+**Two accessibility defects, found by computing contrast for the first time.**
+`packages/ui` declared `MIN_CONTRAST_RATIO = 4.5` with a comment saying it was
+recorded as a value "so a future token change can be checked against it
+programmatically" — and nothing ever checked it.
+
+| Token | Was | Now |
+|---|---|---|
+| `ink.faint` | `#5E6785` — 3.36:1 on base, 3.03:1 on surface | `#858DA8` — 5.71 / 5.15 / 4.55 |
+| `accent.soft` | `#8B6FD8` — 4.48:1 as badge text, 3.55:1 on a card | `#9D85DE` — 5.71 / 5.12 / 4.53 |
+
+Neither is decoration: `ink.faint` carries the footer's medical disclaimer and
+the hero's "sign-up opens in Phase 1"; `accent.soft` is the badge text. Hue and
+saturation were held constant, only lightness raised.
+
+Now guarded three ways — 69 unit tests over the tokens (including badge
+backgrounds *composited* at 10% opacity, which is where `accent.soft` failed
+hardest), and an axe scan of every page in Playwright. Verified negatively:
+restoring the old `ink.faint` makes axe report `color-contrast` on both pages
+that use it, and leaves the 404 passing, which is correct — it does not use it.
+
+**The design tokens were defined twice.** §12 requires them "defined once" in
+`packages/ui`; in practice `apps/web/tailwind.config.ts` restated every hex
+with a comment reading "Change both together". They had already drifted —
+`accent.foreground` existed in one and not the other. `packages/ui` is now the
+single source, the shadcn semantic layer is *derived* from the palette rather
+than retyped, and Tailwind imports both.
+
+**The configured LLM provider was not shown.** §12 lists it among the things
+the status page must report individually. `ai-service` already returns
+`provider` and `provider_tier`; the Go health fan-out discarded them. It now
+carries them through as a `detail` on the ai-service row — no new probe and no
+model call, preserving ai-service's deliberate choice not to bill itself on
+every health poll. This matters because invariant 3 is enforced at startup and
+otherwise invisible afterwards: the status page is where an operator sees that
+production is on a paid tier and development is not.
 
 ---
 

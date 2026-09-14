@@ -90,6 +90,13 @@ Open <http://localhost:3000>.
 
 ## 4. Landing page — what to look for
 
+**Contrast.** Every text token is asserted against every surface it renders on
+by `npm run test --workspace=web`, and axe scans all three pages in
+`tests/e2e/a11y.spec.ts`. Both were added after computing the ratios for the
+first time found `ink.faint` at 3.36:1 and `accent.soft` at 3.55:1, against
+the 4.5:1 this project commits to. If you change a colour in
+`packages/ui/src/index.ts`, those tests are what tell you whether you may.
+
 **Colour.** Background is midnight navy `#0B1026`. If any surface is grey or
 white, a Tailwind token failed to resolve — Tailwind drops unknown colour
 classes silently, so the build will still have passed. Confirm hard:
@@ -133,7 +140,10 @@ roadmap wraps to three rows, nothing overflows horizontally.
 Open <http://localhost:3000/status>.
 
 **Expect** a green "All systems operational" banner and six dependency rows,
-each with its own dot, latency and description. `astro-service`, `ai-service`,
+each with its own dot, latency and description. The ai-service row also shows
+which model backend is configured — `openai-compatible · local` in development,
+a paid provider in production. That line is the visible surface of invariant 3,
+which is otherwise only enforced at startup and invisible thereafter. `astro-service`, `ai-service`,
 Mail and Object storage carry a `non-critical` badge; Postgres and Redis do not.
 
 This page is `force-dynamic` — it must never be cached. Reload and watch the

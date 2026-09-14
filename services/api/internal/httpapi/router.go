@@ -119,9 +119,11 @@ func NewRouter(d Deps) http.Handler {
 // down. Marking them non-critical here encodes that design decision.
 func probers(d Deps) []Prober {
 	list := []Prober{
-		{Name: "postgres", Critical: true, Probe: d.DB.Ping},
-		{Name: "redis", Critical: true, Probe: d.Redis.Ping},
-		{Name: "astro", Critical: false, Probe: d.Astro.Health},
+		{Name: "postgres", Critical: true, Probe: plain(d.DB.Ping)},
+		{Name: "redis", Critical: true, Probe: plain(d.Redis.Ping)},
+		{Name: "astro", Critical: false, Probe: plain(d.Astro.Health)},
+		// The only prober reporting a detail: which model backend is
+		// configured. See clients.AI.Health for why that belongs here.
 		{Name: "ai", Critical: false, Probe: d.AI.Health},
 	}
 
@@ -130,10 +132,10 @@ func probers(d Deps) []Prober {
 	// and mail from Phase 1 (OTP), and until then their absence should
 	// not colour the service's health.
 	if url := d.Config.StorageHealthURL; url != "" {
-		list = append(list, Prober{Name: "storage", Critical: false, Probe: httpProbe(url)})
+		list = append(list, Prober{Name: "storage", Critical: false, Probe: plain(httpProbe(url))})
 	}
 	if url := d.Config.MailHealthURL; url != "" {
-		list = append(list, Prober{Name: "mail", Critical: false, Probe: httpProbe(url)})
+		list = append(list, Prober{Name: "mail", Critical: false, Probe: plain(httpProbe(url))})
 	}
 
 	return list
