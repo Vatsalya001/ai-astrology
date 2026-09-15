@@ -17,6 +17,10 @@ export default defineConfig({
   testDir: './tests/e2e',
   fullyParallel: true,
 
+  // Clears rate-limit windows so a run does not inherit the previous
+  // one's. See the file for why this resets state rather than limits.
+  globalSetup: './tests/e2e/global-setup.ts',
+
   // A test marked .only is almost always a debugging leftover. Failing
   // the build is better than silently running one test in CI.
   forbidOnly: !!process.env.CI,

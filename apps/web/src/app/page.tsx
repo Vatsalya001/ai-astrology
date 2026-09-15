@@ -33,8 +33,8 @@ function SiteHeader() {
           >
             System status
           </Link>
-          <Button variant="secondary" size="sm" disabled title="Arrives in Phase 1">
-            Sign in
+          <Button variant="secondary" size="sm" asChild>
+            <Link href="/auth">Sign in</Link>
           </Button>
         </nav>
       </div>
@@ -83,12 +83,8 @@ function Hero() {
             className="mt-10 flex animate-fade-up flex-col items-center justify-center gap-3 sm:flex-row"
             style={{ animationDelay: '240ms' }}
           >
-            <Button
-              size="lg"
-              disabled
-              title="Birth chart onboarding arrives in Phase 2"
-            >
-              Get your free Kundli
+            <Button size="lg" asChild>
+              <Link href="/auth">Get your free Kundli</Link>
             </Button>
             <Button size="lg" variant="secondary" asChild>
               <Link href="/status">View system status</Link>
@@ -99,7 +95,7 @@ function Hero() {
             className="mt-5 animate-fade-up text-xs text-ink-faint"
             style={{ animationDelay: '320ms' }}
           >
-            Under active construction. Sign-up opens in Phase 1.
+            Free to start. No password to remember.
           </p>
         </div>
       </div>

@@ -21,6 +21,11 @@ const PAGES = [
   { name: 'landing', path: '/' },
   { name: 'status', path: '/status' },
   { name: '404', path: '/no-such-page' },
+  // Phase 1. /auth/verify and /onboarding both require state to reach,
+  // so they are covered from inside the flow in auth-a11y.spec.ts.
+  { name: 'auth', path: '/auth' },
+  { name: 'terms', path: '/terms' },
+  { name: 'privacy', path: '/privacy' },
 ]
 
 for (const page_ of PAGES) {
