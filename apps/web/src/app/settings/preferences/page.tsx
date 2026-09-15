@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react'
 
+import { LoadError } from '@/components/LoadError'
 import { Skeleton } from '@/components/ui/skeleton'
 import { track } from '@/lib/analytics'
 import { LOCALE_NAMES, type Locale } from '@/lib/i18n/dictionaries'
@@ -19,11 +20,13 @@ const OPTIONS = {
 export default function PreferencesPage() {
   const { t, setLocale } = useLocale()
   const [prefs, setPrefs] = useState<Preferences | null>(null)
-  const [state, setState] = useState<'loading' | 'ready'>('loading')
+  const [state, setState] = useState<'loading' | 'ready' | 'error'>('loading')
   const [saving, setSaving] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   const onUnauthenticated = useRequireAuth()
+  // Bumped by Retry; the effect depends on it, so the fetch re-runs.
+  const [attempt, setAttempt] = useState(0)
 
   useEffect(() => {
     usersApi
@@ -37,8 +40,13 @@ export default function PreferencesPage() {
         }
         setState('ready')
       })
-      .catch(onUnauthenticated)
-  }, [onUnauthenticated, setLocale])
+      .catch((err) => {
+        // Only a real "signed out" redirects. Anything else — a dropped
+        // connection, a 500, a deploy in progress — gets an error state
+        // with a retry, because none of those say the session is gone.
+        if (!onUnauthenticated(err)) setState('error')
+      })
+  }, [onUnauthenticated, setLocale, attempt])
 
   async function update(field: keyof Preferences, value: string) {
     setSaving(field)
@@ -65,6 +73,10 @@ export default function PreferencesPage() {
     } finally {
       setSaving(null)
     }
+  }
+
+  if (state === 'error') {
+    return <LoadError onRetry={() => setAttempt((n) => n + 1)} />
   }
 
   if (state === 'loading' || !prefs) {

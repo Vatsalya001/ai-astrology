@@ -5,6 +5,7 @@ import { useEffect, useState } from 'react'
 import { Panel } from '@/components/ui'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { LoadError } from '@/components/LoadError'
 import { Skeleton } from '@/components/ui/skeleton'
 import { track } from '@/lib/analytics'
 import { useLocale } from '@/lib/i18n/context'
@@ -24,6 +25,8 @@ export default function ProfileSettingsPage() {
   const [error, setError] = useState<string | null>(null)
 
   const onUnauthenticated = useRequireAuth()
+  // Bumped by Retry; the effect depends on it, so the fetch re-runs.
+  const [attempt, setAttempt] = useState(0)
 
   useEffect(() => {
     usersApi
@@ -34,8 +37,13 @@ export default function ProfileSettingsPage() {
         setGender(p.gender ?? '')
         setState('ready')
       })
-      .catch(onUnauthenticated)
-  }, [onUnauthenticated])
+      .catch((err) => {
+        // Only a real "signed out" redirects. Anything else — a dropped
+        // connection, a 500, a deploy in progress — gets an error state
+        // with a retry, because none of those say the session is gone.
+        if (!onUnauthenticated(err)) setState('error')
+      })
+  }, [onUnauthenticated, attempt])
 
   async function save(e: React.FormEvent) {
     e.preventDefault()
@@ -58,6 +66,10 @@ export default function ProfileSettingsPage() {
     } finally {
       setSaving(false)
     }
+  }
+
+  if (state === 'error') {
+    return <LoadError onRetry={() => setAttempt((n) => n + 1)} />
   }
 
   if (state === 'loading') {
