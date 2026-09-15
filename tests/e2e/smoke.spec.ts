@@ -26,11 +26,13 @@ test.describe('landing page', () => {
     await expect(page).toHaveTitle(/Ayana/)
   })
 
-  test('pre-launch actions are disabled, not broken links', async ({ page }) => {
+  test('the sign-in path is live', async ({ page }) => {
     await page.goto('/')
-    // Phase 1 enables sign-in; until then it must be visibly unavailable
-    // rather than a link to a 404.
-    await expect(page.getByRole('button', { name: /sign in/i })).toBeDisabled()
+    // Phase 0 shipped these disabled. Phase 1 makes them work, and this
+    // test changed with the behaviour rather than being deleted — a
+    // removed test is indistinguishable from a forgotten one.
+    await page.getByRole('link', { name: /sign in/i }).click()
+    await expect(page).toHaveURL(/\/auth$/)
   })
 
   test('shadcn components resolve the design tokens, not a stray palette', async ({
@@ -43,7 +45,7 @@ test.describe('landing page', () => {
     // is dropped silently: `tsc` sees a valid string, the build succeeds,
     // and the component renders with no background at all. Only a
     // computed style says which actually happened.
-    const cta = page.getByRole('button', { name: /get your free kundli/i })
+    const cta = page.getByRole('link', { name: /get your free kundli/i })
     await expect(cta).toBeVisible()
 
     const styles = await cta.evaluate((el) => {

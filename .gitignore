@@ -74,3 +74,4 @@ Thumbs.db
 # `**/` is required: a pattern with a mid-path slash is anchored to the
 # repo root, so a bare `.adlc/session/` misses services/api/.adlc/session/.
 **/.adlc/session/
+/.run/e2e-log-offset
