@@ -1,7 +1,7 @@
 import AxeBuilder from '@axe-core/playwright'
 import { expect, test } from '@playwright/test'
 
-import { codeFor, uniqueEmail } from './otp-log'
+import { uniqueEmail, watchOTP } from './otp-log'
 
 /**
  * Accessibility for the screens that cannot be reached by URL alone.
@@ -27,12 +27,13 @@ async function scan(page: Parameters<typeof AxeBuilder>[0]['page'], label: strin
 }
 
 test('the whole signup flow is free of detectable violations', async ({ page }) => {
-  const email = uniqueEmail('e')
+  const email = uniqueEmail('e') // distinct first letter — see otp-log.ts
 
   await page.goto('/auth')
   await page.waitForLoadState('networkidle')
   await scan(page, '/auth')
 
+  const otp = watchOTP(email)
   await page.getByLabel(/email address/i).fill(email)
   await page.getByRole('button', { name: /^continue$/i }).click()
   await expect(page).toHaveURL(/\/auth\/verify/)
@@ -41,7 +42,7 @@ test('the whole signup flow is free of detectable violations', async ({ page }) 
 
   // The error state too — a message announced badly is worse than no
   // message, and this is the state users actually hit.
-  const real = await codeFor(email)
+  const real = await otp.next()
   const wrong = real[0] === '0' ? '1' + real.slice(1) : '0' + real.slice(1)
   await page.locator('input[autocomplete="one-time-code"]').fill(wrong)
   await expect(page.getByRole('main').getByRole('alert')).toBeVisible()

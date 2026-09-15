@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test'
 
-import { codeFor, uniqueEmail } from './otp-log'
+import { uniqueEmail, watchOTP } from './otp-log'
 
 /**
  * The §10 auth flows, driven through a real browser against the real
@@ -15,12 +15,13 @@ import { codeFor, uniqueEmail } from './otp-log'
 
 test.describe('sign up', () => {
   test('landing → auth → code → onboarding → home', async ({ page }) => {
-    const email = uniqueEmail('a') // distinct first letter: see otp-log.ts
+    const email = uniqueEmail('a') // distinct first letter — see otp-log.ts
 
     await page.goto('/')
     await page.getByRole('link', { name: /get your free kundli/i }).click()
     await expect(page).toHaveURL(/\/auth$/)
 
+    const otp = watchOTP(email)
     await page.getByLabel(/email address/i).fill(email)
     await page.getByRole('button', { name: /^continue$/i }).click()
     await expect(page).toHaveURL(/\/auth\/verify/)
@@ -30,7 +31,7 @@ test.describe('sign up', () => {
     await expect(page.getByText(email)).toBeVisible()
 
     // Pasting the whole code must fill all six boxes and submit itself.
-    await page.locator('input[autocomplete="one-time-code"]').fill(await codeFor(email))
+    await page.locator('input[autocomplete="one-time-code"]').fill(await otp.next())
 
     // A new account goes to onboarding, not straight home.
     await expect(page).toHaveURL(/\/onboarding\/name/)
@@ -43,14 +44,14 @@ test.describe('sign up', () => {
   })
 
   test('a returning user skips onboarding', async ({ page }) => {
-    const email = uniqueEmail('b')
+    const email = uniqueEmail('b') // distinct first letter — see otp-log.ts
 
     // First pass: create the account.
     await page.goto('/auth')
+    const first = watchOTP(email)
     await page.getByLabel(/email address/i).fill(email)
     await page.getByRole('button', { name: /^continue$/i }).click()
-    const firstCode = await codeFor(email)
-    await page.locator('input[autocomplete="one-time-code"]').fill(firstCode)
+    await page.locator('input[autocomplete="one-time-code"]').fill(await first.next())
     await expect(page).toHaveURL(/\/onboarding\/name/)
 
     await page.getByLabel(/your name/i).fill('Returning')
@@ -64,14 +65,11 @@ test.describe('sign up', () => {
     await expect(page).toHaveURL('/')
 
     await page.goto('/auth')
+    // A second watcher: this sign-in's code, not the first one's.
+    const second = watchOTP(email)
     await page.getByLabel(/email address/i).fill(email)
     await page.getByRole('button', { name: /^continue$/i }).click()
-    // Explicitly a DIFFERENT code from the first sign-in — otherwise a
-    // read that lands before the second request is logged silently
-    // reuses the spent one.
-    await page
-      .locator('input[autocomplete="one-time-code"]')
-      .fill(await codeFor(email, { notEqualTo: firstCode }))
+    await page.locator('input[autocomplete="one-time-code"]').fill(await second.next())
 
     await expect(page).toHaveURL(/\/home$/)
   })
@@ -79,14 +77,15 @@ test.describe('sign up', () => {
 
 test.describe('the verify screen', () => {
   test('rejects a wrong code without leaving the page', async ({ page }) => {
-    const email = uniqueEmail('c')
+    const email = uniqueEmail('c') // distinct first letter — see otp-log.ts
 
     await page.goto('/auth')
+    const otp = watchOTP(email)
     await page.getByLabel(/email address/i).fill(email)
     await page.getByRole('button', { name: /^continue$/i }).click()
     await expect(page).toHaveURL(/\/auth\/verify/)
 
-    const real = await codeFor(email)
+    const real = await otp.next()
     const wrong = real[0] === '0' ? '1' + real.slice(1) : '0' + real.slice(1)
 
     await page.locator('input[autocomplete="one-time-code"]').fill(wrong)
