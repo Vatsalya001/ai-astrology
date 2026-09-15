@@ -98,7 +98,7 @@ func (r *Rotator) nowFunc() time.Time {
 
 // Issue creates the first session of a new family.
 //
-// Called after a successful OTP or OAuth login — the point at which a
+// Called after a successful OTP login — the point at which a
 // lineage begins.
 func (r *Rotator) Issue(ctx context.Context, userID uuid.UUID, role, userAgent string, ipHash []byte) (TokenPair, error) {
 	familyID, err := uuid.NewRandom()

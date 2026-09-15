@@ -245,31 +245,6 @@ func TestIPHashSaltIsRequired(t *testing.T) {
 	}
 }
 
-// Absent Google credentials are a supported state, not a failure: the
-// phase ships the flow against a stub and the route reports "not
-// configured". Booting only with credentials would block every other
-// auth path on an unrelated account.
-func TestOAuthConfiguredReportsCredentialPresence(t *testing.T) {
-	setEnv(t, validEnv())
-	cfg, err := Load()
-	if err != nil {
-		t.Fatalf("Load(): %v", err)
-	}
-	if cfg.OAuthConfigured() {
-		t.Error("OAuthConfigured() is true with no credentials set")
-	}
-
-	t.Setenv("GOOGLE_CLIENT_ID", "id")
-	t.Setenv("GOOGLE_CLIENT_SECRET", "secret")
-	cfg, err = Load()
-	if err != nil {
-		t.Fatalf("Load() with credentials: %v", err)
-	}
-	if !cfg.OAuthConfigured() {
-		t.Error("OAuthConfigured() is false with both credentials set")
-	}
-}
-
 func loadExpectingFailure(t *testing.T) error {
 	t.Helper()
 	_, err := Load()

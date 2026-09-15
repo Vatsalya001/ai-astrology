@@ -86,38 +86,7 @@ async function post<T>(path: string, body: unknown): Promise<T> {
   return payload as T
 }
 
-export interface Providers {
-  google: boolean
-}
-
 export const authApi = {
-  /**
-   * Which social sign-in buttons to render.
-   *
-   * Asked rather than read from this app's own environment, so there is
-   * one source of truth. Two copies of "is Google configured" drift, and
-   * the failure mode is a button that navigates to a JSON error page.
-   */
-  providers: async (): Promise<Providers> => {
-    try {
-      const res = await fetch(`${API_URL}/api/v1/auth/providers`, {
-        headers: { Accept: 'application/json' },
-      })
-      if (!res.ok) return { google: false }
-      return (await res.json()) as Providers
-    } catch {
-      // Fail closed. A button that cannot work is worse than no button,
-      // and email sign-in on this page is unaffected.
-      return { google: false }
-    }
-  },
-
-  /** A top-level navigation, not a fetch — the browser must follow the
-   *  redirect to Google's own origin, which CORS would never allow. */
-  oauthURL: (returnTo?: string): string =>
-    `${API_URL}/api/v1/auth/oauth/google` +
-    (returnTo ? `?return_to=${encodeURIComponent(returnTo)}` : ''),
-
   requestOTP: (channel: Channel, identifier: string, locale: string) =>
     post<{ sent: boolean; expires_in_seconds: number }>('/auth/otp/request', {
       channel,

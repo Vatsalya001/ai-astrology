@@ -97,12 +97,6 @@ type Config struct {
 	OTPTTL         time.Duration `env:"OTP_TTL"          envDefault:"5m" validate:"required"`
 	OTPMaxAttempts int           `env:"OTP_MAX_ATTEMPTS" envDefault:"5"  validate:"required,min=1,max=20"`
 
-	// Google OAuth. Empty is legitimate — the routes report "not
-	// configured" rather than failing to boot, so the rest of auth works
-	// without credentials. See docs/adlc/phase-01-plan.md.
-	GoogleClientID     string `env:"GOOGLE_CLIENT_ID"     envDefault:""`
-	GoogleClientSecret string `env:"GOOGLE_CLIENT_SECRET" envDefault:""`
-
 	AccountDeleteGrace time.Duration `env:"ACCOUNT_DELETE_GRACE" envDefault:"168h" validate:"required"`
 
 	// ─── Feature flags ──────────────────────────────────────────
@@ -168,13 +162,4 @@ func (c *Config) checkProductionInvariants() error {
 	}
 
 	return nil
-}
-
-// OAuthConfigured reports whether Google credentials are present.
-//
-// Absence is a supported state, not an error: the phase ships the full
-// flow and its tests against a stub, and the route returns a clear
-// "not configured" rather than a confusing failure. See the plan.
-func (c *Config) OAuthConfigured() bool {
-	return c.GoogleClientID != "" && c.GoogleClientSecret != ""
 }
