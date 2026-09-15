@@ -35,6 +35,9 @@ type Principal struct {
 	// TokenID is the jti, so a specific token can be denied before it
 	// expires (Phase 6).
 	TokenID string
+	// FamilyID is the device this token belongs to, so the sessions
+	// screen can mark one entry as the current one.
+	FamilyID uuid.UUID
 }
 
 // PrincipalFrom returns the authenticated caller, if any.
@@ -88,10 +91,16 @@ func Authenticate(issuer *Issuer, writeErr ErrorWriter) func(http.Handler) http.
 				return
 			}
 
+			// A malformed family is not fatal: it only costs the "this
+			// device" label, and refusing the request over it would sign
+			// people out for a cosmetic field.
+			familyID, _ := uuid.Parse(claims.Fam)
+
 			ctx := context.WithValue(r.Context(), principalKey, Principal{
-				UserID:  userID,
-				Role:    claims.Role,
-				TokenID: claims.ID,
+				UserID:   userID,
+				Role:     claims.Role,
+				TokenID:  claims.ID,
+				FamilyID: familyID,
 			})
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})

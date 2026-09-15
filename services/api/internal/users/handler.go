@@ -167,6 +167,13 @@ func (h *Handler) ListSessions(w http.ResponseWriter, r *http.Request) {
 		h.handleError(w, r, err)
 		return
 	}
+
+	// Mark the device making this request, so the UI can label it rather
+	// than inviting someone to revoke their own session and wonder why
+	// they were signed out.
+	for i := range sessions {
+		sessions[i].Current = sessions[i].ID == principal.FamilyID
+	}
 	// Always an array, never null: a client iterating the response should
 	// not have to special-case "no other devices".
 	if sessions == nil {

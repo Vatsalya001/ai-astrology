@@ -2,6 +2,8 @@ import type { Metadata, Viewport } from 'next'
 import { Inter, JetBrains_Mono, Cormorant_Garamond } from 'next/font/google'
 import '@/styles/globals.css'
 
+import { LocaleProvider } from '@/lib/i18n/context'
+
 /**
  * next/font self-hosts these at build time, so there is no request to
  * Google at runtime and no layout shift when they load.
@@ -49,14 +51,19 @@ export default function RootLayout({
     >
       <body className="min-h-dvh bg-base text-ink">
         {/* Skip link: the first thing a keyboard user hits, letting them
-            jump past the header instead of tabbing through it. */}
+            jump past the header instead of tabbing through it.
+
+            Deliberately NOT inside LocaleProvider and deliberately not
+            translated. It must render in the server HTML so it works
+            before hydration — a keyboard user who tabs immediately on a
+            slow connection is exactly who it is for. */}
         <a
           href="#main"
           className="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-50 focus:rounded-lg focus:bg-gold focus:px-4 focus:py-2 focus:text-base"
         >
           Skip to content
         </a>
-        {children}
+        <LocaleProvider>{children}</LocaleProvider>
       </body>
     </html>
   )

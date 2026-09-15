@@ -50,6 +50,20 @@ type Querier interface {
 	// row, so the caller cannot tell "already linked" from "insert failed"
 	// without a second query.
 	LinkIdentity(ctx context.Context, arg LinkIdentityParams) (AuthIdentity, error)
+	// One row per DEVICE, not per session.
+	//
+	// A device is a family: every refresh issues a new session row sharing
+	// the family_id of the token it replaced, so a single browser open for an
+	// hour accumulates a dozen rows. Listing those as "devices" is both
+	// wrong and alarming — the user sees twelve unknown sign-ins — and
+	// revoking one of them kills a spent link in the chain rather than the
+	// device.
+	//
+	// DISTINCT ON takes the newest row per family, which carries the most
+	// recent user agent and expiry.
+	ListActiveDevices(ctx context.Context, userID pgtype.UUID) ([]Session, error)
+	// Every row, including superseded links in a rotation chain. Used by the
+	// data export, where completeness is the point.
 	ListActiveSessions(ctx context.Context, userID pgtype.UUID) ([]Session, error)
 	ListAuditLogsForUser(ctx context.Context, arg ListAuditLogsForUserParams) ([]AuditLog, error)
 	// Needed by the data export. Without it the export declares an
@@ -60,6 +74,12 @@ type Querier interface {
 	// ─── Deletion ────────────────────────────────────────────────────────
 	RequestUserDeletion(ctx context.Context, id pgtype.UUID) (User, error)
 	RevokeAllUserSessions(ctx context.Context, userID pgtype.UUID) error
+	// Signs one device out by ending its whole lineage.
+	//
+	// Scoped by user_id, so a caller cannot revoke another account's device
+	// even with a valid family id — the row count is what lets the handler
+	// answer 404 rather than a misleading 204.
+	RevokeDeviceFamily(ctx context.Context, arg RevokeDeviceFamilyParams) (int64, error)
 	// :execrows, not :exec. An :exec cannot distinguish "revoked it" from
 	// "matched nothing", so revoking someone else's session — which the
 	// user_id predicate correctly refuses — returned 204 and told the caller

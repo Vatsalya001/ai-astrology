@@ -58,6 +58,19 @@ export interface EventMap {
   otp_verified: { channel: 'phone' | 'email'; attempts: number }
   signup_completed: { channel: string; user_id: string }
   login_completed: { channel: string; user_id: string }
+  logout_completed: { user_id: string; scope: 'device' | 'all' }
+
+  // Phase 1 — account management
+  //
+  // `field` names WHICH preference changed, never its value: a language
+  // or a theme is harmless, but the habit of sending values is how the
+  // next field added here leaks something that is not.
+  preferences_updated: { user_id: string; field: string }
+  profile_updated: { user_id: string; field: string }
+  session_revoked: { user_id: string }
+  data_exported: { user_id: string }
+  account_deletion_requested: { user_id: string }
+  account_deletion_cancelled: { user_id: string }
   account_deleted: { user_id: string }
 
   // Phase 2 — birth profiles

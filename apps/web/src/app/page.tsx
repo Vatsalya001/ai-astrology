@@ -3,6 +3,18 @@ import { Starfield } from '@/components/Starfield'
 import { Wordmark } from '@/components/Logo'
 import { Badge, Panel, SectionLabel } from '@/components/ui'
 import { Button } from '@/components/ui/button'
+import { getDictionary } from '@/lib/i18n/dictionaries'
+
+/**
+ * Reads the dictionary directly rather than through `useLocale`.
+ *
+ * This is a Server Component and `useLocale` is a client hook — making
+ * the whole marketing page a client component to reach it would trade
+ * static rendering for a language switch nobody uses before signing in.
+ * Server-rendered English is the right default here; the app switches
+ * language once there is an account to read the preference from.
+ */
+const t = getDictionary('en')
 
 export default function LandingPage() {
   return (
@@ -31,7 +43,7 @@ function SiteHeader() {
             href="/status"
             className="rounded-lg px-3 py-2 text-sm text-ink-muted transition-colors hover:text-ink"
           >
-            System status
+            {t.landing.systemStatus}
           </Link>
           <Button variant="secondary" size="sm" asChild>
             <Link href="/auth">Sign in</Link>
@@ -57,16 +69,16 @@ function Hero() {
               <span className="absolute inline-flex h-full w-full rounded-full bg-accent-soft opacity-75" />
               <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-accent-soft" />
             </span>
-            Phase 0 · Foundation
+            {t.landing.phase}
           </Badge>
 
           <h1
             className="mt-8 animate-fade-up text-balance font-serif text-5xl leading-[1.08] tracking-tight sm:text-6xl md:text-7xl"
             style={{ animationDelay: '80ms' }}
           >
-            The AI doesn&apos;t just know astrology.
+            {t.landing.headlineA}
             <span className="mt-2 block bg-gradient-to-r from-gold-soft via-gold to-gold-dim bg-clip-text text-transparent">
-              It knows your astrology.
+              {t.landing.headlineB}
             </span>
           </h1>
 
@@ -74,9 +86,7 @@ function Hero() {
             className="mx-auto mt-7 max-w-2xl animate-fade-up text-balance text-lg leading-relaxed text-ink-muted"
             style={{ animationDelay: '160ms' }}
           >
-            A personal astrologer that understands your birth chart, your life
-            context and everything you&apos;ve discussed before — and connects
-            you to a human expert when you need one.
+            {t.landing.lede}
           </p>
 
           <div
@@ -84,10 +94,10 @@ function Hero() {
             style={{ animationDelay: '240ms' }}
           >
             <Button size="lg" asChild>
-              <Link href="/auth">Get your free Kundli</Link>
+              <Link href="/auth">{t.landing.ctaPrimary}</Link>
             </Button>
             <Button size="lg" variant="secondary" asChild>
-              <Link href="/status">View system status</Link>
+              <Link href="/status">{t.landing.ctaSecondary}</Link>
             </Button>
           </div>
 
@@ -95,7 +105,7 @@ function Hero() {
             className="mt-5 animate-fade-up text-xs text-ink-faint"
             style={{ animationDelay: '320ms' }}
           >
-            Free to start. No password to remember.
+            {t.landing.ctaNote}
           </p>
         </div>
       </div>
@@ -136,9 +146,9 @@ function HowItWorks() {
   return (
     <section className="mx-auto max-w-6xl px-6 py-24">
       <div className="mb-14 text-center">
-        <SectionLabel>How it works</SectionLabel>
+        <SectionLabel>{t.landing.howLabel}</SectionLabel>
         <h2 className="font-serif text-4xl tracking-tight">
-          From birth details to real guidance
+          {t.landing.howTitle}
         </h2>
       </div>
 
@@ -186,9 +196,9 @@ function Principles() {
     <section className="border-y border-border/60 bg-surface/25">
       <div className="mx-auto max-w-6xl px-6 py-24">
         <div className="mb-14 text-center">
-          <SectionLabel>What we commit to</SectionLabel>
+          <SectionLabel>{t.landing.commitLabel}</SectionLabel>
           <h2 className="font-serif text-4xl tracking-tight">
-            Built to be trusted
+            {t.landing.commitTitle}
           </h2>
         </div>
 
@@ -211,9 +221,9 @@ function Principles() {
 }
 
 const ROADMAP = [
-  { phase: 'Phase 0', name: 'Foundation', state: 'active' },
-  { phase: 'Phase 1', name: 'Accounts', state: 'next' },
-  { phase: 'Phase 2', name: 'Birth charts', state: 'planned' },
+  { phase: 'Phase 0', name: 'Foundation', state: 'done' },
+  { phase: 'Phase 1', name: 'Accounts', state: 'active' },
+  { phase: 'Phase 2', name: 'Birth charts', state: 'next' },
   { phase: 'Phase 3', name: 'Kundli UI', state: 'planned' },
   { phase: 'Phase 4', name: 'AI core', state: 'planned' },
   { phase: 'Phase 5', name: 'Chat', state: 'planned' },
@@ -224,11 +234,10 @@ function BuildStatus() {
   return (
     <section className="mx-auto max-w-6xl px-6 py-24">
       <div className="mb-12 text-center">
-        <SectionLabel>Progress</SectionLabel>
-        <h2 className="font-serif text-4xl tracking-tight">Where we are</h2>
+        <SectionLabel>{t.landing.progressLabel}</SectionLabel>
+        <h2 className="font-serif text-4xl tracking-tight">{t.landing.progressTitle}</h2>
         <p className="mx-auto mt-3 max-w-xl text-sm text-ink-muted">
-          Built one phase at a time. Each phase has a gate that must pass
-          before the next one starts.
+          {t.landing.progressBody}
         </p>
       </div>
 
@@ -240,15 +249,21 @@ function BuildStatus() {
                 'rounded-xl border px-4 py-3 text-center transition-colors',
                 r.state === 'active'
                   ? 'border-gold/50 bg-gold/10'
-                  : r.state === 'next'
-                    ? 'border-accent/35 bg-accent/[0.06]'
-                    : 'border-border bg-surface/45',
+                  : r.state === 'done'
+                    ? 'border-ok/35 bg-ok/[0.06]'
+                    : r.state === 'next'
+                      ? 'border-accent/35 bg-accent/[0.06]'
+                      : 'border-border bg-surface/45',
               ].join(' ')}
             >
               <p
                 className={[
                   'font-mono text-[11px] uppercase tracking-wider',
-                  r.state === 'active' ? 'text-gold' : 'text-ink-faint',
+                  r.state === 'active'
+                    ? 'text-gold'
+                    : r.state === 'done'
+                      ? 'text-ok'
+                      : 'text-ink-faint',
                 ].join(' ')}
               >
                 {r.phase}
@@ -275,8 +290,7 @@ function SiteFooter() {
       <div className="mx-auto flex max-w-6xl flex-col items-center justify-between gap-5 px-6 py-10 sm:flex-row">
         <Wordmark />
         <p className="max-w-md text-center text-xs leading-relaxed text-ink-faint sm:text-right">
-          For guidance and reflection. Astrological readings are not a
-          substitute for professional medical, legal or financial advice.
+          {t.landing.disclaimer}
         </p>
       </div>
     </footer>

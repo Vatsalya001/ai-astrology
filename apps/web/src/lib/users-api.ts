@@ -154,6 +154,28 @@ export const usersApi = {
   revokeSession: (id: string) =>
     authed<void>(`/users/me/sessions/${id}`, { method: 'DELETE' }),
 
+  /** Sends a fresh code to the account's own verified contact. */
+  challenge: () => authed<{ sent: boolean }>('/users/me/challenge', { method: 'POST' }),
+
+  requestDeletion: (code: string) =>
+    authed<{ deletion_scheduled_at: string }>('/users/me/delete', {
+      method: 'POST',
+      body: JSON.stringify({ code, confirm: 'DELETE' }),
+    }),
+
+  cancelDeletion: () => authed<void>('/users/me/delete/cancel', { method: 'POST' }),
+
+  /**
+   * Downloads the export.
+   *
+   * A direct navigation rather than a fetch: the response carries
+   * Content-Disposition, so the browser saves it as a file. Fetching it
+   * into memory and re-creating a Blob would work and would also hold
+   * the user's entire history in a JavaScript variable for no reason.
+   */
+  exportUrl: (code: string) =>
+    `${API_URL}/api/v1/users/me/export?code=${encodeURIComponent(code)}`,
+
   signOut: async () => {
     // Clear locally first. Even if the server call fails, this tab must
     // stop behaving as though it is signed in.
