@@ -306,6 +306,7 @@ and the tests are what found the holes.
 | 8e | Analytics events, with a vocabulary that cannot leak PII |
 | 8f | The remaining §10 flows, the web CSP, this gate |
 | 9a | Google OAuth removed; email and phone OTP only |
+| 9c | Mobile viewport coverage — the DoD item nothing tested |
 
 ## What running it found that reading it did not
 
@@ -372,6 +373,20 @@ the relevant cache and try again.
 | ADR | Question | Due |
 |---|---|---|
 | [003](decisions/003-astrology-engine.md) | Swiss Ephemeris licence: AGPL, commercial, or MIT `skyfield` | **Before Phase 7** |
+
+**Nothing tested the app at phone width.** The suite ran one Playwright project,
+Desktop Chrome, while "mobile responsive" sat in the Definition of Done — for a
+product whose audience is on Indian mobile networks. `mobile.spec.ts` now covers
+every screen at 412px, public and signed-in.
+
+Worse, the first version of that test **passed while the page was broken**. It
+compared `scrollWidth` to `window.innerWidth`, and under mobile emulation Chrome
+expands the layout viewport to fit overflow, so the two are always equal. A
+deliberate 900px element in a 412px device measured 924 against 924 and the
+assertion passed. Only breaking the layout on purpose exposed it. The reference is
+now Playwright's `viewportSize()`, which the page cannot move.
+
+---
 
 ## Deferred by decision
 

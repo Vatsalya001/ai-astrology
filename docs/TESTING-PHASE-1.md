@@ -35,6 +35,25 @@ npx playwright test         # 55 browser specs against the running stack
 | 15 | `task verify` green, including `go test -race` | Green. Unit and integration suites both run with `-race`. |
 | 16 | `PROJECT_STATUS.md` and `current-phase.md` updated | This document, plus both files. |
 
+### Mobile responsiveness (global Definition of Done)
+
+`tests/e2e/mobile.spec.ts`, at Pixel 7 (412px). No horizontal overflow on any of
+the four public pages **or** the five signed-in screens; tap targets meet WCAG 2.2
+SC 2.5.8 with its inline-text and not-visible exemptions applied; and the OTP
+field — the one interaction every user performs on a phone — keeps
+`inputmode="numeric"` and `autocomplete="one-time-code"`, which is what makes the
+OS offer the code instead of a QWERTY keyboard.
+
+**This test was vacuous when first written, and only breaking the layout revealed
+it.** It compared `document.documentElement.scrollWidth` against the page's own
+`window.innerWidth`. Under mobile emulation Chrome expands the layout viewport to
+fit overflowing content, so both grow together and the comparison can never fail:
+a deliberate 900px element inside a 412px device measured 924 and 924, and the
+assertion passed while the page was visibly broken. The reference is now
+Playwright's `viewportSize()`, which comes from the harness rather than the page
+and stays pinned at the device width. Re-run against the same break, it fails with
+`content is 924px wide on a 412px device`.
+
 ---
 
 ## §11 Security checklist
