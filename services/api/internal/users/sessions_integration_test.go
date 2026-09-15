@@ -101,6 +101,11 @@ func startPostgres(ctx context.Context, t *testing.T) (*pgxpool.Pool, func()) {
 	}
 }
 
+// Returns the user id and the FAMILY id.
+//
+// The family is what the device list and Revoke both take — a session id
+// would revoke one link in a rotation chain and leave the device signed
+// in, which is the bug these tests exist to prevent.
 func seedUserWithSession(ctx context.Context, t *testing.T, pool *pgxpool.Pool, email string) (uuid.UUID, uuid.UUID) {
 	t.Helper()
 
@@ -111,15 +116,16 @@ func seedUserWithSession(ctx context.Context, t *testing.T, pool *pgxpool.Pool, 
 		t.Fatalf("seed user: %v", err)
 	}
 
-	var sessionID uuid.UUID
+	var familyID uuid.UUID
 	if err := pool.QueryRow(ctx,
 		`INSERT INTO sessions (user_id, family_id, refresh_hash, user_agent, expires_at)
-		 VALUES ($1, gen_random_uuid(), $2, $3, now() + INTERVAL '30 days') RETURNING id`,
+		 VALUES ($1, gen_random_uuid(), $2, $3, now() + INTERVAL '30 days')
+		 RETURNING family_id`,
 		userID, []byte(email+"-hash"), "Test/1.0",
-	).Scan(&sessionID); err != nil {
+	).Scan(&familyID); err != nil {
 		t.Fatalf("seed session: %v", err)
 	}
-	return userID, sessionID
+	return userID, familyID
 }
 
 // The gate item this covers: "Revoking invalidates that device's refresh
@@ -131,11 +137,11 @@ func TestRevokeIsScopedToTheOwner(t *testing.T) {
 
 	dir := NewSessionDirectory(dbgen.New(pool))
 
-	aliceID, aliceSession := seedUserWithSession(ctx, t, pool, "alice@example.com")
-	bobID, bobSession := seedUserWithSession(ctx, t, pool, "bob@example.com")
+	aliceID, aliceDevice := seedUserWithSession(ctx, t, pool, "alice@example.com")
+	bobID, bobDevice := seedUserWithSession(ctx, t, pool, "bob@example.com")
 
-	t.Run("cannot revoke another user's session", func(t *testing.T) {
-		err := dir.Revoke(ctx, bobSession, aliceID)
+	t.Run("cannot revoke another user's device", func(t *testing.T) {
+		err := dir.Revoke(ctx, bobDevice, aliceID)
 		if !errors.Is(err, ErrNotFound) {
 			t.Fatalf("got %v, want ErrNotFound — reporting anything else confirms "+
 				"the session exists and belongs to someone", err)
@@ -151,8 +157,8 @@ func TestRevokeIsScopedToTheOwner(t *testing.T) {
 		}
 	})
 
-	t.Run("can revoke own session", func(t *testing.T) {
-		if err := dir.Revoke(ctx, aliceSession, aliceID); err != nil {
+	t.Run("can revoke own device", func(t *testing.T) {
+		if err := dir.Revoke(ctx, aliceDevice, aliceID); err != nil {
 			t.Fatalf("Revoke: %v", err)
 		}
 
@@ -169,12 +175,12 @@ func TestRevokeIsScopedToTheOwner(t *testing.T) {
 	// call returned success, telling the caller it had revoked something
 	// it had not — and a UI would optimistically drop the row.
 	t.Run("revoking twice reports not found", func(t *testing.T) {
-		if err := dir.Revoke(ctx, aliceSession, aliceID); !errors.Is(err, ErrNotFound) {
+		if err := dir.Revoke(ctx, aliceDevice, aliceID); !errors.Is(err, ErrNotFound) {
 			t.Errorf("second revoke returned %v, want ErrNotFound", err)
 		}
 	})
 
-	t.Run("unknown session id reports not found", func(t *testing.T) {
+	t.Run("unknown device id reports not found", func(t *testing.T) {
 		if err := dir.Revoke(ctx, uuid.New(), aliceID); !errors.Is(err, ErrNotFound) {
 			t.Errorf("got %v, want ErrNotFound", err)
 		}
@@ -293,5 +299,103 @@ func TestRevokeAllEndsEverySession(t *testing.T) {
 	}
 	if len(others) != 1 {
 		t.Errorf("RevokeAll affected another user: they have %d sessions, want 1", len(others))
+	}
+}
+
+// A device is a FAMILY, not a session row.
+//
+// Every refresh issues a new row sharing its predecessor's family_id, so
+// a browser left open for an hour accumulates a dozen. Listing those as
+// devices shows the user sign-ins they do not recognise — this test
+// caught exactly that: one signup, three rows, one device.
+func TestDeviceListCollapsesARotationChain(t *testing.T) {
+	ctx := context.Background()
+	pool, stop := startPostgres(ctx, t)
+	defer stop()
+
+	dir := NewSessionDirectory(dbgen.New(pool))
+	userID, _ := seedUserWithSession(ctx, t, pool, "rotating@example.com")
+
+	// The family the fixture created.
+	var family uuid.UUID
+	if err := pool.QueryRow(ctx,
+		`SELECT family_id FROM sessions WHERE user_id = $1`, userID,
+	).Scan(&family); err != nil {
+		t.Fatalf("read family: %v", err)
+	}
+
+	// Four more rotations of the SAME device.
+	for i := range 4 {
+		if _, err := pool.Exec(ctx,
+			`INSERT INTO sessions (user_id, family_id, refresh_hash, user_agent, expires_at)
+			 VALUES ($1, $2, $3, 'Test/1.0', now() + INTERVAL '30 days')`,
+			userID, family, []byte(fmt.Sprintf("rotation-%d", i)),
+		); err != nil {
+			t.Fatalf("seed rotation %d: %v", i, err)
+		}
+	}
+
+	// A genuinely different device.
+	if _, err := pool.Exec(ctx,
+		`INSERT INTO sessions (user_id, family_id, refresh_hash, user_agent, expires_at)
+		 VALUES ($1, gen_random_uuid(), $2, 'Other/2.0', now() + INTERVAL '30 days')`,
+		userID, []byte("other-device"),
+	); err != nil {
+		t.Fatalf("seed other device: %v", err)
+	}
+
+	devices, err := dir.ListActive(ctx, userID)
+	if err != nil {
+		t.Fatalf("ListActive: %v", err)
+	}
+
+	// Six rows, two devices.
+	if len(devices) != 2 {
+		t.Fatalf("listed %d devices from 6 session rows, want 2 — the list is "+
+			"showing rotations, not devices", len(devices))
+	}
+}
+
+// Signing a device out must end its whole lineage. Revoking one row
+// leaves the device's CURRENT token working, which is the opposite of
+// what the button says.
+func TestRevokingADeviceEndsItsWholeFamily(t *testing.T) {
+	ctx := context.Background()
+	pool, stop := startPostgres(ctx, t)
+	defer stop()
+
+	dir := NewSessionDirectory(dbgen.New(pool))
+	userID, _ := seedUserWithSession(ctx, t, pool, "familyrevoke@example.com")
+
+	var family uuid.UUID
+	if err := pool.QueryRow(ctx,
+		`SELECT family_id FROM sessions WHERE user_id = $1`, userID,
+	).Scan(&family); err != nil {
+		t.Fatalf("read family: %v", err)
+	}
+
+	for i := range 3 {
+		if _, err := pool.Exec(ctx,
+			`INSERT INTO sessions (user_id, family_id, refresh_hash, expires_at)
+			 VALUES ($1, $2, $3, now() + INTERVAL '30 days')`,
+			userID, family, []byte(fmt.Sprintf("chain-%d", i)),
+		); err != nil {
+			t.Fatalf("seed chain %d: %v", i, err)
+		}
+	}
+
+	if err := dir.Revoke(ctx, family, userID); err != nil {
+		t.Fatalf("Revoke: %v", err)
+	}
+
+	var live int
+	if err := pool.QueryRow(ctx,
+		`SELECT count(*) FROM sessions WHERE family_id = $1 AND revoked_at IS NULL`, family,
+	).Scan(&live); err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	if live != 0 {
+		t.Errorf("%d sessions in the family are still live — the device's current "+
+			"token still works after the user signed it out", live)
 	}
 }

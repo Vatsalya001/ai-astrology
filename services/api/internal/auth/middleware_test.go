@@ -31,7 +31,7 @@ func TestAuthenticateAcceptsAValidToken(t *testing.T) {
 	iss := testIssuer(t)
 	userID := uuid.New()
 
-	token, err := iss.IssueAccessToken(userID, RoleUser)
+	token, err := iss.IssueAccessToken(userID, uuid.New(), RoleUser)
 	if err != nil {
 		t.Fatalf("IssueAccessToken: %v", err)
 	}
@@ -76,7 +76,7 @@ func TestAuthenticateAcceptsAValidToken(t *testing.T) {
 func TestAuthenticateRejectsEverythingElse(t *testing.T) {
 	iss := testIssuer(t)
 
-	valid, err := iss.IssueAccessToken(uuid.New(), RoleUser)
+	valid, err := iss.IssueAccessToken(uuid.New(), uuid.New(), RoleUser)
 	if err != nil {
 		t.Fatalf("IssueAccessToken: %v", err)
 	}
@@ -125,7 +125,7 @@ func TestAuthenticateRejectsEverythingElse(t *testing.T) {
 // wire format.
 func TestAuthenticateTrimsSurroundingWhitespace(t *testing.T) {
 	iss := testIssuer(t)
-	token, err := iss.IssueAccessToken(uuid.New(), RoleUser)
+	token, err := iss.IssueAccessToken(uuid.New(), uuid.New(), RoleUser)
 	if err != nil {
 		t.Fatalf("IssueAccessToken: %v", err)
 	}
@@ -154,7 +154,7 @@ func TestAuthenticateTrimsSurroundingWhitespace(t *testing.T) {
 // "bearer".
 func TestAuthenticateAcceptsAnyCaseScheme(t *testing.T) {
 	iss := testIssuer(t)
-	token, err := iss.IssueAccessToken(uuid.New(), RoleUser)
+	token, err := iss.IssueAccessToken(uuid.New(), uuid.New(), RoleUser)
 	if err != nil {
 		t.Fatalf("IssueAccessToken: %v", err)
 	}
@@ -181,7 +181,7 @@ func TestExpiredTokenReportsADistinctCode(t *testing.T) {
 	base := time.Now()
 	iss.now = func() time.Time { return base }
 
-	token, err := iss.IssueAccessToken(uuid.New(), RoleUser)
+	token, err := iss.IssueAccessToken(uuid.New(), uuid.New(), RoleUser)
 	if err != nil {
 		t.Fatalf("IssueAccessToken: %v", err)
 	}
@@ -241,7 +241,7 @@ func TestRequireRoleMatrix(t *testing.T) {
 
 		for _, role := range allRoles {
 			t.Run(routeName+"/"+role, func(t *testing.T) {
-				token, err := iss.IssueAccessToken(uuid.New(), role)
+				token, err := iss.IssueAccessToken(uuid.New(), uuid.New(), role)
 				if err != nil {
 					t.Fatalf("IssueAccessToken: %v", err)
 				}
@@ -273,7 +273,7 @@ func TestRequireRoleMatrix(t *testing.T) {
 func TestRolesHaveNoImplicitHierarchy(t *testing.T) {
 	iss := testIssuer(t)
 
-	token, err := iss.IssueAccessToken(uuid.New(), RoleSuperAdmin)
+	token, err := iss.IssueAccessToken(uuid.New(), uuid.New(), RoleSuperAdmin)
 	if err != nil {
 		t.Fatalf("IssueAccessToken: %v", err)
 	}
@@ -312,7 +312,7 @@ func TestRequireRoleWithoutAuthenticateIs401(t *testing.T) {
 // empty list would turn a typo into an open door.
 func TestRequireRoleWithNoRolesDeniesEveryone(t *testing.T) {
 	iss := testIssuer(t)
-	token, err := iss.IssueAccessToken(uuid.New(), RoleSuperAdmin)
+	token, err := iss.IssueAccessToken(uuid.New(), uuid.New(), RoleSuperAdmin)
 	if err != nil {
 		t.Fatalf("IssueAccessToken: %v", err)
 	}

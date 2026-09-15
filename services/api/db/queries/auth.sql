@@ -116,9 +116,37 @@ UPDATE sessions SET revoked_at = now()
 WHERE user_id = $1 AND revoked_at IS NULL;
 
 -- name: ListActiveSessions :many
+-- Every row, including superseded links in a rotation chain. Used by the
+-- data export, where completeness is the point.
 SELECT * FROM sessions
 WHERE user_id = $1 AND revoked_at IS NULL AND expires_at > now()
 ORDER BY created_at DESC;
+
+-- name: ListActiveDevices :many
+-- One row per DEVICE, not per session.
+--
+-- A device is a family: every refresh issues a new session row sharing
+-- the family_id of the token it replaced, so a single browser open for an
+-- hour accumulates a dozen rows. Listing those as "devices" is both
+-- wrong and alarming — the user sees twelve unknown sign-ins — and
+-- revoking one of them kills a spent link in the chain rather than the
+-- device.
+--
+-- DISTINCT ON takes the newest row per family, which carries the most
+-- recent user agent and expiry.
+SELECT DISTINCT ON (family_id) *
+FROM sessions
+WHERE user_id = $1 AND revoked_at IS NULL AND expires_at > now()
+ORDER BY family_id, created_at DESC;
+
+-- name: RevokeDeviceFamily :execrows
+-- Signs one device out by ending its whole lineage.
+--
+-- Scoped by user_id, so a caller cannot revoke another account's device
+-- even with a valid family id — the row count is what lets the handler
+-- answer 404 rather than a misleading 204.
+UPDATE sessions SET revoked_at = now()
+WHERE family_id = $1 AND user_id = $2 AND revoked_at IS NULL;
 
 -- name: DeleteExpiredSessions :exec
 -- Housekeeping for the worker. Expired rows prove nothing and grow

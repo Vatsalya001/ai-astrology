@@ -61,7 +61,7 @@ func TestAccessTokenRoundTrip(t *testing.T) {
 	iss := testIssuer(t)
 	userID := uuid.New()
 
-	token, err := iss.IssueAccessToken(userID, "user")
+	token, err := iss.IssueAccessToken(userID, uuid.New(), "user")
 	if err != nil {
 		t.Fatalf("IssueAccessToken: %v", err)
 	}
@@ -94,7 +94,7 @@ func TestAccessTokenClaimsContainNoPII(t *testing.T) {
 	iss := testIssuer(t)
 	userID := uuid.New()
 
-	token, err := iss.IssueAccessToken(userID, "astrologer")
+	token, err := iss.IssueAccessToken(userID, uuid.New(), "astrologer")
 	if err != nil {
 		t.Fatalf("IssueAccessToken: %v", err)
 	}
@@ -118,6 +118,11 @@ func TestAccessTokenClaimsContainNoPII(t *testing.T) {
 	// someone adds a claim nobody thought to forbid.
 	allowed := map[string]bool{
 		"sub": true, "role": true, "jti": true,
+		// `fam` identifies the rotation family — the device. Added
+		// deliberately and reviewed here: an opaque UUID, meaningless
+		// without database access, exactly like `sub`. Widening this list
+		// is the review step, which is why the test uses an allowlist.
+		"fam": true,
 		"exp": true, "iat": true, "nbf": true, "iss": true,
 	}
 	for claim := range decoded {
@@ -161,7 +166,7 @@ func TestVerifyRejectsWrongSignature(t *testing.T) {
 	iss := testIssuer(t)
 	userID := uuid.New()
 
-	token, err := iss.IssueAccessToken(userID, "user")
+	token, err := iss.IssueAccessToken(userID, uuid.New(), "user")
 	if err != nil {
 		t.Fatalf("IssueAccessToken: %v", err)
 	}
@@ -206,7 +211,7 @@ func TestAccessTokenExpires(t *testing.T) {
 	base := time.Now()
 	iss.now = func() time.Time { return base }
 
-	token, err := iss.IssueAccessToken(uuid.New(), "user")
+	token, err := iss.IssueAccessToken(uuid.New(), uuid.New(), "user")
 	if err != nil {
 		t.Fatalf("IssueAccessToken: %v", err)
 	}

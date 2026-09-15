@@ -116,7 +116,7 @@ func (r *Rotator) issueInFamily(
 	userAgent string,
 	ipHash []byte,
 ) (TokenPair, error) {
-	access, err := r.issuer.IssueAccessToken(userID, role)
+	access, err := r.issuer.IssueAccessToken(userID, familyID, role)
 	if err != nil {
 		return TokenPair{}, err
 	}

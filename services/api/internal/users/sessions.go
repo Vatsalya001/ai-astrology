@@ -26,14 +26,21 @@ func NewSessionDirectory(q dbgen.Querier) *SessionDirectory {
 
 var _ SessionReader = (*SessionDirectory)(nil)
 
-// ListActive returns the user's live sessions, newest first.
+// ListActive returns the user's signed-in DEVICES, newest first.
 //
-// Never includes refresh_hash. A credential-shaped value rendered into a
-// settings page ends up in a screenshot and a support ticket.
+// One entry per rotation family, not per session row. Every refresh
+// issues a new row sharing its predecessor's family_id, so a browser
+// left open for an hour accumulates a dozen — listing those as devices
+// shows the user twelve sign-ins they do not recognise, and revoking one
+// kills a spent link rather than the device.
+//
+// The ID returned is therefore the FAMILY id, and Revoke takes the same
+// thing. Never includes refresh_hash: a credential-shaped value rendered
+// into a settings page ends up in a screenshot and a support ticket.
 func (d *SessionDirectory) ListActive(ctx context.Context, userID uuid.UUID) ([]SessionView, error) {
-	rows, err := d.q.ListActiveSessions(ctx, toPgUUID(userID))
+	rows, err := d.q.ListActiveDevices(ctx, toPgUUID(userID))
 	if err != nil {
-		return nil, fmt.Errorf("users: list sessions: %w", err)
+		return nil, fmt.Errorf("users: list devices: %w", err)
 	}
 
 	views := make([]SessionView, 0, len(rows))
@@ -43,7 +50,8 @@ func (d *SessionDirectory) ListActive(ctx context.Context, userID uuid.UUID) ([]
 			userAgent = *row.UserAgent
 		}
 		views = append(views, SessionView{
-			ID:        uuid.UUID(row.ID.Bytes),
+			// The family, not the session row — see above.
+			ID:        uuid.UUID(row.FamilyID.Bytes),
 			UserAgent: userAgent,
 			CreatedAt: row.CreatedAt.UTC().Format("2006-01-02T15:04:05Z"),
 			ExpiresAt: row.ExpiresAt.UTC().Format("2006-01-02T15:04:05Z"),
@@ -52,25 +60,28 @@ func (d *SessionDirectory) ListActive(ctx context.Context, userID uuid.UUID) ([]
 	return views, nil
 }
 
-// Revoke ends one session.
+// Revoke signs one device out.
 //
-// The query is scoped by user_id, so revoking someone else's session
+// Takes a FAMILY id and ends the whole lineage, which is what "sign this
+// device out" means: revoking a single row in a rotation chain leaves
+// the device's current token working.
+//
+// The query is scoped by user_id, so revoking someone else's device
 // affects no rows and returns ErrNotFound — never 403, which would
-// confirm the session exists and belongs to another account.
-func (d *SessionDirectory) Revoke(ctx context.Context, sessionID, userID uuid.UUID) error {
-	affected, err := d.q.RevokeSession(ctx, dbgen.RevokeSessionParams{
-		ID:     toPgUUID(sessionID),
-		UserID: toPgUUID(userID),
+// confirm the device exists and belongs to another account.
+func (d *SessionDirectory) Revoke(ctx context.Context, familyID, userID uuid.UUID) error {
+	affected, err := d.q.RevokeDeviceFamily(ctx, dbgen.RevokeDeviceFamilyParams{
+		FamilyID: toPgUUID(familyID),
+		UserID:   toPgUUID(userID),
 	})
 	if err != nil {
-		return fmt.Errorf("users: revoke session: %w", err)
+		return fmt.Errorf("users: revoke device: %w", err)
 	}
 	if affected == 0 {
-		// Either the session does not exist, belongs to someone else, or
+		// Either the device does not exist, belongs to someone else, or
 		// was already revoked. All three are ErrNotFound: reporting 403
-		// for "belongs to someone else" would confirm the session exists,
-		// and a separate code for "already revoked" leaks that it once
-		// did.
+		// for "belongs to someone else" would confirm it exists, and a
+		// separate code for "already revoked" leaks that it once did.
 		return ErrNotFound
 	}
 	return nil

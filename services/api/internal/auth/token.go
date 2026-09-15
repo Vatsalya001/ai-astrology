@@ -39,6 +39,16 @@ const refreshTokenBytes = 32
 // PII ends up in a log aggregator forever.
 type Claims struct {
 	Role string `json:"role"`
+	// Fam is the rotation family this token was issued into — the
+	// device, in user-facing terms.
+	//
+	// Added deliberately, and it is not PII: an opaque UUID identifying a
+	// session lineage, meaningless without database access, exactly like
+	// `sub`. It is here because the sessions screen must be able to say
+	// "this device" — and without it the API cannot tell, since the
+	// refresh cookie is scoped to /api/v1/auth and never reaches
+	// /users/me/sessions.
+	Fam string `json:"fam"`
 	jwt.RegisteredClaims
 }
 
@@ -97,11 +107,12 @@ func (i *Issuer) RefreshTTL() time.Duration { return i.refreshTTL }
 // `jti` is present so a specific token can be denied before it expires
 // (Phase 6 adds the denylist). Without it, revocation can only be
 // per-user, which logs someone out of every device to deal with one.
-func (i *Issuer) IssueAccessToken(userID uuid.UUID, role string) (string, error) {
+func (i *Issuer) IssueAccessToken(userID, familyID uuid.UUID, role string) (string, error) {
 	now := i.nowFunc()
 
 	claims := Claims{
 		Role: role,
+		Fam:  familyID.String(),
 		RegisteredClaims: jwt.RegisteredClaims{
 			Subject:   userID.String(),
 			ID:        uuid.NewString(),

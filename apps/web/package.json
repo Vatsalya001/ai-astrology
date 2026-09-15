@@ -12,6 +12,7 @@
     "test:watch": "vitest"
   },
   "dependencies": {
+    "@ayana/analytics": "*",
     "@ayana/types": "*",
     "@ayana/ui": "*",
     "@radix-ui/react-dialog": "^1.1.23",

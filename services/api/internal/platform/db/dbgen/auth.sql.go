@@ -359,12 +359,63 @@ func (q *Queries) LinkIdentity(ctx context.Context, arg LinkIdentityParams) (Aut
 	return i, err
 }
 
+const listActiveDevices = `-- name: ListActiveDevices :many
+SELECT DISTINCT ON (family_id) id, user_id, family_id, refresh_hash, user_agent, ip_hash, expires_at, used_at, revoked_at, created_at
+FROM sessions
+WHERE user_id = $1 AND revoked_at IS NULL AND expires_at > now()
+ORDER BY family_id, created_at DESC
+`
+
+// One row per DEVICE, not per session.
+//
+// A device is a family: every refresh issues a new session row sharing
+// the family_id of the token it replaced, so a single browser open for an
+// hour accumulates a dozen rows. Listing those as "devices" is both
+// wrong and alarming — the user sees twelve unknown sign-ins — and
+// revoking one of them kills a spent link in the chain rather than the
+// device.
+//
+// DISTINCT ON takes the newest row per family, which carries the most
+// recent user agent and expiry.
+func (q *Queries) ListActiveDevices(ctx context.Context, userID pgtype.UUID) ([]Session, error) {
+	rows, err := q.db.Query(ctx, listActiveDevices, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Session{}
+	for rows.Next() {
+		var i Session
+		if err := rows.Scan(
+			&i.ID,
+			&i.UserID,
+			&i.FamilyID,
+			&i.RefreshHash,
+			&i.UserAgent,
+			&i.IpHash,
+			&i.ExpiresAt,
+			&i.UsedAt,
+			&i.RevokedAt,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listActiveSessions = `-- name: ListActiveSessions :many
 SELECT id, user_id, family_id, refresh_hash, user_agent, ip_hash, expires_at, used_at, revoked_at, created_at FROM sessions
 WHERE user_id = $1 AND revoked_at IS NULL AND expires_at > now()
 ORDER BY created_at DESC
 `
 
+// Every row, including superseded links in a rotation chain. Used by the
+// data export, where completeness is the point.
 func (q *Queries) ListActiveSessions(ctx context.Context, userID pgtype.UUID) ([]Session, error) {
 	rows, err := q.db.Query(ctx, listActiveSessions, userID)
 	if err != nil {
@@ -543,6 +594,29 @@ WHERE user_id = $1 AND revoked_at IS NULL
 func (q *Queries) RevokeAllUserSessions(ctx context.Context, userID pgtype.UUID) error {
 	_, err := q.db.Exec(ctx, revokeAllUserSessions, userID)
 	return err
+}
+
+const revokeDeviceFamily = `-- name: RevokeDeviceFamily :execrows
+UPDATE sessions SET revoked_at = now()
+WHERE family_id = $1 AND user_id = $2 AND revoked_at IS NULL
+`
+
+type RevokeDeviceFamilyParams struct {
+	FamilyID pgtype.UUID
+	UserID   pgtype.UUID
+}
+
+// Signs one device out by ending its whole lineage.
+//
+// Scoped by user_id, so a caller cannot revoke another account's device
+// even with a valid family id — the row count is what lets the handler
+// answer 404 rather than a misleading 204.
+func (q *Queries) RevokeDeviceFamily(ctx context.Context, arg RevokeDeviceFamilyParams) (int64, error) {
+	result, err := q.db.Exec(ctx, revokeDeviceFamily, arg.FamilyID, arg.UserID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const revokeSession = `-- name: RevokeSession :execrows
