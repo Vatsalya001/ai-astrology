@@ -245,7 +245,9 @@ invisible to clients.
 |---|---|---|
 | 10.1 | Expo scaffold, Expo Router, NativeWind with shared tokens | Runs on both simulators |
 | 10.2 | `packages/api-client` consumed by both web and mobile | One typed client, two platforms |
-| 10.3 | Auth: OTP, OAuth, `expo-secure-store` token storage, refresh rotation | |
+| 10.3 | Auth: OTP, `expo-secure-store` token storage, refresh rotation | |
+| 10.3a | **Google OAuth** — deferred here from Phase 1 by owner decision | Round trip creates or links an identity, on web and device |
+| 10.3b | **Apple OAuth** — needs the $99/yr developer account | Same. Effectively mandatory: Apple requires Sign in with Apple wherever a third-party social login is offered |
 | 10.4 | Onboarding: birth details, place search, computing screen | |
 | 10.5 | `ChartSVG` in `react-native-svg` using the shared geometry module | Matches web for all 30 fixtures |
 | 10.6 | Kundli screens: planets, houses, dashas, yogas, transits | |
@@ -311,6 +313,10 @@ sufficient contrast.
 - [ ] Debug logging stripped from release builds
 - [ ] Privacy declarations match what the app actually does
 - [ ] Account deletion reachable in-app in two taps
+- [ ] **OAuth `state` validated (CSRF on the OAuth flow)** — carried from Phase 1 §11 with
+      the feature. Without it the callback accepts a code from anywhere, which silently
+      signs a victim into the attacker's account. PR 8c's implementation and its tests
+      are recoverable by reverting PR 9a; do not rewrite them from scratch.
 
 ---
 
@@ -347,6 +353,11 @@ Global DoD **plus**:
 
 - [ ] Expo app builds and runs on iOS and Android via EAS
 - [ ] Full auth and onboarding flow works on device
+- [ ] **Google OAuth completes and links an identity** — the Phase 1 gate item, moved
+      here. Requires real credentials: a Google Cloud OAuth client with
+      `openid email` scope only, and an authorised redirect URI matching the
+      deployment byte for byte
+- [ ] **Sign in with Apple works** — Apple rejects apps offering Google sign-in without it
 - [ ] **Chart renders in both styles, matching web for all 30 fixtures**
 - [ ] All Kundli screens complete
 - [ ] Streaming chat works on a real device over cellular

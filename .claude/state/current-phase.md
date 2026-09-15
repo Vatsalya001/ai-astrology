@@ -2,8 +2,8 @@
 
 ```
 Phase: 1 — Authentication & User Profiles
-Gate:  ✅ CLOSED  (16 of 17 gate items + §10, §11, §13 checklists)
-       1 item open by decision — Google OAuth needs credentials
+Gate:  ✅ CLOSED  (16 of 16 gate items + §10, §11, §13 checklists)
+       Nothing open.
 ```
 
 Evidence for every item: `docs/TESTING-PHASE-1.md`. It records what was *run*, not
@@ -17,21 +17,22 @@ request" and wired to nothing; and `go test -tags=integration` reporting `ok` wh
 skipping every test because Docker was unavailable. None of that was visible on the
 page. Execute the check.
 
-## Open by decision, not omission
+## Social sign-in is deferred, not dropped
 
-**Google OAuth (gate item 3).** No credentials exist; this is the account owner's
-call. The flow is built and fully covered against a stubbed Google with a real
-Redis — state forgery, replay, expiry, 16-way concurrency, unverified email. Turning
-it on is two lines in `.env`:
+Google OAuth was built and fully tested in PR 8c, then removed in PR 9a by the
+owner's decision: keep sign-in simple until the product exists, add social login
+at the end. The Phase 1 spec no longer carries it — `PHASE-10-MOBILE.md` does,
+as tasks 10.3a and 10.3b, one §11 security item and two gate items.
 
-```
-GOOGLE_CLIENT_ID=...
-GOOGLE_CLIENT_SECRET=...
-```
+**Restoring it is `git revert` of PR 9a**, not a rewrite. The state-forgery,
+replay, expiry, 16-way-concurrency and unverified-email tests all come back with
+it. Do not rebuild this from scratch when Phase 10 arrives.
 
-Authorised redirect URI: `http://localhost:4000/api/v1/auth/oauth/google/callback`.
-The button then appears by itself — the web app asks `GET /api/v1/auth/providers`
-rather than keeping a second copy of the credential state.
+Phase 10 is the right home anyway: Apple requires *Sign in with Apple* wherever
+an app offers a third-party social login, so Google and Apple have to ship
+together once iOS does.
+
+Sign-in today is email OTP and phone OTP. Both need no third party.
 
 ## Next: Phase 2 — Astrology Engine
 
