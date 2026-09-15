@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
+	"github.com/Vatsalya001/ai-astrology/services/api/internal/platform/analytics"
 )
 
 // minOTPResponseTime is the floor on how long /auth/otp/request takes.
@@ -78,6 +80,7 @@ type Service struct {
 	rotator *Rotator
 	users   UserCreator
 	audit   AuditSink
+	events  analytics.Emitter
 	logger  *slog.Logger
 
 	otpLength int
@@ -88,11 +91,14 @@ type Service struct {
 }
 
 type ServiceConfig struct {
-	OTP       *OTPStore
-	Channel   Channel
-	Rotator   *Rotator
-	Users     UserCreator
-	Audit     AuditSink
+	OTP     *OTPStore
+	Channel Channel
+	Rotator *Rotator
+	Users   UserCreator
+	Audit   AuditSink
+	// Events is optional. A nil one becomes analytics.Nop rather than a
+	// nil check at every call site.
+	Events    analytics.Emitter
 	Logger    *slog.Logger
 	OTPLength int
 }
@@ -102,12 +108,17 @@ func NewService(cfg ServiceConfig) *Service {
 	if logger == nil {
 		logger = slog.Default()
 	}
+	var events analytics.Emitter = analytics.Nop{}
+	if cfg.Events != nil {
+		events = cfg.Events
+	}
 	return &Service{
 		otp:       cfg.OTP,
 		channel:   cfg.Channel,
 		rotator:   cfg.Rotator,
 		users:     cfg.Users,
 		audit:     cfg.Audit,
+		events:    events,
 		logger:    logger,
 		otpLength: cfg.OTPLength,
 		now:       time.Now,
@@ -144,6 +155,16 @@ func (s *Service) RequestOTP(ctx context.Context, channel, identifier, locale st
 	s.audit.Record(ctx, nil, "auth.otp_requested", map[string]any{
 		"channel": channel,
 	}, ipHash)
+
+	// Anonymous by construction. Whether this identifier already has an
+	// account is deliberately NOT looked up here: it would tell the
+	// analytics pipeline something the endpoint refuses to tell the
+	// caller, and a warehouse is a worse place to leak it than a response
+	// body. signup_started is emitted on verification, where the answer is
+	// already known for free.
+	s.events.Emit(ctx, analytics.OTPRequested, nil, map[string]any{
+		"channel": channel,
+	})
 
 	return nil
 }
@@ -200,6 +221,20 @@ func (s *Service) VerifyOTP(
 	s.audit.Record(ctx, &user.ID, action, map[string]any{
 		"channel": channel,
 	}, ipHash)
+
+	s.events.Emit(ctx, analytics.OTPVerified, &user.ID, map[string]any{
+		"channel": channel,
+	})
+
+	// signup_started fires here rather than at the request, because this
+	// is the first point at which "is this a new account" is known without
+	// a lookup that would leak the answer into the pipeline.
+	if isNew {
+		s.events.Emit(ctx, analytics.SignupStarted, &user.ID, map[string]any{"channel": channel})
+		s.events.Emit(ctx, analytics.SignupCompleted, &user.ID, map[string]any{"channel": channel})
+	} else {
+		s.events.Emit(ctx, analytics.LoginCompleted, &user.ID, map[string]any{"channel": channel})
+	}
 
 	return pair, user, isNew, nil
 }
@@ -386,6 +421,18 @@ func (s *Service) CompleteOAuth(
 		action = "auth.signup"
 	}
 	s.audit.Record(ctx, &user.ID, action, map[string]any{"provider": provider}, ipHash)
+
+	event := analytics.LoginCompleted
+	if isNew {
+		s.events.Emit(ctx, analytics.SignupStarted, &user.ID, map[string]any{"channel": provider})
+		event = analytics.SignupCompleted
+	}
+	s.events.Emit(ctx, event, &user.ID, map[string]any{
+		// The channel for an OAuth sign-in is the provider, which the
+		// vocabulary already allows: email | phone | google | apple.
+		"channel":  provider,
+		"provider": provider,
+	})
 
 	return pair, user, isNew, nil
 }

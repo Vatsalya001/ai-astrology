@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/Vatsalya001/ai-astrology/services/api/internal/platform/analytics"
 	"github.com/Vatsalya001/ai-astrology/services/api/internal/platform/db/dbgen"
 )
 
@@ -30,6 +31,7 @@ type Deleter struct {
 	sessions *SessionDirectory
 	grace    time.Duration
 	logger   *slog.Logger
+	events   analytics.Emitter
 	now      func() time.Time
 }
 
@@ -37,7 +39,18 @@ func NewDeleter(q dbgen.Querier, sessions *SessionDirectory, grace time.Duration
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &Deleter{q: q, sessions: sessions, grace: grace, logger: logger, now: time.Now}
+	return &Deleter{
+		q: q, sessions: sessions, grace: grace,
+		logger: logger, events: analytics.Nop{}, now: time.Now,
+	}
+}
+
+// WithAnalytics attaches an emitter. See users.Service.WithAnalytics.
+func (d *Deleter) WithAnalytics(events analytics.Emitter) *Deleter {
+	if events != nil {
+		d.events = events
+	}
+	return d
 }
 
 // Request starts the grace window.
@@ -70,6 +83,13 @@ func (d *Deleter) Request(ctx context.Context, userID uuid.UUID) (time.Time, err
 	if !row.DeletionRequestedAt.Valid {
 		return time.Time{}, fmt.Errorf("users: deletion timestamp was not set")
 	}
+
+	// The grace window in hours, which is a configuration value rather
+	// than anything about the person.
+	d.events.Emit(ctx, analytics.AccountDeletionRequested, &userID, map[string]any{
+		"count": int(d.grace.Hours()),
+	})
+
 	return row.DeletionRequestedAt.Time.Add(d.grace), nil
 }
 
@@ -117,6 +137,12 @@ func (d *Deleter) RunHardDeletes(ctx context.Context) (int, error) {
 		// outlives the account. It holds an ID and an action, never PII.
 		d.logger.InfoContext(ctx, "account hard deleted",
 			slog.String("user_id", userID.String()))
+
+		// Emitted AFTER the row is gone, and carrying only the id — which
+		// by then references nothing. That is the point: the event says an
+		// account was deleted without preserving anything about who it
+		// belonged to.
+		d.events.Emit(ctx, analytics.AccountDeleted, &userID, nil)
 	}
 
 	return deleted, nil

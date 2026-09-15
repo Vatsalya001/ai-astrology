@@ -6,10 +6,13 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
+
+	"github.com/Vatsalya001/ai-astrology/services/api/internal/platform/analytics"
 )
 
 // The service against a real OTP store. The fakes here stand in for the
@@ -222,5 +225,140 @@ func TestFailedVerificationAuditsWithoutTheIdentifier(t *testing.T) {
 	}
 	if !found {
 		t.Error("a failed verification was not audited")
+	}
+}
+
+// ─── analytics ───────────────────────────────────────────────────────
+
+// eventRecorder captures analytics instead of writing them.
+type eventRecorder struct {
+	mu     sync.Mutex
+	events []recordedAnalytic
+}
+
+// Named distinctly from the audit sink's recordedEvent, which lives in
+// service_test.go in the same package.
+type recordedAnalytic struct {
+	name   string
+	userID *uuid.UUID
+	props  map[string]any
+}
+
+func (r *eventRecorder) Emit(_ context.Context, name string, userID *uuid.UUID, props map[string]any) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.events = append(r.events, recordedAnalytic{name: name, userID: userID, props: props})
+}
+
+func (r *eventRecorder) names() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make([]string, 0, len(r.events))
+	for _, e := range r.events {
+		out = append(out, e.name)
+	}
+	return out
+}
+
+func (r *eventRecorder) get(name string) (recordedAnalytic, bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, e := range r.events {
+		if e.name == name {
+			return e, true
+		}
+	}
+	return recordedAnalytic{}, false
+}
+
+// A first sign-in is a signup; a second is a login. Getting this backwards
+// makes the signup funnel report every returning user as a new one, and
+// nothing in the code would ever complain.
+func TestAnalyticsDistinguishesSignupFromLogin(t *testing.T) {
+	ctx := context.Background()
+	ch := &captureChannel{}
+	svc, stop := serviceWithRealOTP(t, &fakeUserCreator{}, ch, &fakeAudit{})
+	defer stop()
+
+	rec := &eventRecorder{}
+	svc.events = rec
+
+	const identifier = "analytics-funnel@example.com"
+
+	// First sign-in.
+	if err := svc.RequestOTP(ctx, ChannelEmail, identifier, "en", nil); err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	if _, _, isNew, err := svc.VerifyOTP(
+		ctx, ChannelEmail, identifier, ch.lastCode(), "test-agent", nil,
+	); err != nil || !isNew {
+		t.Fatalf("first verify: isNew=%v err=%v", isNew, err)
+	}
+
+	for _, want := range []string{
+		analytics.OTPRequested, analytics.OTPVerified,
+		analytics.SignupStarted, analytics.SignupCompleted,
+	} {
+		if _, ok := rec.get(want); !ok {
+			t.Errorf("%q was not emitted for a first sign-in; got %v", want, rec.names())
+		}
+	}
+	if _, ok := rec.get(analytics.LoginCompleted); ok {
+		t.Error("a first sign-in emitted login_completed")
+	}
+
+	// Second sign-in, same identifier.
+	second := &eventRecorder{}
+	svc.events = second
+
+	if err := svc.RequestOTP(ctx, ChannelEmail, identifier, "en", nil); err != nil {
+		t.Fatalf("second request: %v", err)
+	}
+	if _, _, isNew, err := svc.VerifyOTP(
+		ctx, ChannelEmail, identifier, ch.lastCode(), "test-agent", nil,
+	); err != nil || isNew {
+		t.Fatalf("second verify: isNew=%v err=%v", isNew, err)
+	}
+
+	if _, ok := second.get(analytics.LoginCompleted); !ok {
+		t.Errorf("a returning user did not emit login_completed; got %v", second.names())
+	}
+	if _, ok := second.get(analytics.SignupCompleted); ok {
+		t.Error("a returning user emitted signup_completed — the funnel would double-count")
+	}
+}
+
+// otp_requested happens before anybody is identified. Attaching the
+// identifier they typed would put an email address in the warehouse AND
+// tell the pipeline something the endpoint deliberately refuses to tell
+// the caller.
+func TestOTPRequestedCarriesNoIdentifier(t *testing.T) {
+	ctx := context.Background()
+	ch := &captureChannel{}
+	svc, stop := serviceWithRealOTP(t, &fakeUserCreator{}, ch, &fakeAudit{})
+	defer stop()
+
+	rec := &eventRecorder{}
+	svc.events = rec
+
+	const identifier = "analytics-anon@example.com"
+	if err := svc.RequestOTP(ctx, ChannelEmail, identifier, "en", nil); err != nil {
+		t.Fatalf("request: %v", err)
+	}
+
+	event, ok := rec.get(analytics.OTPRequested)
+	if !ok {
+		t.Fatalf("otp_requested was not emitted; got %v", rec.names())
+	}
+	if event.userID != nil {
+		t.Error("otp_requested identified a user before verification")
+	}
+	for key, value := range event.props {
+		if key != "channel" {
+			t.Errorf("unexpected property %q = %v", key, value)
+		}
+		if str, isString := value.(string); isString && strings.Contains(str, "@") {
+			t.Errorf("the identifier leaked into %q", key)
+		}
 	}
 }
