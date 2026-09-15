@@ -1,67 +1,73 @@
 # ADR-003 — Astrology engine and its licence
 
-**Status:** 🔴 **PROPOSED — MUST BE CLOSED BEFORE PHASE 7** · raised 2026-09-13
-
-This is the only open architectural question in the project. It is recorded now, in
-Phase 0, because the moment money changes hands "we'll sort the licence out later"
-becomes a liability rather than a task.
+**Status:** ✅ **ACCEPTED** · raised 2026-09-13 · decided 2026-09-16
 
 ## Decision
 
-**Not yet made.** Phase 2 implements against Swiss Ephemeris via `pyswisseph`. The
-licensing path must be chosen before Phase 7 (Monetization).
+**`skyfield` (MIT), with the Vedic layer implemented in `services/astro/app/core/`.**
 
-## Context
+Not `pyswisseph`. The project carries no ephemeris licence obligation, now or at
+Phase 7.
 
-Swiss Ephemeris is the reference implementation for astrological calculation:
-sub-arcsecond accuracy, every ayanamsa, every house system, correct lunar nodes,
-correct retrogradation. `pyswisseph` is its mature Python binding.
+## Why
 
-It is **dual-licensed**: AGPL-3.0, or a paid commercial licence from Astrodienst.
+The three options were:
 
-## Options considered
-
-| Option | Obligation | Fits if |
+| Option | Obligation | |
 |---|---|---|
-| **AGPL-3.0** | Network use triggers source disclosure — you must offer the complete corresponding source of the application to its users | Open-sourcing, or pre-revenue and comfortable with that |
-| **Commercial licence** | One-time fee to Astrodienst | Shipping closed-source commercial SaaS — which this is |
-| **`skyfield` (MIT)** | None | Willing to implement the Vedic layer directly |
+| `pyswisseph` under AGPL-3.0 | Network use triggers source disclosure — serving users over HTTP means offering them the complete corresponding source of Ayana | Rejected |
+| `pyswisseph` + Astrodienst commercial licence | A one-time fee, and a purchase someone has to actually make | Rejected |
+| **`skyfield` (MIT)** | **None** | **Chosen** |
 
-The third option deserves serious consideration rather than dismissal. `skyfield` is
-MIT-licensed, pure Python, and computes accurate geocentric positions from JPL
-ephemerides. What it does not provide is the Vedic layer — ayanamsa, nakshatras,
-dashas, vargas, yogas.
+The decision turns on how much `pyswisseph` actually saves us, and the honest
+answer is: less than it first appears.
 
-But **all of that is deterministic arithmetic on top of longitudes, and we are writing
-it ourselves regardless**: Lahiri ayanamsa is a published polynomial, nakshatra is
-`floor(longitude / 13°20′)`, and Vimshottari is a fixed 120-year proportional
-sequence. The marginal work is smaller than it first appears.
+Both libraries compute accurate geocentric positions — `skyfield` from JPL
+ephemerides, and far beyond the precision astrology needs. What `pyswisseph`
+additionally *bundles* is the ayanamsa tables, the house systems and the node
+calculations. Everything downstream of a longitude — nakshatras, padas, vargas,
+the Vimshottari tree, aspects, yogas, Sade Sati — is deterministic arithmetic we
+were always going to write and test ourselves.
 
-## Current position
+So the marginal work is the Lahiri ayanamsa polynomial and the house systems.
+Lahiri is published. Whole sign — the Vedic default and the only house system
+Phase 2 ships — is `ascendant_sign + n`. That is a small, well-specified,
+testable surface in exchange for permanently removing a licence question from a
+product that intends to take money.
 
-Development proceeds on `pyswisseph`. Both paths are free and legally clean for
-non-distributed development, so this does not block Phase 2.
+### What we are giving up, stated plainly
 
-The abstraction in `services/astro/app/core/` is written so the ephemeris backend is
-swappable: `EPHEMERIS_PROVIDER` is already a configuration value, not a hardcoded
-import. That keeps option C genuinely available rather than theoretically available.
+**Agreement with Astrodienst, not accuracy.** Indian astrologers cross-check
+against astro.com, and `pyswisseph` would match it by construction. We now have
+to *earn* that agreement through cross-validation instead of inheriting it.
 
-## Decision criteria
+This is the strongest argument against this decision and it is the reason the
+Phase 2 gate requires five golden fixtures validated against an **independent**
+reference before any of them are frozen. A golden file that encodes our own
+ayanamsa bug would make that bug permanent and invisible.
 
-Answer these, in order:
+**Placidus and Sripati get harder.** Both are available in `pyswisseph` and
+neither is in `skyfield`. Neither is the default, and Phase 2 ships whole sign
+only. When bhava chalit is wanted, the implementation is ours to write — priced
+in, not overlooked.
 
-1. Will this ship as closed-source SaaS? If yes, AGPL is not viable.
-2. What does the Astrodienst commercial licence actually cost today?
-3. How much work is the Vedic layer on top of `skyfield`, measured rather than
-   estimated? (Phase 2 will tell you, because you will have written most of it.)
+## Consequences
 
-## Tradeoffs
-
-- **AGPL** — free, but source disclosure is incompatible with a closed commercial product
-- **Commercial** — a one-time cost, and the accuracy is unmatched
-- **`skyfield`** — no licence constraint, more of the Vedic layer to own and test
+- `EPHEMERIS_PROVIDER` remains a real configuration value with a real interface
+  behind it, so this is reversible if cross-validation exposes something we
+  cannot reconcile. The abstraction is not theatre; it is the exit.
+- `EPHEMERIS_FLAG`, `EPHEMERIS_PATH` — `pyswisseph` concepts — do not apply.
+  `skyfield` fetches a JPL kernel (`de421.bsp`, ~17 MB, public domain) which is
+  vendored rather than downloaded at runtime: `app/core` may not touch the
+  network, and a service that phones home on boot is not deterministic.
+- The ayanamsa implementation is ours, so it gets its own tests against
+  published values at several epochs — not just the golden files, which would
+  only prove we are self-consistent.
+- No AGPL obligation and no purchase. The Phase 7 liability this ADR was raised
+  to prevent no longer exists.
 
 ## Gate
 
-The Phase 2 Phase Gate contains a blocking checklist item: this ADR must read
-`accepted`, not `proposed`, before Phase 2 is considered complete.
+The Phase 2 gate requires this ADR to read `accepted`. It does. The obligation
+it transfers — cross-validating the ayanamsa and the five fixtures against an
+independent source — is tracked in that same gate and is not optional.

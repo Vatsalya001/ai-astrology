@@ -6,21 +6,43 @@ package dbgen
 
 import (
 	"context"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
 type Querier interface {
 	CancelUserDeletion(ctx context.Context, id pgtype.UUID) (User, error)
+	CountPlaces(ctx context.Context) (int64, error)
+	// Astrology queries. See docs/specs/PHASE-02-ASTROLOGY-ENGINE.md §3.
+	//
+	// Every read of a birth profile or a chart is scoped by user_id in the
+	// SQL itself, not by a check in the handler. A chart is among the most
+	// sensitive objects in the system, and a predicate in the query is a
+	// guarantee the caller cannot forget to apply.
+	// ─── birth profiles ──────────────────────────────────────────────────
+	CreateBirthProfile(ctx context.Context, arg CreateBirthProfileParams) (BirthProfile, error)
 	// ─── Preferences ─────────────────────────────────────────────────────
 	CreateDefaultPreferences(ctx context.Context, userID pgtype.UUID) (UserPreference, error)
 	// ─── Sessions ────────────────────────────────────────────────────────
 	CreateSession(ctx context.Context, arg CreateSessionParams) (Session, error)
 	CreateUserWithEmail(ctx context.Context, email *string) (User, error)
 	CreateUserWithPhone(ctx context.Context, phone *string) (User, error)
+	DeactivateBirthProfile(ctx context.Context, arg DeactivateBirthProfileParams) (int64, error)
+	// Recomputing replaces the whole tree. Deleting first keeps it a tree
+	// rather than two overlapping generations of one.
+	DeleteDashasForChart(ctx context.Context, chartID pgtype.UUID) (int64, error)
 	// Housekeeping for the worker. Expired rows prove nothing and grow
 	// forever.
 	DeleteExpiredSessions(ctx context.Context) error
+	DeleteTransitsBefore(ctx context.Context, timestamp time.Time) (int64, error)
+	// Which periods were running at a given instant — one per level, so a
+	// caller gets the Maha, Antar and Pratyantar in a single round trip.
+	//
+	// Half-open interval: start <= t < end. A closed interval would return
+	// two rows on the boundary instant, since one period's end is the next
+	// one's start.
+	FindDashaAt(ctx context.Context, arg FindDashaAtParams) ([]Dasha, error)
 	// ─── Identities ──────────────────────────────────────────────────────
 	FindIdentity(ctx context.Context, arg FindIdentityParams) (AuthIdentity, error)
 	// Used only on the reuse path, to find which family to revoke. Deliberately
@@ -31,6 +53,15 @@ type Querier interface {
 	FindUserByEmail(ctx context.Context, email *string) (User, error)
 	FindUserByID(ctx context.Context, id pgtype.UUID) (User, error)
 	FindUserByPhone(ctx context.Context, phone *string) (User, error)
+	// Scoped by user. A caller asking for someone else's profile gets no
+	// row, which the handler turns into a 404 — never a 403, because a 403
+	// confirms the row exists.
+	GetBirthProfile(ctx context.Context, arg GetBirthProfileParams) (BirthProfile, error)
+	// Joined to birth_profiles so ownership is enforced in the same
+	// statement that fetches the data. A separate ownership check is a
+	// check someone can forget.
+	GetChart(ctx context.Context, arg GetChartParams) (Chart, error)
+	GetPlace(ctx context.Context, id int32) (Place, error)
 	GetPreferences(ctx context.Context, userID pgtype.UUID) (UserPreference, error)
 	// Queries against schema_meta.
 	//
@@ -46,10 +77,13 @@ type Querier interface {
 	// key, so the record that a deletion happened survives the deletion. It
 	// holds IDs and enums only, never PII.
 	HardDeleteUser(ctx context.Context, id pgtype.UUID) error
+	// ─── dashas ──────────────────────────────────────────────────────────
+	InsertDasha(ctx context.Context, arg InsertDashaParams) (Dasha, error)
 	// ON CONFLICT DO UPDATE rather than DO NOTHING: DO NOTHING returns no
 	// row, so the caller cannot tell "already linked" from "insert failed"
 	// without a second query.
 	LinkIdentity(ctx context.Context, arg LinkIdentityParams) (AuthIdentity, error)
+	ListActiveBirthProfiles(ctx context.Context, userID pgtype.UUID) ([]BirthProfile, error)
 	// One row per DEVICE, not per session.
 	//
 	// A device is a family: every refresh issues a new session row sharing
@@ -66,10 +100,29 @@ type Querier interface {
 	// data export, where completeness is the point.
 	ListActiveSessions(ctx context.Context, userID pgtype.UUID) ([]Session, error)
 	ListAuditLogsForUser(ctx context.Context, arg ListAuditLogsForUserParams) ([]AuditLog, error)
+	// The history behind one profile, newest first.
+	//
+	// Walks superseded_by BACKWARDS from the given id: each step finds the
+	// version that this one replaced. Callers ask for the history of the
+	// profile they are looking at, which is the active one, which is the
+	// newest — so walking back reaches every earlier version.
+	//
+	// Every column reference is qualified. An unqualified `id` here is
+	// ambiguous between the CTE and the table, and sqlc rejects it, which is
+	// the right moment to find out rather than at runtime.
+	ListBirthProfileVersions(ctx context.Context, arg ListBirthProfileVersionsParams) ([]ListBirthProfileVersionsRow, error)
+	// Finds charts built by an older engine, so a library upgrade can be
+	// followed by a targeted recompute instead of a guess.
+	ListChartsByEngineVersion(ctx context.Context, arg ListChartsByEngineVersionParams) ([]Chart, error)
+	ListChartsForProfile(ctx context.Context, arg ListChartsForProfileParams) ([]Chart, error)
+	ListDashasByLevel(ctx context.Context, arg ListDashasByLevelParams) ([]Dasha, error)
 	// Needed by the data export. Without it the export declares an
 	// auth_identities field and always returns [], which is worse than
 	// omitting it: it tells the user there are none.
 	ListIdentitiesForUser(ctx context.Context, userID pgtype.UUID) ([]AuthIdentity, error)
+	// Global and free of personal data, so no user scoping — and that is
+	// what makes them safe to cache across all users.
+	ListTransitsAt(ctx context.Context, arg ListTransitsAtParams) ([]Transit, error)
 	ListUsersPastDeletionGrace(ctx context.Context, deletionRequestedAt pgtype.Timestamptz) ([]User, error)
 	// ─── Deletion ────────────────────────────────────────────────────────
 	RequestUserDeletion(ctx context.Context, id pgtype.UUID) (User, error)
@@ -99,13 +152,33 @@ type Querier interface {
 	// wrote — the classic TOCTOU that makes a leaked token usable twice. No
 	// application lock is needed, and a mocked database cannot test this.
 	RotateRefreshToken(ctx context.Context, refreshHash []byte) (Session, error)
+	// ─── places ──────────────────────────────────────────────────────────
+	// Prefix match, ranked by population — which is what makes "jaip"
+	// return Jaipur, Rajasthan rather than a village of 600 people. The
+	// ranking matters more than the matching at the highest drop-off point
+	// in the product.
+	SearchPlaces(ctx context.Context, arg SearchPlacesParams) ([]Place, error)
 	SetSchemaPhase(ctx context.Context, phase string) (SchemaMetum, error)
+	// Marks a version replaced. Returns the row so the caller can tell
+	// "superseded it" from "there was nothing to supersede" without a second
+	// query — the same reason RevokeSession became :execrows in Phase 1.
+	SupersedeBirthProfile(ctx context.Context, arg SupersedeBirthProfileParams) (BirthProfile, error)
 	TouchLastLogin(ctx context.Context, id pgtype.UUID) error
 	UpdatePreferences(ctx context.Context, arg UpdatePreferencesParams) (UserPreference, error)
 	// COALESCE so a PATCH omitting a field leaves it alone rather than
 	// nulling it. Only name and gender are writable here; email and phone
 	// change through a verification flow, never a profile edit.
 	UpdateUserProfile(ctx context.Context, arg UpdateUserProfileParams) (User, error)
+	// ─── charts ──────────────────────────────────────────────────────────
+	// Keyed on every input that affects the output. Recomputing with the
+	// same inputs replaces the data in place; changing the ayanamsa creates
+	// a different row rather than overwriting an unrelated chart.
+	UpsertChart(ctx context.Context, arg UpsertChartParams) (Chart, error)
+	// Keyed on the GeoNames id, so re-running the importer updates rows
+	// instead of duplicating them.
+	UpsertPlace(ctx context.Context, arg UpsertPlaceParams) error
+	// ─── transits ────────────────────────────────────────────────────────
+	UpsertTransit(ctx context.Context, arg UpsertTransitParams) (Transit, error)
 	// ─── Audit ───────────────────────────────────────────────────────────
 	WriteAuditLog(ctx context.Context, arg WriteAuditLogParams) error
 }

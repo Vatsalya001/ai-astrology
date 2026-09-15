@@ -117,6 +117,63 @@ type AuthIdentity struct {
 	CreatedAt      time.Time
 }
 
+type BirthProfile struct {
+	ID           pgtype.UUID
+	UserID       pgtype.UUID
+	Label        string
+	BirthDate    pgtype.Date
+	BirthTime    pgtype.Time
+	TimeAccuracy string
+	BirthPlace   string
+	Latitude     float64
+	Longitude    float64
+	Timezone     string
+	UtcOffsetMin int32
+	UtcInstant   time.Time
+	Source       string
+	Verified     bool
+	Version      int32
+	SupersededBy pgtype.UUID
+	IsActive     bool
+	CreatedAt    time.Time
+}
+
+type Chart struct {
+	ID                pgtype.UUID
+	BirthProfileID    pgtype.UUID
+	ChartType         string
+	CalculationSystem string
+	Ayanamsa          string
+	HouseSystem       string
+	EngineVersion     string
+	ChartData         []byte
+	ComputedAt        time.Time
+}
+
+type Dasha struct {
+	ID        pgtype.UUID
+	ChartID   pgtype.UUID
+	System    string
+	Planet    string
+	StartDate time.Time
+	EndDate   time.Time
+	Level     int16
+	ParentID  pgtype.UUID
+	Metadata  []byte
+}
+
+type Place struct {
+	ID          int32
+	Name        string
+	AsciiName   string
+	Admin1      *string
+	CountryCode string
+	Latitude    float64
+	Longitude   float64
+	Timezone    string
+	Population  int32
+}
+
 type SchemaMetum struct {
 	ID             int16
 	Application    string
@@ -136,6 +193,18 @@ type Session struct {
 	UsedAt      pgtype.Timestamptz
 	RevokedAt   pgtype.Timestamptz
 	CreatedAt   time.Time
+}
+
+type Transit struct {
+	ID                pgtype.UUID
+	Planet            string
+	Sign              string
+	Degree            float64
+	IsRetrograde      bool
+	Timestamp         time.Time
+	CalculationSystem string
+	Ayanamsa          string
+	Metadata          []byte
 }
 
 type User struct {
