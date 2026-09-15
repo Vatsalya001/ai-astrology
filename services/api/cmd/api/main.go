@@ -19,6 +19,7 @@ import (
 	"github.com/Vatsalya001/ai-astrology/services/api/internal/auth"
 	"github.com/Vatsalya001/ai-astrology/services/api/internal/config"
 	"github.com/Vatsalya001/ai-astrology/services/api/internal/httpapi"
+	"github.com/Vatsalya001/ai-astrology/services/api/internal/platform/analytics"
 	"github.com/Vatsalya001/ai-astrology/services/api/internal/platform/audit"
 	"github.com/Vatsalya001/ai-astrology/services/api/internal/platform/clients"
 	"github.com/Vatsalya001/ai-astrology/services/api/internal/platform/db"
@@ -138,8 +139,13 @@ func run() error {
 
 	queries := dbgen.New(database.Pool)
 	recorder := audit.NewRecorder(queries, log)
-	userService := users.NewService(queries)
-	sessionDirectory := users.NewSessionDirectory(queries)
+	// Structured JSON on stdout, the same sink as every other log line,
+	// so the pipeline that already ships logs ships events too. No vendor,
+	// no SDK, no key — and no ADR needed, because no new technology.
+	events := analytics.NewLogEmitter(log)
+
+	userService := users.NewService(queries).WithAnalytics(events)
+	sessionDirectory := users.NewSessionDirectory(queries).WithAnalytics(events)
 
 	authService := auth.NewService(auth.ServiceConfig{
 		OTP:       auth.NewOTPStore(cache.Client, cfg.OTPTTL, cfg.OTPMaxAttempts),
@@ -147,6 +153,7 @@ func run() error {
 		Rotator:   auth.NewRotator(issuer, auth.NewPostgresSessionStore(queries)),
 		Users:     userService,
 		Audit:     recorder,
+		Events:    events,
 		Logger:    log,
 		OTPLength: cfg.OTPLength,
 	})
@@ -155,7 +162,8 @@ func run() error {
 		auth.NewOTPStore(cache.Client, cfg.OTPTTL, cfg.OTPMaxAttempts),
 		channel, userService, cfg.OTPLength,
 	)
-	deleter := users.NewDeleter(queries, sessionDirectory, cfg.AccountDeleteGrace, log)
+	deleter := users.NewDeleter(queries, sessionDirectory, cfg.AccountDeleteGrace, log).
+		WithAnalytics(events)
 
 	google := auth.NewGoogle(auth.GoogleConfig{
 		ClientID:     cfg.GoogleClientID,

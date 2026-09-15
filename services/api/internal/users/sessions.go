@@ -6,6 +6,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/Vatsalya001/ai-astrology/services/api/internal/platform/analytics"
 	"github.com/Vatsalya001/ai-astrology/services/api/internal/platform/db/dbgen"
 )
 
@@ -17,11 +18,20 @@ import (
 // merits: `auth` owns rotation and revocation *mechanics*; this owns the
 // user-facing view of which devices are signed in.
 type SessionDirectory struct {
-	q dbgen.Querier
+	q      dbgen.Querier
+	events analytics.Emitter
 }
 
 func NewSessionDirectory(q dbgen.Querier) *SessionDirectory {
-	return &SessionDirectory{q: q}
+	return &SessionDirectory{q: q, events: analytics.Nop{}}
+}
+
+// WithAnalytics attaches an emitter. See users.Service.WithAnalytics.
+func (d *SessionDirectory) WithAnalytics(events analytics.Emitter) *SessionDirectory {
+	if events != nil {
+		d.events = events
+	}
+	return d
 }
 
 var _ SessionReader = (*SessionDirectory)(nil)
@@ -84,6 +94,14 @@ func (d *SessionDirectory) Revoke(ctx context.Context, familyID, userID uuid.UUI
 		// separate code for "already revoked" leaks that it once did.
 		return ErrNotFound
 	}
+
+	// Only on a real revocation. Emitting on the not-found path would put
+	// a count of failed cross-user probes into the product funnel, where
+	// it reads as users revoking devices.
+	d.events.Emit(ctx, analytics.SessionRevoked, &userID, map[string]any{
+		"count": int(affected),
+	})
+
 	return nil
 }
 

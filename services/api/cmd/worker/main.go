@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/Vatsalya001/ai-astrology/services/api/internal/config"
+	"github.com/Vatsalya001/ai-astrology/services/api/internal/platform/analytics"
 	"github.com/Vatsalya001/ai-astrology/services/api/internal/platform/db"
 	"github.com/Vatsalya001/ai-astrology/services/api/internal/platform/db/dbgen"
 	"github.com/Vatsalya001/ai-astrology/services/api/internal/platform/logging"
@@ -63,12 +64,16 @@ func run() error {
 	defer func() { _ = cache.Close() }()
 
 	queries := dbgen.New(database.Pool)
+	// The worker is where account_deleted actually fires — the API marks
+	// an account for deletion, this process is what removes it.
+	events := analytics.NewLogEmitter(log)
+
 	deleter := users.NewDeleter(
 		queries,
-		users.NewSessionDirectory(queries),
+		users.NewSessionDirectory(queries).WithAnalytics(events),
 		cfg.AccountDeleteGrace,
 		log,
-	)
+	).WithAnalytics(events)
 
 	log.Info("worker ready",
 		slog.String("jobs", "hard-delete"),

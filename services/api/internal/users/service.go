@@ -16,6 +16,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/Vatsalya001/ai-astrology/services/api/internal/auth"
+	"github.com/Vatsalya001/ai-astrology/services/api/internal/platform/analytics"
 	"github.com/Vatsalya001/ai-astrology/services/api/internal/platform/db/dbgen"
 )
 
@@ -23,11 +24,25 @@ var ErrNotFound = errors.New("users: not found")
 
 // Service is the users business logic.
 type Service struct {
-	q dbgen.Querier
+	q      dbgen.Querier
+	events analytics.Emitter
 }
 
 func NewService(q dbgen.Querier) *Service {
-	return &Service{q: q}
+	return &Service{q: q, events: analytics.Nop{}}
+}
+
+// WithAnalytics attaches an emitter.
+//
+// A separate call rather than a constructor argument because analytics is
+// genuinely optional — every test that does not care about it keeps the
+// two-line constructor, and a Nop is always present so no call site ever
+// needs a nil check.
+func (s *Service) WithAnalytics(events analytics.Emitter) *Service {
+	if events != nil {
+		s.events = events
+	}
+	return s
 }
 
 var _ auth.UserCreator = (*Service)(nil)
@@ -212,6 +227,15 @@ func (s *Service) UpdateProfile(ctx context.Context, id uuid.UUID, name, gender 
 		}
 		return ProfileView{}, fmt.Errorf("users: update profile: %w", err)
 	}
+
+	// onboarding_name_completed, not profile_updated: the spec measures
+	// the onboarding funnel, and this is the step it turns on. Emitted
+	// only when a name was actually supplied — a gender-only edit from the
+	// settings screen is not an onboarding completion.
+	if name != nil {
+		s.events.Emit(ctx, analytics.OnboardingNameCompleted, &id, nil)
+	}
+
 	return toProfileView(row), nil
 }
 
@@ -276,7 +300,37 @@ func (s *Service) UpdatePreferences(ctx context.Context, userID uuid.UUID, in Pr
 		}
 		return PreferencesView{}, fmt.Errorf("users: update preferences: %w", err)
 	}
+
+	// The field NAMES, never their values. Which preferences people change
+	// is the product question; what they changed them to is on the row
+	// already and does not need to be in a warehouse.
+	s.events.Emit(ctx, analytics.PreferencesUpdated, &userID, map[string]any{
+		"fields": changedFields(in),
+	})
+
 	return toPreferencesView(row), nil
+}
+
+// changedFields lists which preference keys a request actually set.
+//
+// Sorted implicitly by declaration order so two identical updates produce
+// identical events, which is what makes them groupable.
+func changedFields(in PreferenceUpdate) []string {
+	fields := make([]string, 0, 4)
+	for _, f := range []struct {
+		name  string
+		value *string
+	}{
+		{"preferred_language", in.PreferredLanguage},
+		{"astrology_system", in.AstrologySystem},
+		{"chart_style", in.ChartStyle},
+		{"theme", in.Theme},
+	} {
+		if f.value != nil {
+			fields = append(fields, f.name)
+		}
+	}
+	return fields
 }
 
 // ─── views ───────────────────────────────────────────────────────────
