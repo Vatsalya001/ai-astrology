@@ -610,6 +610,15 @@ another user's ID cannot retrieve their chart.
 - [ ] User input never enters the system prompt section
 - [ ] Prompt-injection attempts flagged; system prompt never leaks (tested)
 - [ ] Markdown sanitised on an allowlist; no raw HTML rendered
+- [ ] **`script-src 'unsafe-inline'` removed from the web CSP** — carried over
+      from Phase 1, where it was acceptable because the app rendered no
+      untrusted content. This phase is the one that renders model output, so
+      it is the phase that has to pay for it. Replace with a per-request
+      nonce (`proxy.ts`, which forces dynamic rendering) or
+      `experimental.sri` (keeps static rendering; needs an ADR because it is
+      experimental). Sanitising is the first defence; the CSP is what
+      catches the case where the sanitiser has a gap, and with
+      `'unsafe-inline'` present it catches nothing.
 - [ ] SSE endpoint authenticated per connection; tokens not in the query string
 - [ ] Rate limiting per user and per IP on chat
 - [ ] `CHAT_MAX_MESSAGE_LENGTH` enforced server-side, not just in the UI
@@ -693,6 +702,10 @@ Global DoD **plus**:
 - [ ] Save, share and report all work
 - [ ] Persona switch changes tone without changing facts
 - [ ] Markdown sanitised; injection produces no leak (tested)
+- [ ] **Web CSP no longer carries `script-src 'unsafe-inline'`**, and
+      `tests/e2e/csp.spec.ts` still proves the app hydrates under the
+      replacement — a strict policy the app cannot run under gets deleted by
+      whoever hits it on a Friday
 - [ ] Cross-user isolation returns 404 (tested)
 - [ ] Conversation and account deletion cascade fully
 - [ ] Crisis short-circuit verified in the live chat path

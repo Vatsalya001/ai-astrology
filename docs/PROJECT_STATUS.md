@@ -280,17 +280,120 @@ production is on a paid tier and development is not.
 
 ---
 
+# Phase 1 — Authentication & User Profiles ✅
+
+**Gate: 16 of 17 items closed.** The seventeenth is open by the account owner's
+decision, not by omission. Full evidence: [`TESTING-PHASE-1.md`](TESTING-PHASE-1.md).
+
+Hand-rolled, per the spec and the owner's choice. The §14 risk table already said
+what that means — *"hand-rolled auth is a classic vulnerability source"* — with the
+mitigation that every §11 item is tested rather than reviewed. That is what was done,
+and the tests are what found the holes.
+
+## What shipped
+
+| PR | What |
+|---|---|
+| 1–2 | Migration, sqlc queries, the `Channel` interface, Console and SMTP |
+| 3 | Tokens, rotation, reuse detection |
+| 4 | Rate limiting and the auth middleware |
+| 5 | Auth endpoints — login actually works |
+| 6 | Profile, preferences, sessions |
+| 7 | Account deletion and data export |
+| 8a–8b | The nine screens, i18n, the sessions screen |
+| 8c | Google OAuth, built and tested without credentials |
+| 8d | Three rate-limiting holes found by measuring |
+| 8e | Analytics events, with a vocabulary that cannot leak PII |
+| 8f | The remaining §10 flows, the web CSP, this gate |
+
+## What running it found that reading it did not
+
+This is the part worth keeping. Every item below looked correct on the page.
+
+**`POST /users/me/challenge` was completely unlimited.** 25 of 25 consecutive calls
+returned 200. Each sends a real email or SMS to the account's own verified contact,
+so an unlimited version is a mailbomb aimed at whoever owns the account, triggerable
+by anyone holding an access token. Now 3 per 15 minutes **per user** — not per IP,
+because an attacker changes IP freely and cannot change whose account a stolen token
+belongs to. It fails *closed* if Redis is down: the blast radius lands in someone
+else's inbox.
+
+**`GlobalPerIP` was declared "the backstop, applies to every request regardless of
+route" and was wired to nothing.** It is now real middleware on `/api/v1`, which is
+what makes "every endpoint is limited" true by construction rather than by
+remembering — including routes a later phase has not mounted yet.
+
+**The spec's 100/minute backstop was wrong, and the e2e suite is what proved it.** Six
+concurrent browser sessions generated 105 counted requests in 15 seconds — 420/minute
+from one address. Indian carrier-grade NAT puts thousands of subscribers behind one
+public IP, so 100 would not have throttled an attacker; it would have broken entire
+carrier pools. Raised to 1200/minute from that measurement. The same trap
+`OTPRequestPerIP` fell into and was corrected for.
+
+**`go test -tags=integration` reported `ok` when Docker was unavailable**, skipping
+every test. The single-writer grants, refresh reuse detection and the limiter under
+concurrency would all have gone unverified behind a passing check mark.
+`REQUIRE_CONTAINERS=1` in CI now turns that skip into a failure; locally it still
+skips, so a developer without Docker gets a fast unit suite rather than a wall of red.
+
+**`retryable: true` on a permanently-unconfigured feature.** The flag was derived from
+`status >= 500`, so an unconfigured OAuth provider told well-behaved clients to retry
+forever. 501 now, and 501 is excluded from the rule.
+
+**The web app had four security headers and no CSP.** The four that were present are
+one line each; the one that was missing requires deciding what the app is allowed to
+do. Added — and the first strict version *broke the app*, which the new
+`csp.spec.ts` caught as a click timeout on a page that rendered perfectly. See the
+CSP section in `TESTING-PHASE-1.md` for the concession that resulted and the Phase 5
+gate item that retires it.
+
+## Guards proven by breaking them
+
+`TESTING-PHASE-1.md` has the full table. The two that matter most:
+
+- Removing `AND used_at IS NULL` from `RotateRefreshToken` → **32 of 32** concurrent
+  rotations succeeded.
+- Removing `AND revoked_at IS NULL` → a revoked device kept minting tokens,
+  `/auth/refresh` returning **200** where the test expects 401.
+
+## Data corruption, event #9
+
+`next build` aborted with `Cache corruption detected: checksum mismatch in block 12 of
+00000077.sst`. Same class as the Go linker's `index out of range [1879048191]`.
+`rm -rf apps/web/.next` and it built. **`memtest86+` is still unrun.** Nine events is
+not a coincidence; before chasing a mysterious build failure on this machine, clear
+the relevant cache and try again.
+
+---
+
 ## Open decisions
 
 | ADR | Question | Due |
 |---|---|---|
 | [003](decisions/003-astrology-engine.md) | Swiss Ephemeris licence: AGPL, commercial, or MIT `skyfield` | **Before Phase 7** |
 
+## Open by decision
+
+**Google OAuth (Phase 1 gate item 3).** No credentials exist. The flow is built and
+covered end to end against a stubbed Google with a real Redis. Two lines in `.env`
+and an authorised redirect URI of
+`http://localhost:4000/api/v1/auth/oauth/google/callback` close it; the button appears
+by itself, because the web app asks `GET /api/v1/auth/providers` rather than keeping
+its own copy of the credential state.
+
+**Apple OAuth** stays deferred to Phase 10, per §14 — it needs a $99/yr developer
+account and iOS does not ship until then.
+
 ---
 
 ## Next
 
-**Phase 1 — Authentication & User Profiles.** `docs/specs/PHASE-01-AUTH-AND-USERS.md`.
+**Phase 2 — Astrology Engine.** `docs/specs/PHASE-02-ASTROLOGY-ENGINE.md`.
 
-First decision in that phase: managed auth versus hand-rolled. Hand-rolled auth is a
-classic source of vulnerabilities; decide before building, not after.
+Entirely Python, in `services/astro`. The Go service gains a generated client and
+nothing else. Two things decide whether this phase is any good:
+
+1. **Cross-validate every golden file against an independent reference before freezing
+   it.** A golden file that encodes your own bug makes that bug permanent.
+2. **`Decimal`, not float, for dasha arithmetic.** Error accumulates across three
+   levels of subdivision and produces dates wrong by days.

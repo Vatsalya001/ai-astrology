@@ -54,9 +54,9 @@ export interface OTPWatcher {
  * Call this BEFORE the action that triggers a send — otherwise the
  * request may already have been written and there is nothing new to see.
  */
-export function watchOTP(email: string): OTPWatcher {
+export function watchOTP(identifier: string): OTPWatcher {
   const from = logSize()
-  const masked = maskEmail(email)
+  const masked = maskIdentifier(identifier)
   // The mask contains `***` and `@`; an unescaped `*` is a quantifier.
   const pattern = new RegExp(`── OTP for ${escapeRegExp(masked)}: (\\d+)`)
 
@@ -75,7 +75,7 @@ export function watchOTP(email: string): OTPWatcher {
       }
 
       throw new Error(
-        `no OTP for ${email} (logged as ${masked}) appeared in ${API_LOG} ` +
+        `no OTP for ${identifier} (logged as ${masked}) appeared in ${API_LOG} ` +
           `within ${timeoutMs}ms of the request. Is AUTH_CHANNEL=console, and ` +
           `did the request return 200 rather than 429?`,
       )
@@ -83,10 +83,32 @@ export function watchOTP(email: string): OTPWatcher {
   }
 }
 
-/** Mirrors maskIdentifier in services/api/internal/auth/channel.go. */
-function maskEmail(email: string): string {
-  const at = email.lastIndexOf('@')
-  return email.slice(0, 1) + '***' + email.slice(at)
+/**
+ * Mirrors maskIdentifier in services/api/internal/auth/channel.go.
+ *
+ * Both branches, because both channels go through the same log line. The
+ * phone form keeps a three-character head and a three-digit tail, which
+ * is a WEAKER discriminator than the email form's first letter plus
+ * domain — every Indian mobile masks to `+91********`, so concurrent
+ * phone tests must differ in their last three digits. `uniquePhone`
+ * handles that.
+ */
+function maskIdentifier(identifier: string): string {
+  const at = identifier.lastIndexOf('@')
+  if (at > 0) {
+    return identifier.slice(0, 1) + '***' + identifier.slice(at)
+  }
+
+  const keepHead = 3
+  const keepTail = 3
+  if (identifier.length <= keepHead + keepTail) {
+    return '*'.repeat(identifier.length)
+  }
+  return (
+    identifier.slice(0, keepHead) +
+    '*'.repeat(identifier.length - keepHead - keepTail) +
+    identifier.slice(-keepTail)
+  )
 }
 
 function escapeRegExp(s: string): string {
@@ -116,4 +138,23 @@ function logSize(): number {
  */
 export function uniqueEmail(distinctFirstLetter: string): string {
   return `${distinctFirstLetter}${Date.now()}-${Math.floor(Math.random() * 1e6)}@example.com`
+}
+
+/**
+ * A unique E.164 number whose MASK is also unique.
+ *
+ * The phone mask keeps only three leading characters and three trailing
+ * digits, so `+919812345000` and `+919899999000` are indistinguishable in
+ * the log. The caller supplies a distinct three-digit TAIL for the same
+ * reason `uniqueEmail` takes a distinct first letter.
+ *
+ * The middle is randomised so repeated runs do not collide on the
+ * per-identifier rate limit, which keys on the whole number.
+ */
+export function uniquePhone(distinctTail: string): string {
+  if (!/^\d{3}$/.test(distinctTail)) {
+    throw new Error(`uniquePhone needs exactly three digits, got ${distinctTail}`)
+  }
+  const middle = String(Math.floor(Math.random() * 1e7)).padStart(7, '0')
+  return `+91${middle}${distinctTail}`
 }
