@@ -282,8 +282,8 @@ production is on a paid tier and development is not.
 
 # Phase 1 — Authentication & User Profiles ✅
 
-**Gate: 16 of 17 items closed.** The seventeenth is open by the account owner's
-decision, not by omission. Full evidence: [`TESTING-PHASE-1.md`](TESTING-PHASE-1.md).
+**Gate: 16 of 16 items closed. Nothing open.** Full evidence:
+[`TESTING-PHASE-1.md`](TESTING-PHASE-1.md).
 
 Hand-rolled, per the spec and the owner's choice. The §14 risk table already said
 what that means — *"hand-rolled auth is a classic vulnerability source"* — with the
@@ -301,10 +301,11 @@ and the tests are what found the holes.
 | 6 | Profile, preferences, sessions |
 | 7 | Account deletion and data export |
 | 8a–8b | The nine screens, i18n, the sessions screen |
-| 8c | Google OAuth, built and tested without credentials |
+| 8c | Google OAuth, built and tested without credentials *(removed in 9a)* |
 | 8d | Three rate-limiting holes found by measuring |
 | 8e | Analytics events, with a vocabulary that cannot leak PII |
 | 8f | The remaining §10 flows, the web CSP, this gate |
+| 9a | Google OAuth removed; email and phone OTP only |
 
 ## What running it found that reading it did not
 
@@ -372,17 +373,25 @@ the relevant cache and try again.
 |---|---|---|
 | [003](decisions/003-astrology-engine.md) | Swiss Ephemeris licence: AGPL, commercial, or MIT `skyfield` | **Before Phase 7** |
 
-## Open by decision
+## Deferred by decision
 
-**Google OAuth (Phase 1 gate item 3).** No credentials exist. The flow is built and
-covered end to end against a stubbed Google with a real Redis. Two lines in `.env`
-and an authorised redirect URI of
-`http://localhost:4000/api/v1/auth/oauth/google/callback` close it; the button appears
-by itself, because the web app asks `GET /api/v1/auth/providers` rather than keeping
-its own copy of the credential state.
+**Social sign-in moves to Phase 10.** Google OAuth was built and fully tested in
+PR 8c — state forgery, replay, expiry, a 16-way concurrent exchange with exactly
+one winner, unverified-email refusal, all against a stubbed Google with a real
+Redis — and removed in PR 9a. The decision was the owner's: keep sign-in simple
+until the product exists, then add social login at the end.
 
-**Apple OAuth** stays deferred to Phase 10, per §14 — it needs a $99/yr developer
-account and iOS does not ship until then.
+It is **moved, not dropped**. `PHASE-10-MOBILE.md` carries it as tasks 10.3a and
+10.3b, a §11 item for `state` validation, and two gate items. **Restoring the
+implementation is `git revert` of PR 9a** — the code and every one of its tests
+come back intact. Do not rewrite it from scratch.
+
+Phase 10 is also where it belongs: Apple requires *Sign in with Apple* wherever
+an app offers a third-party social login, so Google and Apple have to land
+together once iOS ships.
+
+The conversion cost of having no social sign-in is real and accepted. Email and
+phone OTP need no third party and work today.
 
 ---
 

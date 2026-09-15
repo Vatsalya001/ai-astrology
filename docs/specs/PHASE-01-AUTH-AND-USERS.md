@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | **Goal** | Identity. A person can create an account, prove it's theirs, manage a profile, and delete everything. |
-| **Deliverable** | Signup and login via phone or email OTP (or Google/Apple), profile and preference management, and permanent account deletion — all in `api-service`. |
+| **Deliverable** | Signup and login via phone or email OTP, profile and preference management, and permanent account deletion — all in `api-service`. |
 | **Depends on** | Phase 0 |
 | **Unlocks** | Phase 2 |
 | **Estimated size** | 6–9 days |
@@ -16,7 +16,7 @@ Entirely a Go phase. Neither Python service is touched.
 ## 1. Scope
 
 ### In scope
-- Phone OTP, email OTP, Google OAuth, Apple OAuth
+- Phone OTP and email OTP. **Social sign-in is out of scope** — see §14.
 - Access token (short-lived JWT) + refresh token (rotating, revocable)
 - RBAC: `USER`, `ASTROLOGER`, `ADMIN`, `SUPER_ADMIN`
 - User profile, preferences, language selection
@@ -222,8 +222,6 @@ family revoked. No application-level lock needed.
 |---|---|---|---|
 | `POST` | `/api/v1/auth/otp/request` | — | `{ channel, identifier }` |
 | `POST` | `/api/v1/auth/otp/verify` | — | → tokens + `is_new_user` |
-| `GET` | `/api/v1/auth/oauth/{provider}` | — | redirect to Google/Apple |
-| `GET` | `/api/v1/auth/oauth/{provider}/callback` | — | → tokens |
 | `POST` | `/api/v1/auth/refresh` | refresh | rotates; reuse ⇒ family revoked |
 | `POST` | `/api/v1/auth/logout` | access | revokes current session |
 | `POST` | `/api/v1/auth/logout-all` | access | revokes every session |
@@ -325,7 +323,6 @@ account. One field, one button: "Continue". Branch internally.
 │                                      │
 │   ──────────  or  ──────────         │
 │                                      │
-│   [ Continue with Google ]           │
 │   [ Continue with Apple  ]           │
 │   [ Use email instead    ]           │
 │                                      │
@@ -373,8 +370,7 @@ what makes the promise real.
 |---|---|---|
 | SMS OTP | `ConsoleChannel` — `slog.Info("otp.dev", "identifier", id, "code", code)` | MSG91 / Twilio / AWS SNS — SMS is the one place with no free tier |
 | Email OTP | Mailpit at `localhost:8025` | Resend or Brevo free tier (~3k/mo) covers early production |
-| Google OAuth | Google Cloud Console — free | Same |
-| Apple OAuth | Requires a paid Apple Developer account ($99/yr) | Defer to Phase 10 |
+| Social sign-in | Google is free; Apple needs $99/yr | Both deferred to Phase 10 — see §14 |
 
 **Build email OTP first.** It is free end to end, in dev and in early production, and
 it exercises the identical code path as phone OTP through the channel interface.
@@ -439,8 +435,6 @@ crash the process at startup with a named error.
 | 1.4 | JWT issue/verify; refresh rotation via the atomic SQL above | Replaying a used token revokes the family |
 | 1.5 | Rate limit middleware with an atomic Lua window | 4th OTP request in 15 min → 429 with `Retry-After` |
 | 1.6 | `Authenticate` + `RequireRole` middleware | A `user` token gets 403 on an admin route |
-| 1.7 | Google OAuth with `state` validation | Round-trip creates or links an identity |
-| 1.8 | Apple OAuth *(defer if no dev account)* | Same |
 | 1.9 | Users handlers: me, patch, preferences | |
 | 1.10 | Sessions list + revoke | Revoking invalidates that device's refresh immediately |
 | 1.11 | Deletion: two-step, grace window, `asynq` hard-delete worker | After grace, no row anywhere references the user |
@@ -499,7 +493,6 @@ Deletion:     settings → delete → OTP → login blocked
 - [ ] Refresh cookie: `HttpOnly`, `Secure`, `SameSite=Strict`
 - [ ] Generic client errors; details server-side only
 - [ ] Account deletion genuinely deletes — verified by an integration test
-- [ ] OAuth `state` validated (CSRF on the OAuth flow)
 - [ ] `AUTH_CHANNEL=console` refused in production
 - [ ] Security headers + CSP on web
 
@@ -543,7 +536,7 @@ Global DoD (root README) **plus**:
 | Risk | Mitigation |
 |---|---|
 | SMS has no free tier | Ship email OTP first; the channel interface makes SMS an isolated addition |
-| Apple OAuth needs $99/yr | Defer to Phase 10 when iOS ships. Don't block Phase 1. |
+| Social sign-in is the lowest-friction signup path | **Deliberately deferred to Phase 10**, by the owner's decision: keep sign-in simple until the product exists, then add it. Email OTP needs no third party and works today, so nothing is blocked. The conversion cost is real and accepted. Google OAuth *was* built and fully tested in PR 8c and removed in PR 9a — restoring it is a revert of that commit, not a rewrite. |
 | Hand-rolled auth is a classic vulnerability source | Every item in §11 is tested, not just reviewed. If the team would rather not own this, an ADR switching to a managed provider is legitimate — write it before building, not after. |
 | Deletion cascade misses a table added later | Every phase that adds a user-owned table extends the deletion integration test. This is a line item in each subsequent phase gate. |
 | Rate limiter race under load | Atomic Lua script, tested concurrently with `-race` |
@@ -554,7 +547,6 @@ Global DoD (root README) **plus**:
 
 - [ ] Email OTP works end to end against Mailpit
 - [ ] Phone OTP works end to end via `ConsoleChannel`
-- [ ] Google OAuth completes and links an identity
 - [ ] Access + refresh tokens issue, rotate and revoke correctly
 - [ ] **Refresh reuse revokes the token family — integration test green**
 - [ ] **Concurrent refresh handled correctly under `-race`**
