@@ -70,9 +70,14 @@ func WriteError(w http.ResponseWriter, r *http.Request, status int, code ErrorCo
 	}
 
 	WriteJSON(w, status, errorEnvelope{Error: ErrorBody{
-		Code:      code,
-		Message:   message,
-		TraceID:   traceID,
-		RetryAble: status >= 500 || status == http.StatusTooManyRequests,
+		Code:    code,
+		Message: message,
+		TraceID: traceID,
+		// 501 is the exception among 5xx: "this server does not implement
+		// this" is a permanent property of the deployment, not a blip.
+		// Telling a client to retry a feature that is switched off is a
+		// loop that never terminates.
+		RetryAble: (status >= 500 && status != http.StatusNotImplemented) ||
+			status == http.StatusTooManyRequests,
 	}})
 }
