@@ -4,10 +4,12 @@ import Link from 'next/link'
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 
+import { LoadError } from '@/components/LoadError'
 import { Wordmark } from '@/components/Logo'
 import { Badge, Panel, SectionLabel } from '@/components/ui'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
+import { useRequireAuth } from '@/lib/use-require-auth'
 import { usersApi, type Profile } from '@/lib/users-api'
 import { useLocale } from '@/lib/i18n/context'
 import { resetAnalytics, track } from '@/lib/analytics'
@@ -21,9 +23,16 @@ import { resetAnalytics, track } from '@/lib/analytics'
  */
 export default function HomePage() {
   const router = useRouter()
+  const onUnauthenticated = useRequireAuth()
   const { t, fill } = useLocale()
   const [profile, setProfile] = useState<Profile | null>(null)
+  // 'error' was declared here from the start and nothing ever set it —
+  // the same declared-never-populated pattern that hid the unpopulated
+  // `current` flag on the sessions list and `Identities` in the export.
+  // It is reachable now.
   const [state, setState] = useState<'loading' | 'ready' | 'error'>('loading')
+  // Bumped by Retry; the effect depends on it, so the fetch re-runs.
+  const [attempt, setAttempt] = useState(0)
 
   useEffect(() => {
     let cancelled = false
@@ -35,17 +44,19 @@ export default function HomePage() {
         setProfile(p)
         setState('ready')
       })
-      .catch(() => {
+      .catch((err: unknown) => {
         if (cancelled) return
-        // No valid session. Replace rather than push, so Back does not
-        // return to a page that will only bounce them again.
-        router.replace('/auth')
+        // Only a real "signed out" redirects. A dropped connection or a
+        // 500 says nothing about the session, and throwing the user to
+        // /auth for one tells them they have been signed out when they
+        // have not.
+        if (!onUnauthenticated(err)) setState('error')
       })
 
     return () => {
       cancelled = true
     }
-  }, [router])
+  }, [onUnauthenticated, attempt])
 
   return (
     <>
@@ -77,7 +88,9 @@ export default function HomePage() {
       </header>
 
       <main id="main" className="mx-auto max-w-4xl px-6 py-14">
-        {state === 'loading' ? (
+        {state === 'error' ? (
+          <LoadError onRetry={() => setAttempt((n) => n + 1)} />
+        ) : state === 'loading' ? (
           <div aria-busy="true" aria-live="polite">
             <span className="sr-only">{t.home.loading}</span>
             <Skeleton className="h-10 w-64" />

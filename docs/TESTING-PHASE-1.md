@@ -35,6 +35,30 @@ npx playwright test         # 55 browser specs against the running stack
 | 15 | `task verify` green, including `go test -race` | Green. Unit and integration suites both run with `-race`. |
 | 16 | `PROJECT_STATUS.md` and `current-phase.md` updated | This document, plus both files. |
 
+### Error states on the authenticated screens (global Definition of Done)
+
+`tests/e2e/load-errors.spec.ts`. A failed load is **not** the same as being
+signed out: a 500 or an unreachable server shows an error with a working retry
+and keeps the user where they are, while a genuine 401 still redirects to
+`/auth`. Both halves are asserted, because a version that simply never
+redirected would pass the first and strand a signed-out visitor on a screen that
+can never load.
+
+This was a real defect, not a missing nicety. `useRequireAuth` took no argument
+and redirected on **every** rejection, so `AuthError('NETWORK', 0)` — fetch
+failing outright — was indistinguishable from a dead session. A user on a flaky
+connection, or anyone loading a screen during a deploy, was silently thrown to
+the sign-in page; if the outage was still going they could not sign in either,
+and the reasonable conclusion is that their account is gone.
+
+`/home` and `/settings/profile` had also declared `'error'` in their state union
+since they were written, and **nothing ever set it** — the third instance in this
+phase of the declared-never-populated pattern, after `current` on the sessions
+list and `Identities` in the export.
+
+Proven by reverting: with the old redirect-on-everything behaviour, the suite
+fails with `/home did not show an error`.
+
 ### Mobile responsiveness (global Definition of Done)
 
 `tests/e2e/mobile.spec.ts`, at Pixel 7 (412px). No horizontal overflow on any of

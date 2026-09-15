@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 
 import { Badge, Panel } from '@/components/ui'
 import { Button } from '@/components/ui/button'
+import { LoadError } from '@/components/LoadError'
 import { Skeleton } from '@/components/ui/skeleton'
 import { resetAnalytics, track } from '@/lib/analytics'
 import { useLocale } from '@/lib/i18n/context'
@@ -16,7 +17,7 @@ export default function SessionsPage() {
   const { t } = useLocale()
   const router = useRouter()
   const [sessions, setSessions] = useState<DeviceSession[]>([])
-  const [state, setState] = useState<'loading' | 'ready'>('loading')
+  const [state, setState] = useState<'loading' | 'ready' | 'error'>('loading')
   const [revoking, setRevoking] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
@@ -29,7 +30,12 @@ export default function SessionsPage() {
         setSessions(list)
         setState('ready')
       })
-      .catch(onUnauthenticated)
+      .catch((err) => {
+        // Only a real "signed out" redirects. Anything else — a dropped
+        // connection, a 500, a deploy in progress — gets an error state
+        // with a retry, because none of those say the session is gone.
+        if (!onUnauthenticated(err)) setState('error')
+      })
   }, [onUnauthenticated])
 
   useEffect(load, [load])
@@ -60,6 +66,10 @@ export default function SessionsPage() {
     } finally {
       setRevoking(null)
     }
+  }
+
+  if (state === 'error') {
+    return <LoadError onRetry={load} />
   }
 
   if (state === 'loading') {
