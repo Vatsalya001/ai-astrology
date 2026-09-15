@@ -161,7 +161,40 @@ cmd_up() {
     if [[ "$status" == *healthy* ]]; then ok "$name"; else bad "$name — $status"; fi
   done < <(docker compose ps --format '{{.Name}} {{.Status}}')
 
-  # 3. Go API
+  # 3. Schema
+  #
+  # This was missing, and the omission was invisible on any machine that
+  # had ever run `task migrate` by hand — which is every developer
+  # machine, and no fresh one. CI caught it as
+  # `relation "users" does not exist` after the stack came up "healthy":
+  # a health check proves Postgres is accepting connections, not that it
+  # has the tables this service needs.
+  say "Schema"
+  if ! command -v migrate > /dev/null 2>&1; then
+    info "installing golang-migrate"
+    go install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@latest \
+      > "$RUN_DIR/migrate-install.log" 2>&1 \
+      || { tail -5 "$RUN_DIR/migrate-install.log"; die "could not install golang-migrate"; }
+    export PATH="$PATH:$(go env GOPATH)/bin"
+  fi
+
+  # shellcheck disable=SC1091
+  set -a; . ./.env; set +a
+  if migrate -path services/api/db/migrations -database "$DATABASE_URL" up \
+      > "$RUN_DIR/migrate.log" 2>&1; then
+    ok "migrations applied"
+  else
+    # "no change" is success: the common case is a stack restarted against
+    # a database that is already current.
+    if grep -q 'no change' "$RUN_DIR/migrate.log"; then
+      ok "schema already current"
+    else
+      tail -10 "$RUN_DIR/migrate.log"
+      die "migrations failed — see $RUN_DIR/migrate.log"
+    fi
+  fi
+
+  # 4. Go API
   say "api-service"
   if listening "$API_PORT"; then
     ok "already running (pid $(port_pid "$API_PORT"))"
@@ -183,7 +216,7 @@ cmd_up() {
     fi
   fi
 
-  # 4. Web
+  # 5. Web
   say "web"
   if listening "$WEB_PORT"; then
     ok "already running (pid $(port_pid "$WEB_PORT"))"
