@@ -165,19 +165,6 @@ func run() error {
 	deleter := users.NewDeleter(queries, sessionDirectory, cfg.AccountDeleteGrace, log).
 		WithAnalytics(events)
 
-	google := auth.NewGoogle(auth.GoogleConfig{
-		ClientID:     cfg.GoogleClientID,
-		ClientSecret: cfg.GoogleClientSecret,
-		RedirectURL:  fmt.Sprintf("http://localhost:%d/api/v1/auth/oauth/google/callback", cfg.Port),
-	}, cache.Client)
-	if cfg.OAuthConfigured() {
-		log.Info("google oauth configured")
-	} else {
-		// Stated at startup rather than discovered when someone clicks
-		// the button and gets an error.
-		log.Info("google oauth NOT configured — the route will report it as unavailable")
-	}
-
 	limiter := ratelimit.New(cache.Client)
 
 	// Not behind a trusted proxy in development. X-Forwarded-For is
@@ -214,8 +201,6 @@ func run() error {
 		Deleter:    deleter,
 		Exporter:   users.NewExporter(queries),
 		FreshOTP:   freshOTP,
-		Google:     google,
-		Linker:     userService,
 		Limiter:    limiter,
 		TrustProxy: trustProxy,
 	})

@@ -55,16 +55,6 @@ var (
 	// because it is the same act for the same reason.
 	ChallengePerUser = Rule{Name: "challenge_user", Max: 3, Window: 15 * time.Minute}
 
-	// Starting an OAuth flow writes a state key to Redis with a ten-minute
-	// TTL, before the user has proved anything at all. Unlimited, that is
-	// an unauthenticated write amplifier: one request in, one key held for
-	// ten minutes.
-	//
-	// Loose, like the OTP per-IP limit and for the same CGNAT reason — it
-	// is there to stop a flood, not to be the defence. Nothing is sent and
-	// no account is touched, so the blast radius is Redis memory.
-	OAuthStartPerIP = Rule{Name: "oauth_start_ip", Max: 20, Window: 15 * time.Minute}
-
 	// The backstop. Applies to every request under /api/v1 regardless of
 	// route, so endpoints with no rule of their own — logout, providers,
 	// the read-only profile routes, anything a later phase mounts — are
