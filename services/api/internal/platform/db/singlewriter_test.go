@@ -22,6 +22,8 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/wait"
+
+	"github.com/Vatsalya001/ai-astrology/services/api/internal/platform/testsupport"
 )
 
 // Postgres error code for insufficient_privilege.
@@ -189,7 +191,7 @@ func startPostgres(ctx context.Context, t *testing.T) (writerDSN, readerDSN stri
 		Started:          true,
 	})
 	if err != nil {
-		t.Skipf("could not start Postgres container (is Docker running?): %v", err)
+		testsupport.ContainerUnavailable(t, "Postgres", err)
 	}
 
 	host, err := container.Host(ctx)

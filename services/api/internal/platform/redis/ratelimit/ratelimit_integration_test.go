@@ -12,6 +12,8 @@ import (
 	goredis "github.com/redis/go-redis/v9"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/wait"
+
+	"github.com/Vatsalya001/ai-astrology/services/api/internal/platform/testsupport"
 )
 
 // Against real Redis. The window arithmetic lives in a Lua script that
@@ -31,7 +33,7 @@ func startRedis(ctx context.Context, t *testing.T) (*goredis.Client, func()) {
 		Started: true,
 	})
 	if err != nil {
-		t.Skipf("could not start Redis (is Docker running?): %v", err)
+		testsupport.ContainerUnavailable(t, "Redis", err)
 	}
 
 	host, err := container.Host(ctx)

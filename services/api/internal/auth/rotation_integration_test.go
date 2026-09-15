@@ -19,6 +19,8 @@ import (
 	"github.com/testcontainers/testcontainers-go/wait"
 
 	"github.com/Vatsalya001/ai-astrology/services/api/internal/platform/db/dbgen"
+
+	"github.com/Vatsalya001/ai-astrology/services/api/internal/platform/testsupport"
 )
 
 // Rotation against real Postgres.
@@ -65,7 +67,7 @@ func startPostgresWithSchema(ctx context.Context, t *testing.T) (*pgxpool.Pool, 
 		Started: true,
 	})
 	if err != nil {
-		t.Skipf("could not start Postgres (is Docker running?): %v", err)
+		testsupport.ContainerUnavailable(t, "Postgres", err)
 	}
 
 	host, err := container.Host(ctx)

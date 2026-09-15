@@ -5,11 +5,13 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strconv"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
 	"github.com/Vatsalya001/ai-astrology/services/api/internal/auth"
+	"github.com/Vatsalya001/ai-astrology/services/api/internal/platform/redis/ratelimit"
 )
 
 // Handler exposes the users endpoints.
@@ -366,16 +368,43 @@ type FreshOTPChallenger interface {
 	Challenge(ctx context.Context, userID uuid.UUID, locale string) error
 }
 
+// Throttle is the limiter, declared by the consumer.
+type Throttle interface {
+	Allow(ctx context.Context, rule ratelimit.Rule, subject string) (ratelimit.Result, error)
+}
+
 // Challenge sends a code to the account's own verified contact.
 //
 // Separate from /auth/otp/request because that one takes an identifier
 // from the caller. This one takes none — the destination comes from the
 // account, so a stolen access token cannot redirect the code.
-func (h *Handler) Challenge(challenger FreshOTPChallenger) http.HandlerFunc {
+//
+// Rate limited per USER, not per IP. The cost of this endpoint is an
+// email or an SMS to the account owner, and the account is what an
+// attacker with a stolen access token would be aiming at — they can
+// change IP freely and cannot change whose account the token is for.
+func (h *Handler) Challenge(challenger FreshOTPChallenger, throttle Throttle) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		principal, ok := auth.PrincipalFrom(r.Context())
 		if !ok {
 			h.writeErr(w, r, http.StatusUnauthorized, "UNAUTHORIZED", "Authentication required.", nil)
+			return
+		}
+
+		res, err := throttle.Allow(r.Context(),
+			ratelimit.ChallengePerUser, principal.UserID.String())
+		if err != nil {
+			// Fails CLOSED, unlike the global backstop. Failing open here
+			// means an unbounded mailbomb while Redis is down, and the
+			// blast radius lands in someone else's inbox — a worse outcome
+			// than one user being unable to delete their account for a few
+			// minutes.
+			h.writeErr(w, r, http.StatusServiceUnavailable, "UNAVAILABLE",
+				"Something went wrong. Please try again.", err)
+			return
+		}
+		if !res.Allowed {
+			h.writeRateLimited(w, r, res)
 			return
 		}
 
@@ -385,4 +414,17 @@ func (h *Handler) Challenge(challenger FreshOTPChallenger) http.HandlerFunc {
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"sent": true})
 	}
+}
+
+// writeRateLimited mirrors the auth handler's, including the rounding.
+func (h *Handler) writeRateLimited(w http.ResponseWriter, r *http.Request, res ratelimit.Result) {
+	// Rounded UP: rounding down tells a client to retry while still
+	// blocked, which produces a second 429 and looks like a broken limiter.
+	seconds := int(res.RetryAfter.Seconds())
+	if res.RetryAfter > 0 && seconds == 0 {
+		seconds = 1
+	}
+	w.Header().Set("Retry-After", strconv.Itoa(seconds))
+	h.writeErr(w, r, http.StatusTooManyRequests, "RATE_LIMITED",
+		"Too many requests. Try again shortly.", nil)
 }

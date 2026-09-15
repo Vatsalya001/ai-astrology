@@ -9,6 +9,7 @@ import (
 	"github.com/Vatsalya001/ai-astrology/services/api/internal/platform/clients"
 	"github.com/Vatsalya001/ai-astrology/services/api/internal/platform/db"
 	"github.com/Vatsalya001/ai-astrology/services/api/internal/platform/redis"
+	"github.com/Vatsalya001/ai-astrology/services/api/internal/platform/redis/ratelimit"
 	"github.com/Vatsalya001/ai-astrology/services/api/internal/users"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -42,6 +43,18 @@ type Deps struct {
 	FreshOTP   *auth.FreshOTP
 	Google     auth.OAuthProvider
 	Linker     auth.IdentityLinker
+
+	// TrustProxy must match what the auth handler was built with. Both
+	// derive the client IP; if they disagreed, the limiter and the stored
+	// hash would key on different addresses for the same request.
+	TrustProxy bool
+
+	// Limiter drives the per-IP backstop and the route-specific limits.
+	//
+	// Required whenever Auth or Users is mounted — every one of those
+	// routes depends on it, and a nil here would be a nil-pointer panic on
+	// the first request rather than at startup. NewRouter checks.
+	Limiter *ratelimit.Limiter
 }
 
 // NewRouter builds the HTTP handler.
@@ -55,6 +68,14 @@ type Deps struct {
 //	CORS
 //	Timeout      — innermost, bounds the handler itself
 func NewRouter(d Deps) http.Handler {
+	// A programming error, so it fails at construction. The alternative is
+	// a nil-pointer panic on whichever request first reaches a limited
+	// route — in production, at an unpredictable moment, with a stack
+	// trace instead of a reason.
+	if (d.Auth != nil || d.Users != nil) && d.Limiter == nil {
+		panic("httpapi: Deps.Limiter is required when the auth or users routes are mounted")
+	}
+
 	r := chi.NewRouter()
 
 	r.Use(Recover)
@@ -91,6 +112,13 @@ func NewRouter(d Deps) http.Handler {
 
 	// ─── API v1 ─────────────────────────────────────────────────
 	r.Route("/api/v1", func(r chi.Router) {
+		// The backstop, ahead of every route below. Route-specific limits
+		// are narrower and live in their handlers; this one exists so an
+		// endpoint added later is limited without anyone remembering to.
+		if d.Limiter != nil {
+			r.Use(GlobalThrottle(d.Limiter, d.TrustProxy, d.Config.IPHashSalt))
+		}
+
 		r.Get("/meta", metaHandler(d.Config))
 
 		if d.Auth != nil {
@@ -259,7 +287,7 @@ func mountAuth(r chi.Router, d Deps) {
 		// either: fifteen minutes of validity and an unlocked laptop is
 		// not the bar for erasing an account.
 		if d.Deleter != nil && d.FreshOTP != nil {
-			r.Post("/me/challenge", d.Users.Challenge(d.FreshOTP))
+			r.Post("/me/challenge", d.Users.Challenge(d.FreshOTP, d.Limiter))
 			r.Post("/me/delete", d.Users.RequestDeletion(d.Deleter, d.FreshOTP))
 			r.Post("/me/delete/cancel", d.Users.CancelDeletion(d.Deleter))
 		}

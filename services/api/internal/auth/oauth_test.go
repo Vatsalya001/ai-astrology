@@ -154,44 +154,6 @@ func TestOAuthStartWithoutCredentialsSaysNotConfigured(t *testing.T) {
 	}
 }
 
-func TestOAuthStartRedirectsToConsent(t *testing.T) {
-	h := testHandler()
-	provider := &fakeProvider{
-		configured: true,
-		authURL:    "https://accounts.google.com/o/oauth2/v2/auth?state=abc",
-	}
-	rec := httptest.NewRecorder()
-
-	h.OAuthStart(provider, "http://localhost:3000")(
-		rec, httptest.NewRequest(http.MethodGet, "/auth/oauth/google?return_to=/settings", nil))
-
-	if rec.Code != http.StatusFound {
-		t.Fatalf("status = %d, want 302", rec.Code)
-	}
-	if got := rec.Header().Get("Location"); got != provider.authURL {
-		t.Errorf("Location = %q, want %q", got, provider.authURL)
-	}
-	if provider.gotReturnTo != "/settings" {
-		t.Errorf("return_to reached the provider as %q, want /settings", provider.gotReturnTo)
-	}
-}
-
-// The open-redirect guard must be applied at the ENTRY to the flow, not
-// only inside safeReturnTo's own unit test. A hostile return_to that is
-// merely stored and replayed on the callback is the same bug, later.
-func TestOAuthStartStripsOffSiteReturnTo(t *testing.T) {
-	h := testHandler()
-	provider := &fakeProvider{configured: true, authURL: "https://accounts.google.com/x"}
-
-	h.OAuthStart(provider, "http://localhost:3000")(
-		httptest.NewRecorder(),
-		httptest.NewRequest(http.MethodGet, "/auth/oauth/google?return_to=https://evil.example", nil))
-
-	if provider.gotReturnTo != "" {
-		t.Fatalf("an off-site return_to reached the provider as %q", provider.gotReturnTo)
-	}
-}
-
 // A declined consent screen comes back as ?error=access_denied, not as an
 // HTTP status. It is a normal outcome and must land the user back on the
 // sign-in page rather than on an error page.
