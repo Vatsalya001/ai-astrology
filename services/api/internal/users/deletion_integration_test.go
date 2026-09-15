@@ -48,13 +48,72 @@ func seedFullUser(ctx context.Context, t *testing.T, pool *pgxpool.Pool, email s
 		{"audit",
 			`INSERT INTO audit_logs (user_id, action, metadata) VALUES ($1, 'auth.login', '{"channel":"email"}')`,
 			[]any{userID}},
+		// Phase 2. The spec makes this a standing obligation: "every
+		// phase that adds a user-owned table extends the deletion
+		// integration test". userOwnedTables discovers birth_profiles on
+		// its own and fails if it is not seeded — which is how this
+		// requirement got enforced rather than remembered.
+		{"birth profile",
+			`INSERT INTO birth_profiles
+				(user_id, birth_date, birth_time, time_accuracy, birth_place,
+				 latitude, longitude, timezone, utc_offset_min, utc_instant)
+			 VALUES ($1, '1994-08-17', '14:35', 'exact', 'Jaipur',
+			         26.9124, 75.7873, 'Asia/Kolkata', 330, '1994-08-17T09:05:00Z')`,
+			[]any{userID}},
 	} {
 		if _, err := pool.Exec(ctx, stmt.sql, stmt.args...); err != nil {
 			t.Fatalf("seed %s: %v", stmt.what, err)
 		}
 	}
 
+	// charts and dashas hang off the birth profile rather than the user,
+	// so userOwnedTables cannot discover them — there is no user_id
+	// column to find. They are seeded and asserted explicitly, because a
+	// cascade that stops one level short leaves a chart of a deleted
+	// person's sky behind, which is exactly the residue the Phase 1 gate
+	// exists to forbid.
+	seedChartAndDashas(ctx, t, pool, userID)
+
 	return userID
+}
+
+// seedChartAndDashas hangs a chart and a two-level dasha tree off the
+// user's birth profile.
+func seedChartAndDashas(ctx context.Context, t *testing.T, pool *pgxpool.Pool, userID uuid.UUID) {
+	t.Helper()
+
+	var profileID uuid.UUID
+	if err := pool.QueryRow(ctx,
+		`SELECT id FROM birth_profiles WHERE user_id = $1 LIMIT 1`, userID,
+	).Scan(&profileID); err != nil {
+		t.Fatalf("find seeded birth profile: %v", err)
+	}
+
+	var chartID uuid.UUID
+	if err := pool.QueryRow(ctx,
+		`INSERT INTO charts (birth_profile_id, chart_type, engine_version, chart_data)
+		 VALUES ($1, 'D1', 'test-engine', '{"schema_version":1}') RETURNING id`,
+		profileID,
+	).Scan(&chartID); err != nil {
+		t.Fatalf("seed chart: %v", err)
+	}
+
+	var mahaID uuid.UUID
+	if err := pool.QueryRow(ctx,
+		`INSERT INTO dashas (chart_id, planet, start_date, end_date, level)
+		 VALUES ($1, 'Ketu', '2020-01-01T00:00:00Z', '2027-01-01T00:00:00Z', 1) RETURNING id`,
+		chartID,
+	).Scan(&mahaID); err != nil {
+		t.Fatalf("seed mahadasha: %v", err)
+	}
+
+	if _, err := pool.Exec(ctx,
+		`INSERT INTO dashas (chart_id, planet, start_date, end_date, level, parent_id)
+		 VALUES ($1, 'Venus', '2020-01-01T00:00:00Z', '2021-01-01T00:00:00Z', 2, $2)`,
+		chartID, mahaID,
+	); err != nil {
+		t.Fatalf("seed antardasha: %v", err)
+	}
 }
 
 // userOwnedTables discovers every table with a user_id column.
@@ -160,6 +219,47 @@ func TestHardDeleteLeavesNoResidue(t *testing.T) {
 		if count != 0 {
 			t.Errorf("%d rows remain in %q after hard deletion — this is residue, "+
 				"and the gate says there must be none", count, table)
+		}
+	}
+
+	// charts and dashas have no user_id, so the discovery loop above
+	// cannot see them. They reach the user through
+	// birth_profiles → charts → dashas, and a cascade that stops one
+	// level short leaves a chart of a deleted person's sky behind —
+	// which is residue by any reading of the gate.
+	//
+	// Counted globally rather than by user, because the survivor account
+	// seeds its own rows: a global count of zero would be satisfied by a
+	// cascade that deleted everybody's. So the assertion is that the
+	// SURVIVOR's rows remain and the doomed user's are gone, which only
+	// a correctly scoped cascade satisfies.
+	for _, c := range []struct {
+		table string
+		sql   string
+	}{
+		{"charts", `SELECT count(*) FROM charts c
+		            JOIN birth_profiles p ON p.id = c.birth_profile_id
+		            WHERE p.user_id = $1`},
+		{"dashas", `SELECT count(*) FROM dashas d
+		            JOIN charts c ON c.id = d.chart_id
+		            JOIN birth_profiles p ON p.id = c.birth_profile_id
+		            WHERE p.user_id = $1`},
+	} {
+		var gone int
+		if err := pool.QueryRow(ctx, c.sql, userID).Scan(&gone); err != nil {
+			t.Fatalf("count %s after: %v", c.table, err)
+		}
+		if gone != 0 {
+			t.Errorf("%d rows remain in %q after hard deletion — the cascade "+
+				"stopped short of the chart data", gone, c.table)
+		}
+
+		var survived int
+		if err := pool.QueryRow(ctx, c.sql, survivor).Scan(&survived); err != nil {
+			t.Fatalf("count %s for survivor: %v", c.table, err)
+		}
+		if survived == 0 {
+			t.Errorf("deleting one account removed another account's %s", c.table)
 		}
 	}
 
