@@ -242,37 +242,20 @@ jobs:
       - run: npm ci
       - run: npx playwright install --with-deps chromium
 
-      # The full backend, exactly as a developer runs it.
-      - name: Start infrastructure and Python services
+      # The same script a developer runs, not a reimplementation of it.
+      #
+      # CI used to start the stack with its own inline steps, which meant
+      # it wrote the API log to /tmp/api.log while scripts/ayana writes to
+      # .run/api.log. The e2e suite reads that log to get the OTP, so it
+      # passed locally and failed here — the textbook "works on my
+      # machine" caused by CI and local being different code paths.
+      - name: Start the whole stack
         run: |
           cp .env.example .env
-          docker compose up -d --wait
-          docker compose ps
+          ./scripts/ayana up
 
-      - name: Start the Go API
-        run: |
-          # $GITHUB_WORKSPACE, not ./ — this step runs in services/api
-          # while the .env written by the previous step is at the repo
-          # root, so `. ./.env` looked for a file that is never there.
-          set -a; . "$GITHUB_WORKSPACE/.env"; set +a
-          go build -o /tmp/api ./cmd/api
-          /tmp/api > /tmp/api.log 2>&1 &
-          for i in $(seq 1 30); do
-            curl -sf http://localhost:4000/health >/dev/null && break
-            sleep 1
-          done
-          curl -sf http://localhost:4000/health || { echo "API never became healthy"; cat /tmp/api.log; exit 1; }
-        working-directory: services/api
-
-      - name: Build and start the web app
-        run: |
-          npm run build --workspace=web
-          npm run start --workspace=web > /tmp/web.log 2>&1 &
-          for i in $(seq 1 30); do
-            curl -sf http://localhost:3000 >/dev/null && break
-            sleep 1
-          done
-          curl -sf http://localhost:3000 >/dev/null || { echo "web never came up"; cat /tmp/web.log; exit 1; }
+      - name: Show what is running
+        run: ./scripts/ayana status
 
       # The only test that exercises browser -> Go API -> Python. Every
       # other suite stubs at a boundary.
@@ -281,8 +264,8 @@ jobs:
       - name: Service logs on failure
         if: failure()
         run: |
-          echo "--- api ---";  tail -50 /tmp/api.log || true
-          echo "--- web ---";  tail -50 /tmp/web.log || true
+          echo "--- api ---";  tail -80 .run/api.log || true
+          echo "--- web ---";  tail -40 .run/web.log || true
           docker compose logs --tail=50
 
       - uses: actions/upload-artifact@v4

@@ -1,5 +1,6 @@
 import { execSync } from 'node:child_process'
-import { statSync, writeFileSync } from 'node:fs'
+import { mkdirSync, statSync, writeFileSync } from 'node:fs'
+import { dirname } from 'node:path'
 
 import { API_LOG, OFFSET_FILE } from './otp-log'
 
@@ -28,6 +29,11 @@ export default function globalSetup(): void {
   } catch {
     // No log yet — the stack was just started. Zero is correct.
   }
+
+  // mkdir first. This threw ENOENT in CI, which aborted globalSetup and
+  // therefore the entire suite before a single test ran — a setup step
+  // that can fail the whole run must not assume a directory exists.
+  mkdirSync(dirname(OFFSET_FILE), { recursive: true })
   writeFileSync(OFFSET_FILE, String(offset))
 
   try {
