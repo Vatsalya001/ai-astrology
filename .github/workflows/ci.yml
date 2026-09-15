@@ -101,7 +101,13 @@ jobs:
       # Proves the single-writer rule holds: astro_ro can SELECT and
       # cannot INSERT, UPDATE, DELETE, TRUNCATE or CREATE TABLE. Runs the
       # REAL bootstrap SQL, so weakening those grants fails CI.
+      # REQUIRE_CONTAINERS turns "Docker is unavailable" from a skip into a
+      # failure. Without it, a runner that loses Docker skips every
+      # integration test, `go test` reports ok, and this job passes having
+      # proven none of the things it exists to prove.
       - run: go test ./... -tags=integration -race -count=1
+        env:
+          REQUIRE_CONTAINERS: '1'
 
   contracts:
     name: Cross-service contracts are in sync

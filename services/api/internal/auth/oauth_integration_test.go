@@ -12,6 +12,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/Vatsalya001/ai-astrology/services/api/internal/platform/redis/ratelimit"
 )
 
 // The OAuth flow against a stubbed Google and a real Redis.
@@ -332,4 +334,101 @@ func mustQuery(t *testing.T, rawURL, key string) string {
 		t.Fatalf("no %q in %s", key, rawURL)
 	}
 	return value
+}
+
+// ─── The two handler tests that need a real limiter ──────────────────
+//
+// OAuthStart consults the rate limiter before it writes a state key, and
+// the limiter is a concrete *ratelimit.Limiter rather than an interface,
+// so these cannot run against a nil one. They live here rather than
+// weakening the handler's type to make a unit test possible.
+
+func throttledHandler(t *testing.T) *Handler {
+	t.Helper()
+	client, stop := startRedis(context.Background(), t)
+	t.Cleanup(stop)
+
+	return NewHandler(HandlerConfig{
+		Limiter: ratelimit.New(client),
+		IPSalt:  "integration-test-salt-not-a-secret",
+		WriteError: func(w http.ResponseWriter, _ *http.Request, status int, code, message string, _ error) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(status)
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"error": map[string]string{"code": code, "message": message},
+			})
+		},
+	})
+}
+
+func TestOAuthStartRedirectsToConsent(t *testing.T) {
+	h := throttledHandler(t)
+	provider := &fakeProvider{
+		configured: true,
+		authURL:    "https://accounts.google.com/o/oauth2/v2/auth?state=abc",
+	}
+	rec := httptest.NewRecorder()
+
+	h.OAuthStart(provider, "http://localhost:3000")(
+		rec, httptest.NewRequest(http.MethodGet, "/auth/oauth/google?return_to=/settings", nil))
+
+	if rec.Code != http.StatusFound {
+		t.Fatalf("status = %d, want 302", rec.Code)
+	}
+	if got := rec.Header().Get("Location"); got != provider.authURL {
+		t.Errorf("Location = %q, want %q", got, provider.authURL)
+	}
+	if provider.gotReturnTo != "/settings" {
+		t.Errorf("return_to reached the provider as %q, want /settings", provider.gotReturnTo)
+	}
+}
+
+// The open-redirect guard must be applied at the ENTRY to the flow, not
+// only inside safeReturnTo's own unit test. A hostile return_to that is
+// merely stored and replayed on the callback is the same bug, later.
+func TestOAuthStartStripsOffSiteReturnTo(t *testing.T) {
+	h := throttledHandler(t)
+	provider := &fakeProvider{configured: true, authURL: "https://accounts.google.com/x"}
+
+	h.OAuthStart(provider, "http://localhost:3000")(
+		httptest.NewRecorder(),
+		httptest.NewRequest(http.MethodGet, "/auth/oauth/google?return_to=https://evil.example", nil))
+
+	if provider.gotReturnTo != "" {
+		t.Fatalf("an off-site return_to reached the provider as %q", provider.gotReturnTo)
+	}
+}
+
+// Starting a flow writes a Redis key with a ten-minute TTL before the
+// caller has proved anything. Unlimited, that is an unauthenticated
+// write amplifier.
+func TestOAuthStartIsRateLimited(t *testing.T) {
+	h := throttledHandler(t)
+	provider := &fakeProvider{configured: true, authURL: "https://accounts.google.com/x"}
+
+	var allowed, denied int
+	for range ratelimit.OAuthStartPerIP.Max + 5 {
+		rec := httptest.NewRecorder()
+		h.OAuthStart(provider, "http://localhost:3000")(
+			rec, httptest.NewRequest(http.MethodGet, "/auth/oauth/google", nil))
+
+		switch rec.Code {
+		case http.StatusFound:
+			allowed++
+		case http.StatusTooManyRequests:
+			denied++
+			if rec.Header().Get("Retry-After") == "" {
+				t.Error("a 429 with no Retry-After leaves the client guessing")
+			}
+		default:
+			t.Fatalf("unexpected status %d", rec.Code)
+		}
+	}
+
+	if allowed != ratelimit.OAuthStartPerIP.Max {
+		t.Errorf("%d requests were allowed, want %d", allowed, ratelimit.OAuthStartPerIP.Max)
+	}
+	if denied != 5 {
+		t.Errorf("%d requests were denied, want 5", denied)
+	}
 }

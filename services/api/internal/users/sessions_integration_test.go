@@ -18,6 +18,8 @@ import (
 	"github.com/testcontainers/testcontainers-go/wait"
 
 	"github.com/Vatsalya001/ai-astrology/services/api/internal/platform/db/dbgen"
+
+	"github.com/Vatsalya001/ai-astrology/services/api/internal/platform/testsupport"
 )
 
 // Session revocation against real Postgres.
@@ -61,7 +63,7 @@ func startPostgres(ctx context.Context, t *testing.T) (*pgxpool.Pool, func()) {
 		Started: true,
 	})
 	if err != nil {
-		t.Skipf("could not start Postgres (is Docker running?): %v", err)
+		testsupport.ContainerUnavailable(t, "Postgres", err)
 	}
 
 	host, err := container.Host(ctx)

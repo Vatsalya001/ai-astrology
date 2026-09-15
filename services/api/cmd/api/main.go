@@ -170,14 +170,23 @@ func run() error {
 		log.Info("google oauth NOT configured — the route will report it as unavailable")
 	}
 
+	limiter := ratelimit.New(cache.Client)
+
+	// Not behind a trusted proxy in development. X-Forwarded-For is
+	// client-supplied, and this phase rate-limits per IP — see
+	// auth.ClientIP.
+	//
+	// One variable, read by both the handler and the router's backstop:
+	// they each derive the client IP, and if they disagreed the limiter
+	// and the stored hash would key on different addresses for the same
+	// request.
+	const trustProxy = false
+
 	authHandler := auth.NewHandler(auth.HandlerConfig{
-		Service: authService,
-		Limiter: ratelimit.New(cache.Client),
-		IPSalt:  cfg.IPHashSalt,
-		// Not behind a trusted proxy in development. X-Forwarded-For is
-		// client-supplied, and this phase rate-limits per IP — see
-		// auth.ClientIP.
-		TrustProxy: false,
+		Service:    authService,
+		Limiter:    limiter,
+		IPSalt:     cfg.IPHashSalt,
+		TrustProxy: trustProxy,
 		// The refresh cookie is Secure in anything but local plain HTTP.
 		Secure:     !cfg.IsDevelopment(),
 		RefreshTTL: cfg.JWTRefreshTTL,
@@ -199,6 +208,8 @@ func run() error {
 		FreshOTP:   freshOTP,
 		Google:     google,
 		Linker:     userService,
+		Limiter:    limiter,
+		TrustProxy: trustProxy,
 	})
 
 	srv := &http.Server{

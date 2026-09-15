@@ -460,6 +460,11 @@ func (h *Handler) Providers(provider OAuthProvider) http.HandlerFunc {
 }
 
 // OAuthStart redirects to the provider's consent screen.
+//
+// Rate limited per IP. Every call writes a state key to Redis with a
+// ten-minute TTL before the caller has proved anything at all, so an
+// unlimited version is an unauthenticated write amplifier — one request
+// in, one key held for ten minutes.
 func (h *Handler) OAuthStart(provider OAuthProvider, webURL string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if !provider.Configured() {
@@ -471,6 +476,21 @@ func (h *Handler) OAuthStart(provider OAuthProvider, webURL string) http.Handler
 			// them in ten seconds.
 			h.writeErr(w, r, http.StatusNotImplemented, "OAUTH_NOT_CONFIGURED",
 				"Google sign-in is not available yet. Use email or phone instead.", nil)
+			return
+		}
+
+		// After the Configured() check: an unconfigured provider writes
+		// nothing, so throttling it would spend Redis calls to protect
+		// Redis. Before AuthURL, which is the call that writes.
+		ipKey := string(HashIP(ClientIP(r, h.trustProxy), h.ipSalt))
+		res, err := h.limiter.Allow(r.Context(), ratelimit.OAuthStartPerIP, ipKey)
+		if err != nil {
+			h.writeErr(w, r, http.StatusInternalServerError, "INTERNAL_ERROR",
+				"Something went wrong. Please try again.", err)
+			return
+		}
+		if !res.Allowed {
+			h.writeRateLimited(w, r, res)
 			return
 		}
 
