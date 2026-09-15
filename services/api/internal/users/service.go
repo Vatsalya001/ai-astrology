@@ -347,3 +347,70 @@ func (s *Service) VerifiedContact(ctx context.Context, userID uuid.UUID) (string
 	}
 	return "", "", ErrNotFound
 }
+
+// FindOrCreateByOAuth links a provider identity to an account.
+//
+// Keyed on (provider, subject) — the provider's stable id — never on the
+// email. Google addresses can be reassigned inside a Workspace domain,
+// so keying on the address would eventually hand a new employee the
+// previous holder's account.
+//
+// The email is still recorded when the account is created, because it is
+// the only contact we have for someone who only ever signs in with
+// Google.
+func (s *Service) FindOrCreateByOAuth(
+	ctx context.Context,
+	provider, subject, email string,
+) (auth.User, bool, error) {
+	existing, err := s.q.FindIdentity(ctx, dbgen.FindIdentityParams{
+		Provider:       dbgen.AuthProvider(provider),
+		ProviderUserID: subject,
+	})
+	if err == nil {
+		row, findErr := s.q.FindUserByID(ctx, existing.UserID)
+		if findErr != nil {
+			return auth.User{}, false, fmt.Errorf("users: load oauth user: %w", findErr)
+		}
+		return toAuthUser(row), false, nil
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return auth.User{}, false, fmt.Errorf("users: find identity: %w", err)
+	}
+
+	// No identity yet. If the verified email already belongs to an
+	// account, link to it rather than creating a duplicate — somebody who
+	// signed up by email and later clicks "continue with Google" means
+	// the same person, and two accounts for one address is a support
+	// ticket nobody can resolve.
+	//
+	// Safe because the provider asserted the email is verified; an
+	// unverified one is refused before this point.
+	if user, findErr := s.findByIdentifier(ctx, auth.ChannelEmail, email); findErr == nil {
+		if _, linkErr := s.q.LinkIdentity(ctx, dbgen.LinkIdentityParams{
+			UserID:         toPgUUID(user.ID),
+			Provider:       dbgen.AuthProvider(provider),
+			ProviderUserID: subject,
+		}); linkErr != nil {
+			return auth.User{}, false, fmt.Errorf("users: link to existing user: %w", linkErr)
+		}
+		return user, false, nil
+	} else if !errors.Is(findErr, ErrNotFound) {
+		return auth.User{}, false, findErr
+	}
+
+	created, err := s.create(ctx, auth.ChannelEmail, email)
+	if err != nil {
+		return auth.User{}, false, err
+	}
+	if _, err := s.q.CreateDefaultPreferences(ctx, toPgUUID(created.ID)); err != nil {
+		return auth.User{}, false, fmt.Errorf("users: create default preferences: %w", err)
+	}
+	if _, err := s.q.LinkIdentity(ctx, dbgen.LinkIdentityParams{
+		UserID:         toPgUUID(created.ID),
+		Provider:       dbgen.AuthProvider(provider),
+		ProviderUserID: subject,
+	}); err != nil {
+		return auth.User{}, false, fmt.Errorf("users: link identity: %w", err)
+	}
+	return created, true, nil
+}

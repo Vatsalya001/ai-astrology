@@ -347,3 +347,45 @@ func (f *FreshOTP) VerifyFresh(ctx context.Context, userID uuid.UUID, code strin
 // deletion — and the two are not the same consent. It also means an
 // in-flight login code is not clobbered by a deletion challenge.
 func freshScope(channel string) string { return "fresh:" + channel }
+
+// IdentityLinker links an OAuth identity to an account.
+//
+// Declared by the consumer, like UserCreator. Keyed on the provider's
+// stable subject, never on the email — an address can be reassigned
+// within a Workspace domain, and keying on it would hand the new holder
+// the previous owner's account.
+type IdentityLinker interface {
+	FindOrCreateByOAuth(ctx context.Context, provider, subject, email string) (User, bool, error)
+}
+
+// CompleteOAuth turns a verified provider identity into tokens.
+func (s *Service) CompleteOAuth(
+	ctx context.Context,
+	linker IdentityLinker,
+	provider, subject, email, userAgent string,
+	ipHash []byte,
+) (TokenPair, User, bool, error) {
+	user, isNew, err := linker.FindOrCreateByOAuth(ctx, provider, subject, email)
+	if err != nil {
+		return TokenPair{}, User{}, false, fmt.Errorf("auth: link oauth identity: %w", err)
+	}
+
+	if user.Status == "suspended" {
+		s.audit.Record(ctx, &user.ID, "auth.login_blocked",
+			map[string]any{"reason": "suspended", "provider": provider}, ipHash)
+		return TokenPair{}, User{}, false, ErrUserSuspended
+	}
+
+	pair, err := s.rotator.Issue(ctx, user.ID, user.Role, userAgent, ipHash)
+	if err != nil {
+		return TokenPair{}, User{}, false, err
+	}
+
+	action := "auth.login"
+	if isNew {
+		action = "auth.signup"
+	}
+	s.audit.Record(ctx, &user.ID, action, map[string]any{"provider": provider}, ipHash)
+
+	return pair, user, isNew, nil
+}

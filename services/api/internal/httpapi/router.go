@@ -40,6 +40,8 @@ type Deps struct {
 	Deleter    *users.Deleter
 	Exporter   *users.Exporter
 	FreshOTP   *auth.FreshOTP
+	Google     auth.OAuthProvider
+	Linker     auth.IdentityLinker
 }
 
 // NewRouter builds the HTTP handler.
@@ -210,6 +212,17 @@ func mountAuth(r chi.Router, d Deps) {
 		r.Post("/otp/request", d.Auth.RequestOTP)
 		r.Post("/otp/verify", d.Auth.VerifyOTP)
 		r.Post("/refresh", d.Auth.Refresh)
+
+		// OAuth. Mounted even without credentials: the route then
+		// answers "not available" rather than 404ing, which is the
+		// difference between a feature that is off and one that is
+		// broken.
+		if d.Google != nil && d.Linker != nil {
+			r.Get("/providers", d.Auth.Providers(d.Google))
+			r.Get("/oauth/google", d.Auth.OAuthStart(d.Google, d.Config.WebURL))
+			r.Get("/oauth/google/callback",
+				d.Auth.OAuthCallback(d.Google, d.Linker, "google", d.Config.WebURL))
+		}
 
 		// Logout takes the refresh token, so it does not require a valid
 		// ACCESS token — an expired session must still be closable.
