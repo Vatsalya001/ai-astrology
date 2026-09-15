@@ -2,7 +2,8 @@
 
 Read this at the start of every session. It is short on purpose.
 
-**Current phase: 0 — Foundation.** See `.claude/state/current-phase.md`.
+**Current phase: 2 — Astrology Engine.** Phases 0 and 1 are closed.
+See `.claude/state/current-phase.md` for what carries forward.
 
 ---
 
