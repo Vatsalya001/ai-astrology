@@ -25,6 +25,16 @@ import { uniqueEmail, watchOTP } from './otp-log'
  * The tests that need an empty profile list get one from `clearProfiles`
  * rather than from a new account. Soft deletion makes that honest: the
  * list really is empty afterwards, which is the state under test.
+ *
+ * The letter must be unique across the WHOLE suite — see signUp. Finding
+ * which are free needs this, not a grep for `uniqueEmail('x')`:
+ *
+ *     grep -rhoE "signUp\\([a-zA-Z]+, '[a-z]'|uniqueEmail\\('[a-z]'" \\
+ *       tests/e2e/*.spec.ts | grep -oE "'[a-z]'" | tr -d \"'\" | sort -u
+ *
+ * The literal-only grep is what I used first, and it missed all nine
+ * letters settings.spec.ts passes to its own helper. TestNoTwoSpecsShare
+ * AMaskLetter now checks it instead of anybody remembering to.
  */
 test.describe.configure({ mode: 'serial' })
 
@@ -32,7 +42,7 @@ let shared: Page
 
 test.beforeAll(async ({ browser }) => {
   shared = await browser.newPage()
-  await signUp(shared, 'g')
+  await signUp(shared, 'w')
 })
 
 test.afterAll(async () => {

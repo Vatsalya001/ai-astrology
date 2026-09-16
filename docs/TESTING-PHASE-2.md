@@ -128,6 +128,21 @@ boundary tested.
 `(-1e-18) % 360.0` is `360.0`, which gave sign index 12 — the "house 13" its own
 docstring promised to prevent, in the one line meant to prevent it.
 
+### Two spec files had been sharing OTP mask letters
+
+`uniqueEmail` produces `g1789…@example.com`, and the API log masks it to
+`g***@example.com` — so the **first letter is the identity** as far as the OTP watcher
+is concerned. Two tests sharing one, running in parallel, read each other's codes, and
+the failure presents as "wrong code": broken authentication, not a collision.
+
+I hit this twice. The second time, the letters I picked as free came from grepping for
+`uniqueEmail('x')` literals, which missed all nine that `settings.spec.ts` passes as a
+**parameter** to its own `signUp` helper.
+
+`mask-letters.spec.ts` now reads every form and fails on a duplicate. On its first run
+it found a collision that was **already there and not mine**: `load-errors.spec.ts` and
+`settings.spec.ts` had both been using `i` and `j`.
+
 ### A golden-file fix that never took effect
 
 PR 14 added `DASHA_TOLERANCE_SECONDS` but the assertion it was meant to replace was never
@@ -169,6 +184,8 @@ Every one of these was reverted, observed to fail, and restored.
 | a new `user_id` table added | `reading_notes has a user_id column but no entry in this test` |
 | house rotation made to repeat a sign | `houses at lat 0.000 do not cover twelve distinct signs` |
 | a planet placed in house 13 | `Sun is in house 13 at lat 0.000` |
+| two specs given the same mask letter | `'g' in onboarding-birth.spec.ts and settings.spec.ts` |
+| the mask-letter patterns made to match nothing | `this test is checking nothing` |
 
 ---
 
