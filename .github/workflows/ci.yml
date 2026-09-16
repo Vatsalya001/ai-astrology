@@ -225,7 +225,16 @@ jobs:
       - run: npm ci
       - run: npm run typecheck --workspaces --if-present
       - run: npm run lint --workspace=web
-      - run: npm run test --workspace=web
+
+      # --workspaces, not --workspace=web.
+      #
+      # This said `--workspace=web` while `typecheck` above already said
+      # `--workspaces`, so a test script in any package under packages/
+      # was silently skipped. Adding `@ayana/astrology-geometry` with 27
+      # tests would have run none of them in CI while passing locally —
+      # the worst kind of green.
+      - run: npm run test --workspaces --if-present
+
       - run: npm run build --workspace=web
       - name: Audit dependencies
         run: npm audit --audit-level=high
