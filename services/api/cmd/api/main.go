@@ -18,6 +18,7 @@ import (
 
 	"github.com/Vatsalya001/ai-astrology/services/api/internal/auth"
 	"github.com/Vatsalya001/ai-astrology/services/api/internal/birthprofiles"
+	"github.com/Vatsalya001/ai-astrology/services/api/internal/charts"
 	"github.com/Vatsalya001/ai-astrology/services/api/internal/config"
 	"github.com/Vatsalya001/ai-astrology/services/api/internal/httpapi"
 	"github.com/Vatsalya001/ai-astrology/services/api/internal/places"
@@ -30,6 +31,7 @@ import (
 	"github.com/Vatsalya001/ai-astrology/services/api/internal/platform/observability"
 	"github.com/Vatsalya001/ai-astrology/services/api/internal/platform/redis"
 	"github.com/Vatsalya001/ai-astrology/services/api/internal/platform/redis/ratelimit"
+	"github.com/Vatsalya001/ai-astrology/services/api/internal/transits"
 	"github.com/Vatsalya001/ai-astrology/services/api/internal/users"
 )
 
@@ -193,6 +195,9 @@ func run() error {
 	// ─── Phase 2 ────────────────────────────────────────────────
 	placeService := places.NewService(queries)
 	profileService := birthprofiles.NewService(queries).WithAnalytics(events)
+	chartService := charts.NewService(queries, database.Pool, astroClient, profileService, log).
+		WithAnalytics(events)
+	transitReader := transits.NewReader(queries)
 
 	handler := httpapi.NewRouter(httpapi.Deps{
 		Config:     cfg,
@@ -212,7 +217,12 @@ func run() error {
 
 		BirthProfiles: birthprofiles.NewHandler(
 			profileService, placeAdapter{placeService}, httpapi.AuthErrorWriter),
-		Places:       places.NewHandler(placeService, httpapi.AuthErrorWriter),
+		Places: places.NewHandler(placeService, httpapi.AuthErrorWriter),
+		Charts: charts.NewHandler(chartService, httpapi.AuthErrorWriter),
+		// The chart service supplies the natal Moon sign the gochara is
+		// rotated onto. Passed as an interface the transits package
+		// declares, so neither domain imports the other.
+		Transits:     transits.NewHandler(transitReader, chartService, httpapi.AuthErrorWriter),
 		ProfileOwner: profileService,
 	})
 

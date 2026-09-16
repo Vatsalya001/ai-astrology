@@ -104,8 +104,17 @@ type Chart struct {
 	Stale bool `json:"stale,omitempty"`
 }
 
+// TxBeginner starts a transaction.
+//
+// Declared by the consumer, so this package names only what it uses —
+// *pgxpool.Pool satisfies it, and so does a pgx.Conn.
+type TxBeginner interface {
+	Begin(ctx context.Context) (pgx.Tx, error)
+}
+
 type Service struct {
 	q        dbgen.Querier
+	db       TxBeginner
 	astro    *clients.Astro
 	profiles *birthprofiles.Service
 	logger   *slog.Logger
@@ -114,6 +123,7 @@ type Service struct {
 
 func NewService(
 	q dbgen.Querier,
+	db TxBeginner,
 	astro *clients.Astro,
 	profiles *birthprofiles.Service,
 	logger *slog.Logger,
@@ -121,7 +131,10 @@ func NewService(
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &Service{q: q, astro: astro, profiles: profiles, logger: logger, events: analytics.Nop{}}
+	return &Service{
+		q: q, db: db, astro: astro, profiles: profiles,
+		logger: logger, events: analytics.Nop{},
+	}
 }
 
 func (s *Service) WithAnalytics(events analytics.Emitter) *Service {
@@ -255,7 +268,24 @@ func (s *Service) computeAndStore(
 		return Chart{}, fmt.Errorf("charts: encode: %w", err)
 	}
 
-	row, err := s.q.UpsertChart(ctx, dbgen.UpsertChartParams{
+	// The chart row and its dasha tree are written in ONE transaction.
+	//
+	// Separately, a chart whose tree failed to write is served happily
+	// forever — every read finds the chart, no read notices the missing
+	// dashas, and the only symptom is an empty dasha screen that looks
+	// like "this chart has no dashas", which is a real and different
+	// thing (see ErrNoDashas).
+	tx, err := s.db.Begin(ctx)
+	if err != nil {
+		return Chart{}, fmt.Errorf("charts: begin: %w", err)
+	}
+	// Rollback after a successful Commit is a no-op, so this needs no
+	// flag to track whether the commit happened.
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	txq := dbgen.New(tx)
+
+	row, err := txq.UpsertChart(ctx, dbgen.UpsertChartParams{
 		BirthProfileID:    toPgUUID(key.ProfileID),
 		ChartType:         key.ChartType,
 		CalculationSystem: key.System,
@@ -266,6 +296,19 @@ func (s *Service) computeAndStore(
 	})
 	if err != nil {
 		return Chart{}, fmt.Errorf("charts: persist: %w", err)
+	}
+
+	// A chart without a birth time has no dashas at all — the Moon cannot
+	// be pinned to a nakshatra pada without one — so an absent tree is
+	// expected rather than a failure.
+	if response.Dashas != nil {
+		if _, err := storeDashaTree(ctx, txq, uuid.UUID(row.ID.Bytes), *response.Dashas); err != nil {
+			return Chart{}, err
+		}
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return Chart{}, fmt.Errorf("charts: commit: %w", err)
 	}
 
 	s.events.Emit(ctx, analytics.ChartGenerated, &userID, map[string]any{
@@ -304,4 +347,31 @@ func toChart(row dbgen.Chart) Chart {
 
 func toPgUUID(id uuid.UUID) pgtype.UUID {
 	return pgtype.UUID{Bytes: id, Valid: true}
+}
+
+// Recompute discards the stored chart and asks astro-service again.
+//
+// The one operation in this package that deliberately ignores storage.
+// Everything else treats a stored chart as authoritative, because a chart
+// is a pure function of its inputs; this exists for the case where the
+// FUNCTION changed — a new ephemeris, a corrected ayanamsa, a fixed
+// navamsa formula — and the stored answer is now the old engine's.
+//
+// It does not delete first. The upsert inside computeAndStore replaces
+// the row in the same transaction that writes the new dasha tree, so a
+// failed recompute leaves the previous chart intact rather than leaving
+// the user with nothing while astro-service is unreachable.
+func (s *Service) Recompute(ctx context.Context, userID uuid.UUID, key Key) (Chart, error) {
+	key = key.withDefaults()
+
+	profile, err := s.profiles.Get(ctx, userID, key.ProfileID)
+	if err != nil {
+		return Chart{}, err
+	}
+
+	chart, err := s.computeAndStore(ctx, userID, profile, key)
+	if err != nil {
+		return Chart{}, err
+	}
+	return chart, nil
 }

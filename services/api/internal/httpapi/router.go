@@ -6,12 +6,14 @@ import (
 
 	"github.com/Vatsalya001/ai-astrology/services/api/internal/auth"
 	"github.com/Vatsalya001/ai-astrology/services/api/internal/birthprofiles"
+	"github.com/Vatsalya001/ai-astrology/services/api/internal/charts"
 	"github.com/Vatsalya001/ai-astrology/services/api/internal/config"
 	"github.com/Vatsalya001/ai-astrology/services/api/internal/places"
 	"github.com/Vatsalya001/ai-astrology/services/api/internal/platform/clients"
 	"github.com/Vatsalya001/ai-astrology/services/api/internal/platform/db"
 	"github.com/Vatsalya001/ai-astrology/services/api/internal/platform/redis"
 	"github.com/Vatsalya001/ai-astrology/services/api/internal/platform/redis/ratelimit"
+	"github.com/Vatsalya001/ai-astrology/services/api/internal/transits"
 	"github.com/Vatsalya001/ai-astrology/services/api/internal/users"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -54,6 +56,8 @@ type Deps struct {
 	// a route that exists and 500s is worse than one that 404s.
 	BirthProfiles *birthprofiles.Handler
 	Places        *places.Handler
+	Charts        *charts.Handler
+	Transits      *transits.Handler
 	// ProfileOwner gates the chart and transit subtrees. Required
 	// whenever those are mounted; see mountAstrology.
 	ProfileOwner ProfileOwnership
@@ -327,13 +331,14 @@ func mountAstrology(r chi.Router, d Deps) {
 		})
 	}
 
-	if d.BirthProfiles == nil {
-		return
-	}
 	// A programming error, so it fails at construction rather than by
 	// serving somebody else's birth profile on the first request.
-	if d.ProfileOwner == nil {
-		panic("httpapi: Deps.ProfileOwner is required when the birth-profile routes are mounted")
+	if (d.BirthProfiles != nil || d.Charts != nil || d.Transits != nil) && d.ProfileOwner == nil {
+		panic("httpapi: Deps.ProfileOwner is required when any profile-scoped route is mounted")
+	}
+
+	if d.BirthProfiles == nil {
+		return
 	}
 
 	r.Route("/birth-profiles", func(r chi.Router) {
@@ -359,6 +364,60 @@ func mountAstrology(r chi.Router, d Deps) {
 			r.Get("/{id}/versions", d.BirthProfiles.Versions)
 		})
 	})
+
+	// ─── Charts and dashas ──────────────────────────────────────
+	//
+	// Every route addresses a birth profile, so the whole subtree sits
+	// behind the ownership check — there is no collection endpoint here
+	// to leave outside it.
+	if d.Charts != nil {
+		r.Route("/charts", func(r chi.Router) {
+			r.Use(authenticate)
+
+			// Group, NOT r.Use on the Route above — and this is not style.
+			//
+			// Middleware added with r.Use on a sub-router runs BEFORE chi
+			// matches the route within it, so chi.URLParam returns "" and
+			// the ownership check sees an unparseable ID on every request.
+			// It fails closed, which is the right direction, but it 404s
+			// the owner too. Group attaches the middleware to the endpoint
+			// chain instead, after the match, where the parameter exists.
+			//
+			// Found by TestEveryProfileScopedRouteRefusesAStranger, which
+			// asserts the OWNER does not get 404 — the half of that test
+			// that looked like belt-and-braces.
+			r.Group(func(r chi.Router) {
+				r.Use(RequireProfileOwnership(d.ProfileOwner, "birthProfileId"))
+
+				r.Get("/{birthProfileId}", d.Charts.Get)
+				r.Get("/{birthProfileId}/dashas", d.Charts.Dashas)
+				r.Get("/{birthProfileId}/dashas/current", d.Charts.Current)
+
+				// The only route here that calls astro-service
+				// unconditionally, so it carries its own per-user limit on
+				// top of the global per-IP backstop.
+				r.Post("/{birthProfileId}/recompute", d.Charts.Recompute(d.Limiter))
+			})
+		})
+	}
+
+	// ─── Transits ───────────────────────────────────────────────
+	if d.Transits != nil {
+		r.Route("/astrology", func(r chi.Router) {
+			r.Use(authenticate)
+
+			// Global. No profile in the path and nothing to own: these
+			// positions are identical for every person alive at that
+			// instant, which is what makes the table free of personal data
+			// in the first place.
+			r.Get("/transits", d.Transits.Global)
+
+			r.Group(func(r chi.Router) {
+				r.Use(RequireProfileOwnership(d.ProfileOwner, "birthProfileId"))
+				r.Get("/transits/{birthProfileId}", d.Transits.Natal)
+			})
+		})
+	}
 }
 
 // authErrorWriter adapts WriteError to the signature the auth package
