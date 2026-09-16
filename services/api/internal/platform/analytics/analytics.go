@@ -39,6 +39,23 @@ const (
 	SessionRevoked           = "session_revoked"
 	AccountDeletionRequested = "account_deletion_requested"
 	AccountDeleted           = "account_deleted"
+
+	// Phase 2, from PHASE-02 §15.
+	//
+	// No dates, times, place names or coordinates in any payload. Birth
+	// date + time + place is close to a unique identifier, so the same
+	// rule the logger follows applies here — enums and IDs only, and the
+	// property allowlist below enforces it rather than trusting each
+	// call site.
+	BirthProfileStarted       = "birth_profile_started"
+	BirthProfileStepCompleted = "birth_profile_step_completed"
+	BirthTimeUnknownSelected  = "birth_time_unknown_selected"
+	PlaceSearchPerformed      = "place_search_performed"
+	PlaceSelectedViaMap       = "place_selected_via_map"
+	BirthProfileCreated       = "birth_profile_created"
+	ChartGenerated            = "chart_generated"
+	ChartGenerationFailed     = "chart_generation_failed"
+	BirthProfileEdited        = "birth_profile_edited"
 )
 
 // knownEvents is the closed set. Adding one is a deliberate edit here,
@@ -54,6 +71,16 @@ var knownEvents = map[string]bool{
 	SessionRevoked:           true,
 	AccountDeletionRequested: true,
 	AccountDeleted:           true,
+
+	BirthProfileStarted:       true,
+	BirthProfileStepCompleted: true,
+	BirthTimeUnknownSelected:  true,
+	PlaceSearchPerformed:      true,
+	PlaceSelectedViaMap:       true,
+	BirthProfileCreated:       true,
+	ChartGenerated:            true,
+	ChartGenerationFailed:     true,
+	BirthProfileEdited:        true,
 }
 
 // allowedProperties is what may travel with an event.
@@ -72,6 +99,18 @@ var allowedProperties = map[string]bool{
 	"count":    true,
 	"role":     true,
 	"is_new":   true,
+
+	// Phase 2. Every one of these is a count, an enum or a duration.
+	//
+	// Deliberately absent, and worth naming so the omission reads as a
+	// decision: no `birth_date`, `birth_time`, `place`, `latitude`,
+	// `longitude` or `timezone`. Those are the fields that would make an
+	// analytics row identify a person.
+	"step":        true, // which onboarding step, 1-3
+	"duration_ms": true,
+	"chart_type":  true, // D1 | D9 | D10
+	"error_code":  true, // a short enum, never a message
+	"cached":      true,
 }
 
 // Emitter records a product event.

@@ -114,11 +114,25 @@ func TestUnknownEventsAreRefused(t *testing.T) {
 // Every name in the spec's §12 list must be accepted, or a call site
 // wired correctly would still emit nothing.
 func TestTheWholeSpecVocabularyIsAccepted(t *testing.T) {
-	spec := []string{
+	// Both phases' §15 lists, enumerated separately so a future phase
+	// adds its own block rather than editing a single opaque slice.
+	//
+	// This test caught the Phase 2 additions the moment they landed —
+	// which is the point. The count assertion is not bureaucracy: a
+	// vocabulary that grows without anyone noticing is how an event
+	// nobody defined ends up in a dashboard.
+	phase1 := []string{
 		"signup_started", "otp_requested", "otp_verified", "signup_completed",
 		"login_completed", "onboarding_name_completed", "preferences_updated",
 		"session_revoked", "account_deletion_requested", "account_deleted",
 	}
+	phase2 := []string{
+		"birth_profile_started", "birth_profile_step_completed",
+		"birth_time_unknown_selected", "place_search_performed",
+		"place_selected_via_map", "birth_profile_created",
+		"chart_generated", "chart_generation_failed", "birth_profile_edited",
+	}
+	spec := append(append([]string{}, phase1...), phase2...)
 
 	for _, name := range spec {
 		emitter, buf := capture(t)
@@ -130,8 +144,9 @@ func TestTheWholeSpecVocabularyIsAccepted(t *testing.T) {
 	}
 
 	if len(knownEvents) != len(spec) {
-		t.Errorf("knownEvents has %d entries, the spec lists %d — one of them has drifted",
-			len(knownEvents), len(spec))
+		t.Errorf("knownEvents has %d entries, the two specs list %d (%d + %d) — "+
+			"an event was added without being written down, or vice versa",
+			len(knownEvents), len(spec), len(phase1), len(phase2))
 	}
 }
 
