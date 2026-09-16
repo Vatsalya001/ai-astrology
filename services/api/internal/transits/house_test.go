@@ -128,3 +128,54 @@ func TestSadeSatiPhaseNamesMatchAstroService(t *testing.T) {
 		}
 	}
 }
+
+// The zodiac is a second list duplicated across the Go/Python boundary,
+// and it is load-bearing in a way the phase names are not: the natal
+// Moon sign arrives from a stored chart as a NAME and the rotation needs
+// an INDEX, so a reordering here shifts every user's gochara by however
+// far the list moved. It still renders. It still looks plausible.
+func TestSignNamesMatchAstroService(t *testing.T) {
+	path := filepath.Join("..", "..", "..", "astro", "app", "core", "constants.py")
+	source, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+
+	block := regexp.MustCompile(`(?s)SIGNS:\s*Final\s*=\s*\((.*?)\)`).FindSubmatch(source)
+	if block == nil {
+		t.Fatal("could not find SIGNS in astro-service constants.py; " +
+			"the tuple this test compares against has been renamed or restructured")
+	}
+
+	var python []string
+	for _, m := range regexp.MustCompile(`"([A-Za-z]+)"`).FindAllSubmatch(block[1], -1) {
+		python = append(python, string(m[1]))
+	}
+
+	if len(python) != len(transits.SignNames) {
+		t.Fatalf("astro-service lists %d signs, Go lists %d: %v vs %v",
+			len(python), len(transits.SignNames), python, transits.SignNames)
+	}
+	for i, name := range transits.SignNames {
+		if python[i] != name {
+			t.Fatalf("sign %d is %q in Go and %q in astro-service — the two orders "+
+				"have drifted, so a chart naming either sign now rotates to the "+
+				"wrong house for every user",
+				i, name, python[i])
+		}
+	}
+}
+
+// An unrecognised sign must be an error, never index 0 — because Aries
+// IS index 0, and a not-found zero would place every unknown sign at the
+// start of the zodiac and compute houses from a Moon it never found.
+func TestAnUnknownSignIsAnErrorNotAries(t *testing.T) {
+	if index, err := transits.SignIndex("Ophiuchus"); err == nil {
+		t.Fatalf("an unknown sign resolved to index %d instead of failing", index)
+	}
+
+	index, err := transits.SignIndex("Aries")
+	if err != nil || index != 0 {
+		t.Fatalf("SignIndex(\"Aries\") = %d, %v; want 0, nil", index, err)
+	}
+}

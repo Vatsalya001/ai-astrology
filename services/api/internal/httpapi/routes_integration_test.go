@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -23,6 +24,7 @@ import (
 
 	"github.com/Vatsalya001/ai-astrology/services/api/internal/auth"
 	"github.com/Vatsalya001/ai-astrology/services/api/internal/birthprofiles"
+	"github.com/Vatsalya001/ai-astrology/services/api/internal/charts"
 	"github.com/Vatsalya001/ai-astrology/services/api/internal/config"
 	"github.com/Vatsalya001/ai-astrology/services/api/internal/places"
 	"github.com/Vatsalya001/ai-astrology/services/api/internal/platform/clients"
@@ -31,6 +33,7 @@ import (
 	"github.com/Vatsalya001/ai-astrology/services/api/internal/platform/redis"
 	"github.com/Vatsalya001/ai-astrology/services/api/internal/platform/redis/ratelimit"
 	"github.com/Vatsalya001/ai-astrology/services/api/internal/platform/testsupport"
+	"github.com/Vatsalya001/ai-astrology/services/api/internal/transits"
 	"github.com/Vatsalya001/ai-astrology/services/api/internal/users"
 )
 
@@ -83,7 +86,12 @@ func newRouterHarness(t *testing.T) (*routerHarness, func()) {
 
 	cfg := &config.Config{WebURL: "http://localhost:3000", IPHashSalt: testSalt}
 
-	astro, err := clients.NewAstro("http://127.0.0.1:1", "token", time.Second)
+	astroStub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(stubChartJSON))
+	}))
+
+	astro, err := clients.NewAstro(astroStub.URL, "token", 2*time.Second)
 	if err != nil {
 		t.Fatalf("NewAstro: %v", err)
 	}
@@ -91,6 +99,8 @@ func newRouterHarness(t *testing.T) (*routerHarness, func()) {
 	if err != nil {
 		t.Fatalf("NewAI: %v", err)
 	}
+
+	chartService := charts.NewService(queries, pool, astro, profileService, nil)
 
 	deps := Deps{
 		Config:     cfg,
@@ -106,6 +116,8 @@ func newRouterHarness(t *testing.T) (*routerHarness, func()) {
 		BirthProfiles: birthprofiles.NewHandler(
 			profileService, placeShim{placeService}, AuthErrorWriter),
 		Places:       places.NewHandler(placeService, AuthErrorWriter),
+		Charts:       charts.NewHandler(chartService, AuthErrorWriter),
+		Transits:     transits.NewHandler(transits.NewReader(queries), chartService, AuthErrorWriter),
 		ProfileOwner: profileService,
 	}
 
@@ -119,8 +131,10 @@ func newRouterHarness(t *testing.T) (*routerHarness, func()) {
 	h.bob = seedRouterUser(ctx, t, pool, "bob")
 	h.placeID = seedPlace(ctx, t, pool)
 	h.profile = seedProfile(ctx, t, profileService, h.alice, h.placeID, placeService)
+	seedTransits(ctx, t, pool)
 
 	return h, func() {
+		astroStub.Close()
 		stopRedis()
 		stopDB()
 	}
@@ -525,7 +539,9 @@ func phase2Routes(t *testing.T, router chi.Router, placeID int32) []discovered {
 	var out []discovered
 	for _, route := range walk(t, router) {
 		if strings.HasPrefix(route.pattern, "/api/v1/birth-profiles") ||
-			strings.HasPrefix(route.pattern, "/api/v1/places") {
+			strings.HasPrefix(route.pattern, "/api/v1/places") ||
+			strings.HasPrefix(route.pattern, "/api/v1/charts") ||
+			strings.HasPrefix(route.pattern, "/api/v1/astrology") {
 			route.body = bodyFor(route.method, route.pattern, placeID)
 			out = append(out, route)
 		}
@@ -701,4 +717,476 @@ func startRouterPostgres(ctx context.Context, t *testing.T) (*pgxpool.Pool, func
 		pool.Close()
 		_ = container.Terminate(context.Background())
 	}
+}
+
+// stubChartJSON is what the fake astro-service returns.
+//
+// The dasha tree is three real levels with a second Mahadasha after the
+// first, so ordering and "which is running now" have something to be
+// wrong about. A single period would satisfy every assertion trivially.
+//
+// The Moon is in Capricorn, which is also where seedTransits puts Saturn
+// — so the natal transit endpoint has an active Sade Sati at peak, and a
+// rotation that silently returned astro's own house number would produce
+// a different answer.
+const stubChartJSON = `{
+  "meta": {"schema_version":1,"calculation_system":"vedic","ayanamsa":"lahiri",
+           "ayanamsa_value":24.21,"house_system":"whole_sign",
+           "engine_version":"skyfield-1.55+de421+schema1",
+           "computed_at":"2026-01-01T00:00:00Z","time_accuracy":"exact"},
+  "ascendant": null, "houses": null, "navamsa": null,
+  "planets": [], "yogas": [],
+  "summary": {"sun_sign":"Pisces","moon_sign":"Capricorn","ascendant_sign":"Aries",
+              "moon_nakshatra":"Shravana","moon_nakshatra_pada":2},
+  "dashas": [
+    {"planet":"Sun","start":"2020-01-01T00:00:00Z","end":"2026-12-31T00:00:00Z","level":1,
+     "children":[
+       {"planet":"Sun","start":"2020-01-01T00:00:00Z","end":"2021-01-01T00:00:00Z","level":2},
+       {"planet":"Moon","start":"2021-01-01T00:00:00Z","end":"2026-12-31T00:00:00Z","level":2,
+        "children":[
+          {"planet":"Rahu","start":"2021-01-01T00:00:00Z","end":"2026-01-01T00:00:00Z","level":3},
+          {"planet":"Mars","start":"2026-01-01T00:00:00Z","end":"2026-12-31T00:00:00Z","level":3}
+        ]}
+     ]},
+    {"planet":"Moon","start":"2026-12-31T00:00:00Z","end":"2036-12-31T00:00:00Z","level":1,
+     "children":[
+       {"planet":"Moon","start":"2026-12-31T00:00:00Z","end":"2027-11-01T00:00:00Z","level":2}
+     ]}
+  ]
+}`
+
+// dashaProbe is an instant inside the first Mahadasha, the Moon
+// Antardasha and the Mars Pratyantardasha — one value that lands in all
+// three, which is the point of the tree above.
+const dashaProbe = "2026-06-01T00:00:00Z"
+
+// seedTransits fills the global table directly, standing in for the
+// six-hourly worker. Saturn sits in Capricorn, over the stub chart's
+// natal Moon.
+func seedTransits(ctx context.Context, t *testing.T, pool *pgxpool.Pool) {
+	t.Helper()
+
+	rows := []struct {
+		planet    string
+		sign      string
+		signIndex int
+	}{
+		{"Sun", "Taurus", 1},
+		{"Moon", "Leo", 4},
+		{"Saturn", "Capricorn", 9},
+	}
+	at := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
+
+	for _, row := range rows {
+		if _, err := pool.Exec(ctx,
+			`INSERT INTO transits (planet, sign, degree, is_retrograde, timestamp,
+			                       calculation_system, ayanamsa, metadata)
+			 VALUES ($1, $2, 14.5, FALSE, $3, 'vedic', 'lahiri',
+			         jsonb_build_object('longitude', $4::double precision,
+			                            'sign_index', $5::int))`,
+			row.planet, row.sign, at, float64(row.signIndex)*30+14.5, row.signIndex,
+		); err != nil {
+			t.Fatalf("seed transit %s: %v", row.planet, err)
+		}
+	}
+}
+
+// ─── charts, dashas and transits ─────────────────────────────────────
+
+// The dasha tree is stored as ROWS, not just as JSON inside the chart,
+// and this is the query that justifies it: one instant in, three levels
+// out, one round trip.
+func TestCurrentDashasReturnAllThreeLevels(t *testing.T) {
+	h, cleanup := newRouterHarness(t)
+	defer cleanup()
+	alice := h.token(t, h.alice)
+
+	rec := h.do(t, http.MethodGet,
+		"/api/v1/charts/"+h.profile.String()+"/dashas/current?at="+dashaProbe, alice, "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("current dashas returned %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var current struct {
+		Maha *struct {
+			Planet    string  `json:"planet"`
+			Level     int     `json:"level"`
+			ElapsedPc float64 `json:"elapsed_percent"`
+		} `json:"mahadasha"`
+		Antar *struct {
+			Planet string `json:"planet"`
+			Level  int    `json:"level"`
+		} `json:"antardasha"`
+		Pratyantar *struct {
+			Planet string `json:"planet"`
+			Level  int    `json:"level"`
+		} `json:"pratyantardasha"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &current); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+
+	if current.Maha == nil || current.Antar == nil || current.Pratyantar == nil {
+		t.Fatalf("expected all three levels at %s, got maha=%v antar=%v pratyantar=%v — "+
+			"a missing level means the tree was written without its children, and the "+
+			"screen renders that as fact",
+			dashaProbe, current.Maha, current.Antar, current.Pratyantar)
+	}
+
+	// The instant sits inside exactly one period per level, and these are
+	// the three. Getting the parent-child links wrong would return a
+	// plausible but different trio.
+	if current.Maha.Planet != "Sun" {
+		t.Fatalf("Mahadasha at %s is %s, want Sun", dashaProbe, current.Maha.Planet)
+	}
+	if current.Antar.Planet != "Moon" {
+		t.Fatalf("Antardasha is %s, want Moon", current.Antar.Planet)
+	}
+	if current.Pratyantar.Planet != "Mars" {
+		t.Fatalf("Pratyantardasha is %s, want Mars", current.Pratyantar.Planet)
+	}
+
+	// Sun runs 2020-01-01 to 2026-12-31 and the probe is 2026-06-01, so
+	// it is most of the way through. An elapsed of 0 or 100 would mean the
+	// progress bar is computed from the wrong pair of timestamps.
+	if current.Maha.ElapsedPc <= 80 || current.Maha.ElapsedPc >= 100 {
+		t.Fatalf("Mahadasha is %.1f%% elapsed at %s; the probe is six years into a "+
+			"seven-year period", current.Maha.ElapsedPc, dashaProbe)
+	}
+}
+
+// Levels come back ordered and complete, which is what ListDashasByLevel
+// is for. Level 3 having more rows than level 1 is the shape of a tree.
+func TestDashaLevelsAreOrderedAndNested(t *testing.T) {
+	h, cleanup := newRouterHarness(t)
+	defer cleanup()
+	alice := h.token(t, h.alice)
+
+	counts := map[int]int{}
+	for level := 1; level <= 3; level++ {
+		rec := h.do(t, http.MethodGet, fmt.Sprintf(
+			"/api/v1/charts/%s/dashas?level=%d", h.profile.String(), level), alice, "")
+		if rec.Code != http.StatusOK {
+			t.Fatalf("level %d returned %d: %s", level, rec.Code, rec.Body.String())
+		}
+
+		var body struct {
+			Level   int `json:"level"`
+			Periods []struct {
+				Planet   string    `json:"planet"`
+				Start    time.Time `json:"start"`
+				End      time.Time `json:"end"`
+				Level    int       `json:"level"`
+				ParentID *string   `json:"parent_id"`
+			} `json:"periods"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+			t.Fatalf("decode level %d: %v", level, err)
+		}
+		counts[level] = len(body.Periods)
+
+		for i, period := range body.Periods {
+			if period.Level != level {
+				t.Fatalf("level %d query returned a level-%d period", level, period.Level)
+			}
+			// The parent_id / level pair is a CHECK constraint in the
+			// schema; this asserts the API surfaces it consistently.
+			if level == 1 && period.ParentID != nil {
+				t.Fatalf("a Mahadasha has parent %s; level 1 is the root", *period.ParentID)
+			}
+			if level > 1 && period.ParentID == nil {
+				t.Fatalf("a level-%d period has no parent — it is queryable as though "+
+					"it were a Mahadasha", level)
+			}
+			if i > 0 && period.Start.Before(body.Periods[i-1].Start) {
+				t.Fatalf("level %d is not ordered by start date", level)
+			}
+		}
+	}
+
+	if counts[1] != 2 {
+		t.Fatalf("level 1 has %d periods, want the 2 in the fixture", counts[1])
+	}
+	if counts[3] == 0 {
+		t.Fatal("level 3 is empty; the recursion never reached the third level, " +
+			"and the deepest dasha the product shows does not exist")
+	}
+}
+
+func TestAnOutOfRangeDashaLevelIsRefused(t *testing.T) {
+	h, cleanup := newRouterHarness(t)
+	defer cleanup()
+	alice := h.token(t, h.alice)
+
+	for _, level := range []string{"0", "4", "-1", "three"} {
+		rec := h.do(t, http.MethodGet,
+			"/api/v1/charts/"+h.profile.String()+"/dashas?level="+level, alice, "")
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("level=%s returned %d, want 400", level, rec.Code)
+		}
+	}
+}
+
+// The chart type reaches both a database UNIQUE key and astro-service, so
+// it is an allowlist rather than a pass-through: an unrecognised value
+// would create a permanent cache entry for a chart nothing can render.
+func TestTheChartTypeIsAnAllowlist(t *testing.T) {
+	h, cleanup := newRouterHarness(t)
+	defer cleanup()
+	alice := h.token(t, h.alice)
+
+	for _, chartType := range []string{"D1", "D9", "d1"} {
+		rec := h.do(t, http.MethodGet,
+			"/api/v1/charts/"+h.profile.String()+"?type="+url.QueryEscape(chartType), alice, "")
+		if rec.Code != http.StatusOK {
+			t.Fatalf("type=%s returned %d: %s", chartType, rec.Code, rec.Body.String())
+		}
+	}
+	// D10 is a real divisional chart that Phase 2 does not compute, so it
+	// must be refused rather than cached as an empty D1. The last one is
+	// not expected to reach SQL — sqlc parameterises everything — but a
+	// value that would be catastrophic if it did belongs in the allowlist
+	// test rather than in a comment.
+	for _, chartType := range []string{"D10", "D60", "'; DROP TABLE charts; --"} {
+		rec := h.do(t, http.MethodGet,
+			"/api/v1/charts/"+h.profile.String()+"?type="+url.QueryEscape(chartType), alice, "")
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("type=%q returned %d, want 400", chartType, rec.Code)
+		}
+	}
+
+	// And the tables are still there.
+	var tables int
+	if err := h.pool.QueryRow(context.Background(),
+		`SELECT count(*) FROM information_schema.tables
+		 WHERE table_schema = 'public' AND table_name IN ('charts', 'dashas')`).Scan(&tables); err != nil {
+		t.Fatalf("count tables: %v", err)
+	}
+	if tables != 2 {
+		t.Fatalf("expected charts and dashas to still exist, found %d", tables)
+	}
+}
+
+// The natal transit endpoint rotates the SHARED table onto this user's
+// Moon. Saturn is in Capricorn and so is the stub chart's natal Moon, so
+// Sade Sati is at peak — and the house must be 1, not the 7 that a
+// pass-through of astro's own number would give.
+func TestNatalTransitsRotateOntoTheUsersMoon(t *testing.T) {
+	h, cleanup := newRouterHarness(t)
+	defer cleanup()
+	alice := h.token(t, h.alice)
+
+	rec := h.do(t, http.MethodGet,
+		"/api/v1/astrology/transits/"+h.profile.String()+"?at="+dashaProbe, alice, "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("natal transits returned %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var body struct {
+		NatalMoonSign string `json:"natal_moon_sign"`
+		Transits      []struct {
+			Planet        string `json:"planet"`
+			Sign          string `json:"sign"`
+			HouseFromMoon int    `json:"house_from_moon"`
+		} `json:"transits"`
+		SadeSati struct {
+			IsActive bool    `json:"is_active"`
+			Phase    *string `json:"phase"`
+		} `json:"sade_sati"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+
+	if body.NatalMoonSign != "Capricorn" {
+		t.Fatalf("natal moon sign is %q, want Capricorn from the stored chart summary",
+			body.NatalMoonSign)
+	}
+
+	var saturn, sun int
+	for _, transit := range body.Transits {
+		switch transit.Planet {
+		case "Saturn":
+			saturn = transit.HouseFromMoon
+		case "Sun":
+			sun = transit.HouseFromMoon
+		}
+	}
+	if saturn != 1 {
+		t.Fatalf("Saturn in Capricorn with a Capricorn Moon is house %d, want 1", saturn)
+	}
+	// Taurus is four signs on from Capricorn counting inclusively: 5.
+	if sun != 5 {
+		t.Fatalf("the Sun in Taurus with a Capricorn Moon is house %d, want 5 — "+
+			"the rotation is applied per planet, not once for the whole set", sun)
+	}
+
+	if !body.SadeSati.IsActive || body.SadeSati.Phase == nil || *body.SadeSati.Phase != "peak" {
+		t.Fatalf("Saturn over the natal Moon: active=%v phase=%v, want an active peak",
+			body.SadeSati.IsActive, body.SadeSati.Phase)
+	}
+}
+
+// The global endpoint must not leak a natal frame. A house number there
+// would be somebody's — whoever's Moon happened to be used.
+func TestGlobalTransitsCarryNoHouse(t *testing.T) {
+	h, cleanup := newRouterHarness(t)
+	defer cleanup()
+
+	rec := h.do(t, http.MethodGet, "/api/v1/astrology/transits?at="+dashaProbe,
+		h.token(t, h.alice), "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("global transits returned %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var raw struct {
+		Transits []map[string]any `json:"transits"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &raw); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(raw.Transits) == 0 {
+		t.Fatal("the global endpoint returned nothing")
+	}
+
+	for _, transit := range raw.Transits {
+		for _, field := range []string{"house_from_moon", "house_from_ascendant"} {
+			if _, present := transit[field]; present {
+				t.Fatalf("the global response carries %q for %v — a house is relative to "+
+					"one person's natal chart and has no meaning in a shared response",
+					field, transit["planet"])
+			}
+		}
+	}
+}
+
+// A chart whose profile has no birth time has no dasha tree, because the
+// Moon cannot be pinned to a nakshatra pada without one. That is a
+// different thing from "we failed", and the user is told which.
+func TestDashasForAnUnknownBirthTimeExplainWhy(t *testing.T) {
+	h, cleanup := newRouterHarness(t)
+	defer cleanup()
+	alice := h.token(t, h.alice)
+
+	created := h.do(t, http.MethodPost, "/api/v1/birth-profiles", alice, fmt.Sprintf(
+		`{"label":"no-time","birth_date":"1990-03-15","time_accuracy":"unknown","place_id":%d}`,
+		h.placeID))
+	if created.Code != http.StatusCreated {
+		t.Fatalf("create returned %d: %s", created.Code, created.Body.String())
+	}
+	var profile struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(created.Body.Bytes(), &profile); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+
+	// Compute the chart first, so there is a chart row to hang the
+	// absence off. Otherwise this would test "no chart", which 404s for a
+	// completely different reason.
+	if chart := h.do(t, http.MethodGet, "/api/v1/charts/"+profile.ID, alice, ""); chart.Code != http.StatusOK {
+		t.Fatalf("computing the chart returned %d: %s", chart.Code, chart.Body.String())
+	}
+
+	// The stub returns a dasha tree regardless of time accuracy, so the
+	// real no-time case is reproduced by removing the rows a real
+	// astro-service would never have sent.
+	if _, err := h.pool.Exec(context.Background(),
+		`DELETE FROM dashas d USING charts c, birth_profiles p
+		 WHERE d.chart_id = c.id AND c.birth_profile_id = p.id AND p.id = $1`,
+		profile.ID); err != nil {
+		t.Fatalf("clear dashas: %v", err)
+	}
+
+	rec := h.do(t, http.MethodGet, "/api/v1/charts/"+profile.ID+"/dashas", alice, "")
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("dashas with no tree returned %d, want 422 — a 404 would say the chart "+
+			"does not exist, and an empty list would say there are no dashas, which is "+
+			"a claim about astrology rather than about this profile (body: %s)",
+			rec.Code, strings.TrimSpace(rec.Body.String()))
+	}
+	if !strings.Contains(rec.Body.String(), "birth time") {
+		t.Fatalf("the message does not tell the user what to do about it: %s",
+			strings.TrimSpace(rec.Body.String()))
+	}
+}
+
+// Recompute is the one route that calls astro-service unconditionally,
+// so the limit is the feature, not an afterthought: without it, one
+// authenticated user is arbitrary load on the compute service and the
+// rest of the product degrades with them.
+func TestRecomputeIsRateLimitedPerUser(t *testing.T) {
+	h, cleanup := newRouterHarness(t)
+	defer cleanup()
+	alice := h.token(t, h.alice)
+	path := "/api/v1/charts/" + h.profile.String() + "/recompute"
+
+	for attempt := 1; attempt <= charts.RecomputeLimit.Max; attempt++ {
+		rec := h.do(t, http.MethodPost, path, alice, "")
+		if rec.Code != http.StatusOK {
+			t.Fatalf("recompute %d of %d returned %d: %s",
+				attempt, charts.RecomputeLimit.Max, rec.Code, rec.Body.String())
+		}
+	}
+
+	rec := h.do(t, http.MethodPost, path, alice, "")
+	if rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("recompute %d returned %d, want 429 — the limit is what stops one "+
+			"account becoming arbitrary load on astro-service",
+			charts.RecomputeLimit.Max+1, rec.Code)
+	}
+	if rec.Header().Get("Retry-After") == "" {
+		t.Fatal("a 429 with no Retry-After leaves the client guessing, and guessing " +
+			"means retrying immediately")
+	}
+
+	// Per user, not per IP: everyone behind one mobile carrier NAT shares
+	// an address, and limiting on it would punish all of them for one.
+	// Bob owns no profile, so he gets 404 — but from the OWNERSHIP check,
+	// which means he was not stopped by Alice's exhausted limit.
+	bob := h.do(t, http.MethodPost, path, h.token(t, h.bob), "")
+	if bob.Code == http.StatusTooManyRequests {
+		t.Fatal("a second user was rate-limited by the first user's recomputes; " +
+			"the limiter is keyed on something they share")
+	}
+}
+
+// Recompute replaces the stored chart rather than deleting and refilling,
+// so a failure leaves the previous chart intact.
+func TestRecomputeReplacesTheChartAndItsDashaTree(t *testing.T) {
+	h, cleanup := newRouterHarness(t)
+	defer cleanup()
+	alice := h.token(t, h.alice)
+
+	// Compute once, then count.
+	if rec := h.do(t, http.MethodGet, "/api/v1/charts/"+h.profile.String(), alice, ""); rec.Code != http.StatusOK {
+		t.Fatalf("initial chart returned %d: %s", rec.Code, rec.Body.String())
+	}
+	before := h.countDashas(t)
+	if before == 0 {
+		t.Fatal("no dasha rows after computing a chart")
+	}
+
+	if rec := h.do(t, http.MethodPost,
+		"/api/v1/charts/"+h.profile.String()+"/recompute", alice, ""); rec.Code != http.StatusOK {
+		t.Fatalf("recompute returned %d: %s", rec.Code, rec.Body.String())
+	}
+
+	if after := h.countDashas(t); after != before {
+		t.Fatalf("the dasha tree has %d rows after a recompute and %d before — "+
+			"the old tree was not replaced, it was added to, and FindDashaAt now "+
+			"returns two overlapping generations", after, before)
+	}
+}
+
+func (h *routerHarness) countDashas(t *testing.T) int {
+	t.Helper()
+	var n int
+	if err := h.pool.QueryRow(context.Background(),
+		`SELECT count(*) FROM dashas d
+		 JOIN charts c ON c.id = d.chart_id
+		 WHERE c.birth_profile_id = $1`, h.profile).Scan(&n); err != nil {
+		t.Fatalf("count dashas: %v", err)
+	}
+	return n
 }

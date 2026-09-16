@@ -21,13 +21,9 @@ const (
 	PhaseSetting = "setting" // the 2nd
 )
 
-// Position is a transit as one particular user sees it.
-//
-// Everything above HouseFromMoon came out of the shared table unchanged.
-// HouseFromMoon is computed here, per request, from that user's natal
-// Moon — it is not stored, and storing it is the bug ReferenceMoonSign
-// documents.
-type Position struct {
+// Global is a transit with no natal frame: exactly what the shared table
+// holds, and true for every person alive at that instant.
+type Global struct {
 	Planet       string    `json:"planet"`
 	Sign         string    `json:"sign"`
 	SignIndex    int       `json:"sign_index"`
@@ -35,10 +31,21 @@ type Position struct {
 	Longitude    float64   `json:"longitude"`
 	IsRetrograde bool      `json:"is_retrograde"`
 	Timestamp    time.Time `json:"timestamp"`
+}
+
+// Position is a transit as one particular user sees it.
+//
+// A separate type from Global rather than a Global with a zero house.
+// A caller holding a Position knows the house is meaningful; a caller
+// holding a Global cannot read a house at all, which is better than
+// reading a 0 that looks like an answer.
+type Position struct {
+	Global
 
 	// HouseFromMoon is 1..12, counted inclusively from the natal Moon's
 	// sign — the Vedic convention, in which the Moon's own sign is the
-	// 1st house and not the 0th.
+	// 1st house and not the 0th. Computed per request and never stored;
+	// storing it is the bug ReferenceMoonSign documents.
 	HouseFromMoon int `json:"house_from_moon"`
 }
 
@@ -65,13 +72,12 @@ func NewReader(q dbgen.Querier) *Reader { return &Reader{q: q} }
 // statements, and only one of them is ever true.
 var ErrNoTransits = fmt.Errorf("transits: none stored")
 
-// At returns the most recent stored position of every planet at or
-// before `at`, rotated onto the caller's natal Moon sign.
-func (r *Reader) At(ctx context.Context, at time.Time, natalMoonSign int) ([]Position, error) {
-	if natalMoonSign < 0 || natalMoonSign >= SignCount {
-		return nil, fmt.Errorf("transits: natal moon sign %d is outside 0..11", natalMoonSign)
-	}
-
+// GlobalAt returns the most recent stored position of every planet at or
+// before `at`, with no natal frame.
+//
+// Safe to cache across every user, and free of personal data, because
+// that is exactly what the table holds.
+func (r *Reader) GlobalAt(ctx context.Context, at time.Time) ([]Global, error) {
 	rows, err := r.q.ListTransitsAt(ctx, dbgen.ListTransitsAtParams{
 		Timestamp:         at.UTC(),
 		CalculationSystem: SystemVedic,
@@ -84,13 +90,34 @@ func (r *Reader) At(ctx context.Context, at time.Time, natalMoonSign int) ([]Pos
 		return nil, ErrNoTransits
 	}
 
-	out := make([]Position, 0, len(rows))
+	out := make([]Global, 0, len(rows))
 	for _, row := range rows {
-		position, convErr := toPosition(row, natalMoonSign)
+		position, convErr := toGlobal(row)
 		if convErr != nil {
 			return nil, convErr
 		}
 		out = append(out, position)
+	}
+	return out, nil
+}
+
+// At returns the same positions rotated onto the caller's natal Moon.
+func (r *Reader) At(ctx context.Context, at time.Time, natalMoonSign int) ([]Position, error) {
+	if natalMoonSign < 0 || natalMoonSign >= SignCount {
+		return nil, fmt.Errorf("transits: natal moon sign %d is outside 0..11", natalMoonSign)
+	}
+
+	globals, err := r.GlobalAt(ctx, at)
+	if err != nil {
+		return nil, err
+	}
+
+	out := make([]Position, 0, len(globals))
+	for _, global := range globals {
+		out = append(out, Position{
+			Global:        global,
+			HouseFromMoon: HouseFromMoon(global.SignIndex, natalMoonSign),
+		})
 	}
 	return out, nil
 }
@@ -150,23 +177,22 @@ func HouseFromMoon(signIndex, natalMoonSign int) int {
 	return ((signIndex-natalMoonSign)%SignCount+SignCount)%SignCount + 1
 }
 
-func toPosition(row dbgen.Transit, natalMoonSign int) (Position, error) {
+func toGlobal(row dbgen.Transit) (Global, error) {
 	var metadata struct {
 		Longitude float64 `json:"longitude"`
 		SignIndex int     `json:"sign_index"`
 	}
 	if err := json.Unmarshal(row.Metadata, &metadata); err != nil {
-		return Position{}, fmt.Errorf("transits: decode metadata for %s: %w", row.Planet, err)
+		return Global{}, fmt.Errorf("transits: decode metadata for %s: %w", row.Planet, err)
 	}
 
-	return Position{
-		Planet:        row.Planet,
-		Sign:          row.Sign,
-		SignIndex:     metadata.SignIndex,
-		Degree:        row.Degree,
-		Longitude:     metadata.Longitude,
-		IsRetrograde:  row.IsRetrograde,
-		Timestamp:     row.Timestamp,
-		HouseFromMoon: HouseFromMoon(metadata.SignIndex, natalMoonSign),
+	return Global{
+		Planet:       row.Planet,
+		Sign:         row.Sign,
+		SignIndex:    metadata.SignIndex,
+		Degree:       row.Degree,
+		Longitude:    metadata.Longitude,
+		IsRetrograde: row.IsRetrograde,
+		Timestamp:    row.Timestamp,
 	}, nil
 }

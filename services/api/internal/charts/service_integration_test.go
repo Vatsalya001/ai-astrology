@@ -87,7 +87,7 @@ func newHarness(t *testing.T) (*harness, func()) {
 	h := &harness{
 		pool:       pool,
 		profiles:   profiles,
-		charts:     charts.NewService(q, astro, profiles, nil),
+		charts:     charts.NewService(q, pool, astro, profiles, nil),
 		astroCalls: &calls,
 		setDown:    func(v bool) { down.Store(v) },
 		userID:     seedUser(ctx, t, pool),
