@@ -76,6 +76,28 @@ tasks:
     dir: '{{.API_DIR}}'
     cmds: [go run ./cmd/worker]
 
+  astro:ephemeris:
+    desc: Vendor the JPL ephemeris kernel and verify its checksum
+    # The kernel is COMMITTED, so this is normally a no-op. It exists to
+    # re-fetch a corrupted copy and to record where the file came from —
+    # note the URL: the canonical
+    # .../generic_kernels/spk/planets/de421.bsp now 404s, and the file
+    # lives under a_old_versions/. A build that downloaded at runtime
+    # would already have broken.
+    dir: services/astro
+    cmds:
+      - |
+        if [ ! -f data/de421.bsp ]; then
+          echo "fetching de421.bsp (17 MB)…"
+          curl -sSfL --max-time 600 -o data/de421.bsp \
+            https://naif.jpl.nasa.gov/pub/naif/generic_kernels/spk/planets/a_old_versions/de421.bsp
+        fi
+      - cd data && sha256sum -c de421.bsp.sha256
+    sources:
+      - data/de421.bsp.sha256
+    generates:
+      - data/de421.bsp
+
   dev:astro:
     desc: Run astro-service from source with live reload
     # Stops the container first: compose publishes 8100, so both cannot

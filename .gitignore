@@ -75,3 +75,6 @@ Thumbs.db
 # repo root, so a bare `.adlc/session/` misses services/api/.adlc/session/.
 **/.adlc/session/
 /.run/e2e-log-offset
+
+# Task's own checksum cache.
+.task/
