@@ -99,6 +99,14 @@ type Config struct {
 
 	AccountDeleteGrace time.Duration `env:"ACCOUNT_DELETE_GRACE" envDefault:"168h" validate:"required"`
 
+	// ─── Background jobs ────────────────────────────────────────
+	// How many tasks one worker replica runs at once. Two, because the
+	// only Phase 2 job is a six-hourly call to astro-service: concurrency
+	// here buys nothing and a large pool would just hold Redis
+	// connections open. Phase 3's PDF renderer is what makes this worth
+	// raising.
+	WorkerConcurrency int `env:"WORKER_CONCURRENCY" envDefault:"2" validate:"required,min=1,max=64"`
+
 	// ─── Feature flags ──────────────────────────────────────────
 	FeatureAIChat        bool `env:"FEATURE_AI_CHAT_ENABLED"          envDefault:"false"`
 	FeatureVoice         bool `env:"FEATURE_VOICE_ENABLED"            envDefault:"false"`

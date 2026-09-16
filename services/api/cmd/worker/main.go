@@ -25,10 +25,13 @@ import (
 
 	"github.com/Vatsalya001/ai-astrology/services/api/internal/config"
 	"github.com/Vatsalya001/ai-astrology/services/api/internal/platform/analytics"
+	"github.com/Vatsalya001/ai-astrology/services/api/internal/platform/clients"
 	"github.com/Vatsalya001/ai-astrology/services/api/internal/platform/db"
 	"github.com/Vatsalya001/ai-astrology/services/api/internal/platform/db/dbgen"
+	"github.com/Vatsalya001/ai-astrology/services/api/internal/platform/jobs"
 	"github.com/Vatsalya001/ai-astrology/services/api/internal/platform/logging"
 	"github.com/Vatsalya001/ai-astrology/services/api/internal/platform/redis"
+	"github.com/Vatsalya001/ai-astrology/services/api/internal/transits"
 	"github.com/Vatsalya001/ai-astrology/services/api/internal/users"
 )
 
@@ -75,9 +78,42 @@ func run() error {
 		log,
 	).WithAnalytics(events)
 
+	// ─── The asynq side ─────────────────────────────────────────
+	//
+	// Two scheduling mechanisms in one process, deliberately. The
+	// hard-delete pass below is a database-only sweep that is idempotent
+	// and harmless to run on every replica at once, so a ticker is the
+	// right size for it and rewriting it would be a regression surface
+	// with no phase-2 benefit. The transit refresh calls astro-service,
+	// so it needs retry with backoff and must run ONCE across the fleet.
+	// See internal/platform/jobs.
+	astro, err := clients.NewAstro(cfg.AstroServiceURL, cfg.InternalToken, cfg.ServiceTimeout)
+	if err != nil {
+		return fmt.Errorf("astro client: %w", err)
+	}
+
+	runtime, err := jobs.NewRuntime(cfg.RedisURL, cfg.WorkerConcurrency, log)
+	if err != nil {
+		return err
+	}
+
+	refresher := transits.NewRefresher(queries, astro, jobs.TransitRefreshInterval, log)
+	if err := transits.NewRefreshHandler(
+		refresher, jobs.TransitRetention, time.Now, log,
+	).Register(runtime); err != nil {
+		return err
+	}
+
+	if err := runtime.Start(); err != nil {
+		return err
+	}
+	defer runtime.Shutdown()
+
 	log.Info("worker ready",
-		slog.String("jobs", "hard-delete"),
+		slog.String("jobs", "hard-delete, transits:refresh"),
 		slog.Duration("delete_grace", cfg.AccountDeleteGrace),
+		slog.String("transit_cron", jobs.TransitRefreshCron),
+		slog.Int("concurrency", cfg.WorkerConcurrency),
 	)
 
 	// Hourly, not continuously. The grace window is measured in days, so
