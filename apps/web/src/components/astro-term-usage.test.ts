@@ -116,6 +116,10 @@ describe('AstroTerm usage', () => {
       'distinct, and named for the house they sit on',
     '/components/chart/VargaSwitcher.tsx':
       'Varga.term is GlossaryKey; varga.test.ts asserts every chart name resolves',
+    '/components/chart/DashaTimeline.tsx':
+      'LEVELS[].term is GlossaryKey; DashaTimeline.test.tsx asserts all three resolve',
+    '/components/chart/SadeSatiIndicator.tsx':
+      'PHASES[].term is GlossaryKey; SadeSatiIndicator.test.tsx asserts all three resolve',
   }
 
   it('has no computed term props outside the files that justify one', () => {

@@ -62,6 +62,59 @@ export interface Chart {
   stale?: boolean
 }
 
+export interface DashaPeriod {
+  id: string
+  planet: string
+  /** RFC 3339. */
+  start: string
+  end: string
+  level: number
+  parent_id?: string
+  elapsed_percent?: number
+}
+
+export interface CurrentDashas {
+  mahadasha: DashaPeriod | null
+  antardasha: DashaPeriod | null
+  pratyantardasha: DashaPeriod | null
+  at: string
+}
+
+export interface TransitPosition {
+  planet: string
+  sign: string
+  sign_index: number
+  degree: number
+  longitude: number
+  is_retrograde: boolean
+  timestamp: string
+  /** 1..12, counted inclusively from the natal Moon's sign. */
+  house_from_moon: number
+}
+
+/**
+ * Saturn's seven-and-a-half-year passage over the natal Moon.
+ *
+ * Note what is NOT here: start and end dates. The engine reports the
+ * phase and the geometry, not the span, and the UI does not invent one —
+ * deriving "ends April 2033" in TypeScript would be the frontend
+ * computing astrology, which is the same rule that keeps the model out
+ * of it. See `SadeSatiIndicator`.
+ */
+export interface SadeSatiStatus {
+  is_active: boolean
+  phase: string | null
+  saturn_sign: string
+  houses_from_moon: number
+}
+
+export interface NatalTransits {
+  at: string
+  natal_moon_sign: string
+  transits: TransitPosition[]
+  sade_sati: SadeSatiStatus
+}
+
 /**
  * Minimum characters before a search is worth making.
  *
@@ -126,4 +179,34 @@ export const astrologyApi = {
    */
   chart: (profileId: string, type: VargaType = DEFAULT_VARGA) =>
     authed<Chart>(`/charts/${profileId}?type=${encodeURIComponent(type)}`),
+
+  /**
+   * One level at a time.
+   *
+   * The tree is 819 rows — 9 mahadashas, 81 antardashas, 729
+   * pratyantardashas — and the timeline shows nine of them until
+   * somebody drills in. Fetching all three levels to render the top one
+   * is 90x the payload for the first paint of the screen users open
+   * most.
+   */
+  dashas: (profileId: string, level: 1 | 2 | 3 = 1) =>
+    authed<{ level: number; periods: DashaPeriod[] }>(
+      `/charts/${profileId}/dashas?level=${level}`,
+    ),
+
+  /**
+   * The question the dasha screen actually asks: where am I now.
+   *
+   * Answered by the server rather than by searching the fetched periods
+   * in the browser, because the browser's clock is the user's and can be
+   * wrong by years. A "you are here" marker derived from a wrong clock
+   * is a confident wrong answer to the thing people come to this screen
+   * for.
+   */
+  currentDashas: (profileId: string) =>
+    authed<CurrentDashas>(`/charts/${profileId}/dashas/current`),
+
+  /** Positions relative to this profile's natal Moon, plus Sade Sati. */
+  transits: (profileId: string) =>
+    authed<NatalTransits>(`/astrology/transits/${profileId}`),
 }

@@ -20,6 +20,7 @@ type Runtime struct {
 	server    *asynq.Server
 	scheduler *asynq.Scheduler
 	mux       *asynq.ServeMux
+	client    *asynq.Client
 	logger    *slog.Logger
 }
 
@@ -83,6 +84,7 @@ func NewRuntime(redisURL string, concurrency int, logger *slog.Logger) (*Runtime
 		server:    server,
 		scheduler: scheduler,
 		mux:       asynq.NewServeMux(),
+		client:    asynq.NewClient(connection),
 		logger:    logger,
 	}, nil
 }
@@ -96,6 +98,30 @@ func (r *Runtime) Handle(taskType string, handler asynq.HandlerFunc) {
 func (r *Runtime) Schedule(cronspec string, task *asynq.Task) error {
 	if _, err := r.scheduler.Register(cronspec, task); err != nil {
 		return fmt.Errorf("jobs: schedule %s: %w", task.Type(), err)
+	}
+	return nil
+}
+
+// EnqueueNow puts one task on the queue immediately.
+//
+// For work that must not wait for the next cron tick. The transit
+// refresh runs every six hours, so on a fresh database — a first deploy,
+// a restored environment, a developer's machine after `docker compose
+// down -v` — the transits table stays empty for up to six hours and
+// /kundli/transits answers 503 the whole time. Nothing is broken and
+// every health check is green, which is the worst version of this.
+//
+// Safe to call on every replica: TransitRefreshTask carries
+// asynq.Unique, so a startup enqueue that races the scheduler's is
+// deduplicated rather than doubling the load on astro-service.
+func (r *Runtime) EnqueueNow(task *asynq.Task) error {
+	if _, err := r.client.Enqueue(task); err != nil {
+		// A duplicate is the unique lock doing its job, not a failure.
+		if errors.Is(err, asynq.ErrDuplicateTask) || errors.Is(err, asynq.ErrTaskIDConflict) {
+			r.logger.Info("task already queued", slog.String("type", task.Type()))
+			return nil
+		}
+		return fmt.Errorf("jobs: enqueue %s: %w", task.Type(), err)
 	}
 	return nil
 }
@@ -122,6 +148,9 @@ func (r *Runtime) Start() error {
 func (r *Runtime) Shutdown() {
 	r.scheduler.Shutdown()
 	r.server.Shutdown()
+	if r.client != nil {
+		_ = r.client.Close()
+	}
 }
 
 // slogAdapter routes asynq's logging into the service's structured JSON.
