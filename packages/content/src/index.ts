@@ -1,5 +1,6 @@
 export { GLOSSARY, GLOSSARY_KEYS, type GlossaryKey } from './glossary'
 export { YOGAS, YOGA_KEYS, describeYoga, hasYoga, type YogaKey } from './yogas'
+export { MOON_DAYS, MOON_SIGNS, moonDay, type MoonSign } from './moon-days'
 export {
   PREDICTIVE_PHRASES,
   SENSITIVE_DOMAINS,
