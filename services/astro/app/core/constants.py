@@ -203,9 +203,34 @@ def normalise_longitude(longitude: float) -> float:
     return longitude % FULL_CIRCLE
 
 
+def subdivision_index(longitude: float, divisions: int) -> int:
+    """Which of `divisions` equal arcs a longitude falls in.
+
+    Multiply first, divide second. That ordering is the whole point, and
+    it is not a micro-optimisation — it is a correctness fix for a bug
+    this code actually had.
+
+    The natural form, `longitude // (360 / divisions)`, is wrong whenever
+    360/divisions is not representable in binary. For the 27 nakshatras
+    the arc is 13.333…°, and at an exact boundary the division lands a
+    hair under the integer: 40.0 // 13.333… gives 2, not 3. Measured, on
+    the first version of this module: NINE of the twenty-seven nakshatra
+    boundaries returned the previous nakshatra, and the same nine padas
+    returned 4 instead of 1.
+
+    `longitude * divisions / 360` keeps those cases exact, because
+    40 * 27 = 1080 and 1080 / 360 = 3.0 with no rounding at all.
+
+    The failure mattered: a planet sitting exactly on a nakshatra cusp
+    would be reported in the wrong nakshatra, which changes its pada, its
+    dasha lord, and therefore the entire Vimshottari tree.
+    """
+    return int(normalise_longitude(longitude) * divisions / FULL_CIRCLE)
+
+
 def sign_index(longitude: float) -> int:
     """0 = Aries … 11 = Pisces."""
-    return int(normalise_longitude(longitude) // SIGN_ARC)
+    return subdivision_index(longitude, SIGN_COUNT)
 
 
 def degree_in_sign(longitude: float) -> float:
@@ -215,9 +240,18 @@ def degree_in_sign(longitude: float) -> float:
 
 def nakshatra_index(longitude: float) -> int:
     """0 = Ashwini … 26 = Revati."""
-    return int(normalise_longitude(longitude) // NAKSHATRA_ARC)
+    return subdivision_index(longitude, NAKSHATRA_COUNT)
+
+
+#: 108 arcs of 3°20' around the zodiac.
+#:
+#: A pada and a navamsa are the SAME division: 27 nakshatras by 4 padas
+#: and 12 signs by 9 navamsas both give 108. Sharing one constant makes
+#: that identity explicit instead of leaving two 3°20' subdivisions to
+#: drift apart.
+PADA_COUNT: Final = NAKSHATRA_COUNT * PADAS_PER_NAKSHATRA
 
 
 def pada(longitude: float) -> int:
     """Which quarter of the nakshatra, 1-4."""
-    return int((normalise_longitude(longitude) % NAKSHATRA_ARC) // PADA_ARC) + 1
+    return subdivision_index(longitude, PADA_COUNT) % PADAS_PER_NAKSHATRA + 1
