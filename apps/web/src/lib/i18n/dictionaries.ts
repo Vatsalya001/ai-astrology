@@ -244,6 +244,12 @@ export const en = {
     exportButton: 'Download',
   },
 
+  chart: {
+    // A screen reader otherwise announces "Nakshatra, button" and gives
+    // the user nothing to decide with. {term} is the word itself.
+    defineTerm: 'What “{term}” means',
+  },
+
   /**
    * Option VALUES, not just their labels.
    *
@@ -485,6 +491,10 @@ export const hi: Dictionary = {
     exportTitle: 'अपना डेटा निर्यात करें',
     exportBody: 'आपके बारे में रखी गई हर चीज़ की पूरी JSON फ़ाइल।',
     exportButton: 'डाउनलोड',
+  },
+
+  chart: {
+    defineTerm: '“{term}” का अर्थ',
   },
 
   values: {
