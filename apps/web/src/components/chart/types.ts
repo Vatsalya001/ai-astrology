@@ -16,7 +16,16 @@ export interface PlanetPlacement {
   signIndex: SignIndex
   /** Degree within the sign, 0–30. */
   degree: number
-  house: HouseNumber
+  /**
+   * Null when the birth time is unknown.
+   *
+   * `astro-service` sends `0` for this, which is not a house — the Vedic
+   * convention counts the ascendant's own sign as house 1, so there is no
+   * house 0 to be in. Carried as `0` it renders as "0th house" wherever
+   * an ordinal is taken, which is a real position stated confidently and
+   * wrongly. The parser maps it to null at the boundary.
+   */
+  house: HouseNumber | null
   nakshatra: string
   pada: number
   isRetrograde: boolean

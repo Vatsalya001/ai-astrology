@@ -93,7 +93,15 @@ export function ChartSVG({
   const byRegion = useMemo(() => {
     const map = new Map<number, PlanetPlacement[]>()
     for (const planet of chart.planets) {
+      // A planet with no house cannot be placed in a North Indian
+      // chart, whose cells ARE the houses. It is skipped rather than
+      // bucketed under 0, which would collect every such planet into a
+      // cell that does not exist. The South Indian chart keys on the
+      // sign and is unaffected — which is exactly why it is the style
+      // that still works without a birth time.
       const key = style === 'north' ? planet.house : planet.signIndex
+      if (key === null) continue
+
       const bucket = map.get(key)
       if (bucket) bucket.push(planet)
       else map.set(key, [planet])
@@ -477,7 +485,7 @@ function ChartDataTable({ chart }: { chart: ChartData }) {
           <tr key={planet.planet}>
             <th scope="row">{planet.planet}</th>
             <td>{planet.sign}</td>
-            <td>{ordinal(planet.house)}</td>
+            <td>{planet.house === null ? '—' : ordinal(planet.house)}</td>
             <td>{Math.round(planet.degree)} degrees</td>
             <td>
               {planet.nakshatra}, pada {planet.pada}

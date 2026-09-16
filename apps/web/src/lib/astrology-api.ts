@@ -1,4 +1,5 @@
 import { authed } from './users-api'
+import { DEFAULT_VARGA, type VargaType } from './varga'
 
 /**
  * The Phase 2 endpoints: places, birth profiles, charts.
@@ -113,6 +114,16 @@ export const astrologyApi = {
   versions: (id: string) =>
     authed<{ versions: BirthProfile[] }>(`/birth-profiles/${id}/versions`),
 
-  chart: (profileId: string, type: 'D1' | 'D9' = 'D1') =>
-    authed<Chart>(`/charts/${profileId}?type=${type}`),
+  /**
+   * `type` comes from `VARGAS`, not from a literal union written here.
+   *
+   * It was `'D1' | 'D9'` — D10 shipped in the engine and in api-service
+   * and never reached the client, so the dasamsa was uncallable from the
+   * web app for a whole PR. api-service falls back to the rasi on an
+   * unrecognised type rather than erroring, which is why nothing
+   * complained. `varga.test.ts` now compares this list against the Go
+   * constants directly.
+   */
+  chart: (profileId: string, type: VargaType = DEFAULT_VARGA) =>
+    authed<Chart>(`/charts/${profileId}?type=${encodeURIComponent(type)}`),
 }

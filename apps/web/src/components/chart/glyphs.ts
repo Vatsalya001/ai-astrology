@@ -55,16 +55,20 @@ export function planetAbbreviation(planet: string): string {
 export function planetLabel(planet: {
   planet: string
   sign: string
-  house: number
+  /** Null when the birth time is unknown — there is no house to name. */
+  house: number | null
   degree: number
   isRetrograde: boolean
   isCombust: boolean
 }): string {
-  const parts = [
-    `${planet.planet} in ${planet.sign}`,
-    `${ordinal(planet.house)} house`,
-    `${Math.round(planet.degree)} degrees`,
-  ]
+  const parts = [`${planet.planet} in ${planet.sign}`]
+
+  // Omitted, not rendered as "0th house" or as "no house". A reader
+  // without a birth time is told once, on the screen, why the houses
+  // are absent; repeating it on all nine planets is noise.
+  if (planet.house !== null) parts.push(`${ordinal(planet.house)} house`)
+
+  parts.push(`${Math.round(planet.degree)} degrees`)
   if (planet.isRetrograde) parts.push('retrograde')
   if (planet.isCombust) parts.push('combust')
   return parts.join(', ')
