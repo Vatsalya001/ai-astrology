@@ -32,7 +32,7 @@ export type GlossaryKey =
   | 'yoga' | 'kendra' | 'trikona' | 'dusthana' | 'panch_mahapurusha'
   | 'raja_yoga' | 'neecha_bhanga'
   // House groupings
-  | 'lagna_bhava' | 'dhana_bhava' | 'sukha_bhava' | 'putra_bhava'
+  | 'lagna_bhava' | 'dhana_bhava' | 'sahaja_bhava' | 'sukha_bhava' | 'putra_bhava'
   | 'ripu_bhava' | 'kalatra_bhava' | 'ayur_bhava' | 'bhagya_bhava'
   | 'karma_bhava' | 'labha_bhava' | 'vyaya_bhava'
   // Practical
@@ -685,6 +685,18 @@ export const GLOSSARY: Localised<GlossaryKey> = {
       name: 'द्वितीय भाव',
       short: 'साधन, कुटुंब, वाणी।',
       long: 'परंपरा में संचित धन, जन्म के कुल और वाणी के लिए देखा जाता है।',
+    },
+  },
+  sahaja_bhava: {
+    en: {
+      name: 'Third house',
+      short: 'Siblings, courage, communication.',
+      long: 'Traditionally read for younger siblings, self-effort and short journeys, and for the nerve to act on one’s own initiative.',
+    },
+    hi: {
+      name: 'तृतीय भाव',
+      short: 'भाई-बहन, साहस, संवाद।',
+      long: 'परंपरा में छोटे भाई-बहनों, स्वयं के प्रयास और छोटी यात्राओं के लिए, तथा अपनी पहल पर कार्य करने के साहस के लिए देखा जाता है।',
     },
   },
   sukha_bhava: {

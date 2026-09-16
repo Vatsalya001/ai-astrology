@@ -96,12 +96,48 @@ describe('AstroTerm usage', () => {
     ).toEqual([])
   })
 
-  it('has no computed term props this scan cannot follow', () => {
+  /**
+   * Files where `term={…}` is computed, and why each is safe anyway.
+   *
+   * The rule for being on this list is not "it looked fine". It is that
+   * the value's SOURCE is typed `GlossaryKey`, so a typo is a compile
+   * error — a stronger guarantee than this scan gives — and that a test
+   * checks the mapping itself, because a well-typed key can still point
+   * at the wrong entry.
+   *
+   * This list started empty and every entry was added by this test
+   * failing on a real commit, which is the only way it should grow.
+   */
+  const COMPUTED_TERMS_ALLOWED: Record<string, string> = {
+    '/components/chart/PlanetTable.tsx':
+      'dignity().term is GlossaryKey | null; format.test.ts asserts every real dignity has one',
+    '/components/chart/HouseList.tsx':
+      'HOUSE_TERMS is (GlossaryKey | null)[]; HouseList.test.tsx asserts all twelve are present, ' +
+      'distinct, and named for the house they sit on',
+    '/components/chart/VargaSwitcher.tsx':
+      'Varga.term is GlossaryKey; varga.test.ts asserts every chart name resolves',
+  }
+
+  it('has no computed term props outside the files that justify one', () => {
+    const unjustified = scan().dynamic.filter((file) => !(file in COMPUTED_TERMS_ALLOWED))
+
     expect(
-      scan().dynamic,
+      unjustified,
       'A computed `term={…}` is outside what a source scan can check, so it reopens ' +
-        'exactly the hole this file closes. If one is genuinely needed, narrow its ' +
-        'source to GlossaryKey at the call site and list the file here deliberately.',
+        'exactly the hole this file closes. If one is genuinely needed, type its source ' +
+        'as GlossaryKey, add a test for the mapping, and add the file to ' +
+        'COMPUTED_TERMS_ALLOWED with that reason.',
+    ).toEqual([])
+  })
+
+  // An allowlist nobody prunes is a list of files that stopped existing.
+  it('does not allow computed terms in files that no longer have any', () => {
+    const dynamic = new Set(scan().dynamic)
+    const stale = Object.keys(COMPUTED_TERMS_ALLOWED).filter((file) => !dynamic.has(file))
+
+    expect(
+      stale,
+      'these files are exempted from the computed-term check and no longer contain one',
     ).toEqual([])
   })
 
