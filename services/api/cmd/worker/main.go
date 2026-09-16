@@ -109,6 +109,24 @@ func run() error {
 	}
 	defer runtime.Shutdown()
 
+	// One refresh immediately, not only on the next six-hourly tick.
+	//
+	// The same reasoning as the hard-delete sweep below: a process that
+	// has just started should not make the product wait for a cron. On a
+	// fresh database the transits table is EMPTY, so until the next tick
+	// /kundli/transits answers 503 and Sade Sati — the most-asked
+	// question in the product — has nothing behind it, for up to six
+	// hours, with every health check green the whole time.
+	//
+	// Not fatal if it fails. The cron will come round, and a worker that
+	// refuses to boot because one enqueue failed is worse than a worker
+	// that starts with slightly stale transits.
+	if err := runtime.EnqueueNow(jobs.NewTransitRefreshTask()); err != nil {
+		log.Error("could not enqueue the startup transit refresh",
+			slog.String("error", err.Error()),
+			slog.String("consequence", "transits stay as they are until the next cron tick"))
+	}
+
 	log.Info("worker ready",
 		slog.String("jobs", "hard-delete, transits:refresh"),
 		slog.Duration("delete_grace", cfg.AccountDeleteGrace),

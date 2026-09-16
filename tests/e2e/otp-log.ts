@@ -1,3 +1,4 @@
+import { execSync } from 'node:child_process'
 import { readFileSync, statSync } from 'node:fs'
 
 export const API_LOG = '.run/api.log'
@@ -49,12 +50,56 @@ export interface OTPWatcher {
 }
 
 /**
+ * Clears the per-IP OTP window, and only that one.
+ *
+ * The suite makes more OTP requests from one apparent address than any
+ * person would, and it is now exactly at the ceiling: a full run makes
+ * 31 requests against `OTPRequestPerIP`'s 30 per 15 minutes, so the last
+ * spec to ask gets a 429 and fails with the page still sitting on
+ * /auth — which reads as broken authentication, not as a limiter.
+ *
+ * ── Why clear rather than raise the limit ──
+ *
+ * 30 is a production number with a written rationale: it exists to catch
+ * one source spraying hundreds of requests, and it is deliberately loose
+ * because Indian carriers run carrier-grade NAT with thousands of
+ * subscribers behind one address. Moving a security control because the
+ * test suite grew is the wrong direction, and it would have to be moved
+ * again at the next screen.
+ *
+ * The suite IS that NAT case: many independent users behind one address.
+ * So the rule that does not model it is cleared, and the rules that DO
+ * — per-identifier 3/15min and 10/day, which key on the thing actually
+ * being attacked — stay fully in force for every test.
+ *
+ * ── An honest gap ──
+ *
+ * `OTPRequestPerIP` has no test anywhere: not in Go, not here, and none
+ * before this change either. This makes a never-exercised guard slightly
+ * less exercised, which is worth saying out loud rather than leaving for
+ * somebody to discover.
+ */
+function clearIPWindow(): void {
+  try {
+    execSync(
+      "docker compose exec -T redis redis-cli EVAL \"local k=redis.call('keys','rl:otp_req_ip:*'); " +
+        'for i=1,#k do redis.call(\'del\',k[i]) end; return #k" 0',
+      { stdio: 'pipe', timeout: 10_000 },
+    )
+  } catch {
+    // Not fatal: a developer running against a stack started some other
+    // way still gets a useful run, they may just hit the limiter.
+  }
+}
+
+/**
  * Marks the current end of the log.
  *
  * Call this BEFORE the action that triggers a send — otherwise the
  * request may already have been written and there is nothing new to see.
  */
 export function watchOTP(identifier: string): OTPWatcher {
+  clearIPWindow()
   const from = logSize()
   const masked = maskIdentifier(identifier)
   // The mask contains `***` and `@`; an unescaped `*` is a quantifier.

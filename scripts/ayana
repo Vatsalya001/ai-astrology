@@ -22,8 +22,10 @@ cd "$REPO"
 RUN_DIR="$REPO/.run"
 API_LOG="$RUN_DIR/api.log"
 WEB_LOG="$RUN_DIR/web.log"
+WORKER_LOG="$RUN_DIR/worker.log"
 API_PID="$RUN_DIR/api.pid"
 WEB_PID="$RUN_DIR/web.pid"
+WORKER_PID="$RUN_DIR/worker.pid"
 
 API_PORT=4000
 WEB_PORT=3000
@@ -90,6 +92,31 @@ kill_tree() {
     kill_tree "$child" "$sig"
   done
   kill "-$sig" "$pid" 2>/dev/null || true
+}
+
+# The worker has no port, so "is it up?" has to be asked of the PID.
+#
+# Everything else here deliberately asks the port instead, because a PID
+# file can be stale and a wrapper PID answers the wrong question. The
+# worker consumes a queue and serves nothing, so there is no port to ask
+# — which is exactly why it was possible to ship a stack that reported
+# six green health checks with the transit refresher never running at
+# all, and the entire transits and Sade Sati feature dead behind it.
+worker_running() {
+  local pid
+  [[ -f "$WORKER_PID" ]] || return 1
+  pid=$(cat "$WORKER_PID" 2>/dev/null) || return 1
+  [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null
+}
+
+# Waits for a line in a log rather than for a socket.
+wait_for_log() {
+  local file=$1 needle=$2 attempts=${3:-45}
+  for ((i = 1; i <= attempts; i++)); do
+    [[ -f "$file" ]] && grep -q "$needle" "$file" && return 0
+    sleep 1
+  done
+  return 1
 }
 
 # SIGTERM, then SIGKILL only for whatever is still holding the port.
@@ -248,7 +275,37 @@ cmd_up() {
     fi
   fi
 
-  # 5. Web
+  # 5. Worker
+  #
+  # Not optional, and not a background nicety: it owns the six-hourly
+  # transit refresh, and it enqueues one at startup. Without it the
+  # transits table stays empty forever, /kundli/transits answers 503,
+  # and Sade Sati — the most-asked question in the product — has no data
+  # behind it. `task health` stays entirely green throughout, because
+  # the worker is not a health dependency of anything.
+  say "worker"
+  if worker_running; then
+    ok "already running (pid $(cat "$WORKER_PID"))"
+  else
+    go build -C services/api -o "$RUN_DIR/ayana-worker" ./cmd/worker 2>&1 \
+      | sed 's/^/    /' || die "go build failed"
+    # shellcheck disable=SC1091
+    set -a; . ./.env; set +a
+    "$RUN_DIR/ayana-worker" > "$WORKER_LOG" 2>&1 &
+    echo $! > "$WORKER_PID"
+
+    # "worker ready" is logged after the asynq runtime starts, so waiting
+    # for it distinguishes a worker that is running from a process that
+    # exited on a bad DSN one second later.
+    if wait_for_log "$WORKER_LOG" "worker ready"; then
+      ok "consuming the queue"
+    else
+      tail -20 "$WORKER_LOG"
+      die "worker never became ready — see $WORKER_LOG"
+    fi
+  fi
+
+  # 6. Web
   say "web"
   if listening "$WEB_PORT"; then
     ok "already running (pid $(port_pid "$WEB_PORT"))"
@@ -292,6 +349,14 @@ cmd_status() {
   printf '  %s%-34s%s  %s\n' "$DIM" "postgres://localhost:5433" "$RESET" "user: ayana  db: ayana  (5432 is taken on this machine)"
   printf '  %s%-34s%s  %s\n' "$DIM" "redis://localhost:6381"    "$RESET" "(6379 and 6380 are taken)"
   printf '  %s%-34s%s  %s\n' "$DIM" "http://localhost:11434"    "$RESET" "Ollama — free local models, no API key"
+  echo
+
+  say "Background"
+  if worker_running; then
+    printf '  %s✓%s worker     consuming the queue (pid %s)\n' "$GREEN" "$RESET" "$(cat "$WORKER_PID")"
+  else
+    printf '  %s✗%s worker     NOT running — transits and Sade Sati have no data\n' "$RED" "$RESET"
+  fi
   echo
 
   say "Health"
@@ -427,6 +492,20 @@ cmd_down() {
   else
     info "api-service was not running"
     rm -f "$API_PID"
+  fi
+
+  if worker_running; then
+    kill_tree "$(cat "$WORKER_PID")" TERM
+    for _ in {1..6}; do
+      worker_running || break
+      sleep 1
+    done
+    worker_running && kill_tree "$(cat "$WORKER_PID")" KILL
+    rm -f "$WORKER_PID"
+    ok "worker stopped"
+  else
+    info "worker was not running"
+    rm -f "$WORKER_PID"
   fi
 
   docker compose down > "$RUN_DIR/compose-down.log" 2>&1 \

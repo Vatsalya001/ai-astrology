@@ -37,6 +37,18 @@ const LETTER_PATTERNS = [
   /signUp\(\s*[A-Za-z]+\s*,\s*'([a-z])'/g,
 ]
 
+/**
+ * The phone channel has the same problem with a different discriminator.
+ *
+ * `maskIdentifier` keeps three leading characters and three trailing
+ * digits, and every Indian mobile masks to `+91********`, so the TAIL is
+ * all that separates two concurrent phone signups. This went unchecked
+ * until the email alphabet ran out and a spec had to switch channels —
+ * at which point an unguarded thousand-value space is only better than a
+ * guarded twenty-six-value one until two specs pick the same number.
+ */
+const TAIL_PATTERN = /uniquePhone\(\s*'(\d{3})'/g
+
 test('no two specs share an OTP mask letter', () => {
   const owners = new Map<string, Set<string>>()
 
@@ -79,5 +91,43 @@ test('no two specs share an OTP mask letter', () => {
       "other's codes, and the failure presents as \"wrong code\" — which looks " +
       'like broken authentication rather than a collision. Pick a letter no ' +
       'other spec uses.',
+  ).toEqual([])
+})
+
+test('no two specs share an OTP phone mask tail', () => {
+  const owners = new Map<string, Set<string>>()
+
+  const specs = readdirSync(E2E_DIR).filter(
+    (name) => name.endsWith('.spec.ts') && name !== 'mask-letters.spec.ts',
+  )
+
+  for (const file of specs) {
+    const source = readFileSync(join(E2E_DIR, file), 'utf8')
+    TAIL_PATTERN.lastIndex = 0
+    for (const match of source.matchAll(TAIL_PATTERN)) {
+      const tail = match[1]!
+      if (!owners.has(tail)) owners.set(tail, new Set())
+      owners.get(tail)!.add(file)
+    }
+  }
+
+  // Lower than the letter threshold on purpose: only a couple of specs
+  // sign up by phone today. It is not zero, which is what would mean the
+  // pattern has stopped matching.
+  expect(
+    owners.size,
+    'no phone tails were found — the pattern no longer matches how specs ' +
+      'request a number, so this test is checking nothing',
+  ).toBeGreaterThan(0)
+
+  const shared = [...owners.entries()]
+    .filter(([, files]) => files.size > 1)
+    .map(([tail, files]) => `'${tail}' in ${[...files].sort().join(' and ')}`)
+
+  expect(
+    shared,
+    'these specs share a phone mask tail. Every Indian mobile masks to ' +
+      '+91********, so the tail is the whole discriminator — sharing one has ' +
+      'exactly the same effect as sharing an email letter.',
   ).toEqual([])
 })
