@@ -50,16 +50,27 @@ func headerInjector(token string) func(context.Context, *http.Request) error {
 // Timeout is the budget for the WHOLE call including retries, not per
 // attempt. A caller that asked for 10s should wait 10s, not 30.
 func httpClient(timeout time.Duration, name string) *http.Client {
+	// Ordered deliberately: breaker OUTSIDE retry.
+	//
+	// Inside, the breaker would see each retry as a separate failure and
+	// trip three times faster than configured. Outside, it sees one
+	// logical call — request plus its retries — which is the unit an
+	// operator means by "five consecutive failures", and it short-circuits
+	// the whole retry sequence rather than just its last attempt.
 	return &http.Client{
 		Timeout: timeout,
-		Transport: &retryTransport{
-			name: name,
-			base: &http.Transport{
-				MaxIdleConns:        100,
-				MaxIdleConnsPerHost: 10,
-				IdleConnTimeout:     90 * time.Second,
+		Transport: newCircuitBreaker(
+			&retryTransport{
+				name: name,
+				base: &http.Transport{
+					MaxIdleConns:        100,
+					MaxIdleConnsPerHost: 10,
+					IdleConnTimeout:     90 * time.Second,
+				},
 			},
-		},
+			name,
+			nil,
+		),
 	}
 }
 
