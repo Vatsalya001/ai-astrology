@@ -114,6 +114,7 @@ class BirthData(Strict):
 class ChartRequest(Strict):
     birth: BirthData
     include_navamsa: bool = True
+    include_dasamsa: bool = True
     include_dashas: bool = True
     include_yogas: bool = True
 
@@ -239,6 +240,11 @@ class ChartResponse(Strict):
     houses: list[HousePosition] | None
     planets: list[PlanetPosition]
     navamsa: DivisionalChart | None = None
+    # D10, read for career and profession. Separate from `navamsa`
+    # rather than a list keyed by type: each divisional chart is
+    # requested by a caller that knows which one it wants, and a list
+    # would make "is the D10 present?" a search.
+    dasamsa: DivisionalChart | None = None
     dashas: list[DashaPeriodOut] | None = None
     yogas: list[YogaResult] = Field(default_factory=list)
     summary: ChartSummary

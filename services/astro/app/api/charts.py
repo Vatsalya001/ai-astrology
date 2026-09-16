@@ -24,7 +24,13 @@ from skyfield.timelib import Time, Timescale
 
 from app.core.aspects import aspects_of
 from app.core.ayanamsa import AyanamsaCalculator, AyanamsaSystem
-from app.core.chart import PlacedPlanet, Rasi, compute_navamsa, compute_rasi
+from app.core.chart import (
+    PlacedPlanet,
+    Rasi,
+    compute_dasamsa,
+    compute_navamsa,
+    compute_rasi,
+)
 from app.core.constants import Planet
 from app.core.dasha import DashaPeriod, build_vimshottari
 from app.core.ephemeris import SkyfieldEphemeris
@@ -187,6 +193,15 @@ def compute_chart(request: ChartRequest) -> ChartResponse:
     moon = next(p for p in rasi.planets if p.planet is Planet.MOON)
     sun = next(p for p in rasi.planets if p.planet is Planet.SUN)
 
+    dasamsa = None
+    if request.include_dasamsa:
+        d10 = compute_dasamsa(rasi)
+        dasamsa = DivisionalChart(
+            ascendant=_ascendant_out(d10),
+            houses=_houses_out(d10),
+            planets=[_planet_out(p) for p in d10.planets],
+        )
+
     navamsa = None
     if request.include_navamsa:
         d9 = compute_navamsa(rasi)
@@ -234,6 +249,7 @@ def compute_chart(request: ChartRequest) -> ChartResponse:
         houses=_houses_out(rasi),
         planets=[_planet_out(p) for p in rasi.planets],
         navamsa=navamsa,
+        dasamsa=dasamsa,
         dashas=dashas,
         yogas=yogas,
         summary=ChartSummary(

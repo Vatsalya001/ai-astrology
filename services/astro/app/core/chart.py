@@ -18,6 +18,7 @@ mistake can hide.
 from __future__ import annotations
 
 import math
+from collections.abc import Callable
 from dataclasses import dataclass
 
 from skyfield.timelib import Time
@@ -25,13 +26,17 @@ from skyfield.timelib import Time
 from app.core.ayanamsa import AyanamsaCalculator, AyanamsaSystem
 from app.core.constants import (
     COMBUSTION_ORB,
+    DASAMSA_COUNT,
+    DASAMSAS_PER_SIGN,
     EXALTATION,
+    FULL_CIRCLE,
     HOUSE_COUNT,
     MOOLATRIKONA,
     NAKSHATRAS,
     NODES,
     PADA_COUNT,
     SIGN_ARC,
+    SIGN_COUNT,
     SIGN_LORDS,
     SIGNS,
     Dignity,
@@ -345,6 +350,50 @@ def navamsa_longitude(longitude: float) -> float:
     return normalise_longitude(target_sign * SIGN_ARC + within)
 
 
+def dasamsa_longitude(longitude: float) -> float:
+    """Map a rasi longitude into the D10 chart — career and profession.
+
+    Each sign divides into ten dasamsas of 3°, and the classical rule
+    (BPHS) is stated by parity:
+
+      odd signs  (Aries, Gemini, Leo, Libra, Sagittarius, Aquarius)
+          the ten are reckoned from the SAME sign
+      even signs (Taurus, Cancer, Virgo, Scorpio, Capricorn, Pisces)
+          they are reckoned from the NINTH sign therefrom
+
+    Note "odd" is the traditional 1-based numbering: Aries is the 1st
+    sign and therefore odd, which is `sign_index % 2 == 0` here. Getting
+    that inversion wrong swaps every dasamsa in the chart and still
+    produces a complete, plausible D10.
+
+    **This does NOT collapse into a continuous count**, and that is the
+    trap. The navamsa above does — 108 navamsas over 12 signs is nine
+    whole cycles, so `floor(longitude / 3°20') mod 12` walks the zodiac
+    without restarting and the element rule falls out for free. The same
+    trick applied to ten divisions is wrong for 90 of the 120 dasamsas:
+    it puts the first dasamsa of Taurus in Aquarius where the rule says
+    Capricorn, and of Gemini in Sagittarius where the rule says Gemini.
+    `test_the_continuous_count_trick_does_not_work_for_d10` measures
+    that, so nobody "simplifies" this into the navamsa's shape.
+    """
+    # subdivision_index, not a division — the same float fix the pada and
+    # navamsa share. 120 exact 3° arcs, counted multiply-first.
+    overall = subdivision_index(longitude, DASAMSA_COUNT)
+    source_sign = overall // DASAMSAS_PER_SIGN
+    within_sign = overall % DASAMSAS_PER_SIGN
+
+    # The ninth sign from S, counting S itself as the first, is S + 8.
+    start = source_sign if source_sign % 2 == 0 else (source_sign + 8) % SIGN_COUNT
+    target_sign = (start + within_sign) % SIGN_COUNT
+
+    # Position inside the dasamsa, expanded to fill the destination sign:
+    # a 3° slice maps onto a full 30°.
+    exact = normalise_longitude(longitude) * DASAMSA_COUNT / FULL_CIRCLE
+    within = (exact - overall) * SIGN_ARC
+
+    return normalise_longitude(target_sign * SIGN_ARC + within)
+
+
 def compute_navamsa(rasi: Rasi) -> Rasi:
     """Derive the D9 chart from the D1.
 
@@ -353,11 +402,30 @@ def compute_navamsa(rasi: Rasi) -> Rasi:
     second path to the same answer and therefore a way for the two to
     disagree.
     """
+    return _divisional(rasi, navamsa_longitude)
+
+
+def compute_dasamsa(rasi: Rasi) -> Rasi:
+    """Derive the D10 chart from the D1.
+
+    Same reasoning as the navamsa: a pure transformation of D1
+    longitudes, derived rather than recomputed.
+    """
+    return _divisional(rasi, dasamsa_longitude)
+
+
+def _divisional(rasi: Rasi, project: Callable[[float], float]) -> Rasi:
+    """Build a divisional chart by projecting every D1 longitude.
+
+    One function for both charts. The two differed only in which mapper
+    they called, and two copies of this would be two places to forget
+    that combustion is a rasi property.
+    """
     ascendant: Ascendant | None = None
     ascendant_sign: int | None = None
 
     if rasi.ascendant is not None:
-        longitude = navamsa_longitude(rasi.ascendant.longitude)
+        longitude = project(rasi.ascendant.longitude)
         ascendant_sign = sign_index(longitude)
         ascendant = Ascendant(
             longitude=longitude,
@@ -370,7 +438,7 @@ def compute_navamsa(rasi: Rasi) -> Rasi:
 
     placed: list[PlacedPlanet] = []
     for planet in rasi.planets:
-        longitude = navamsa_longitude(planet.longitude)
+        longitude = project(planet.longitude)
         index = sign_index(longitude)
         placed.append(
             PlacedPlanet(

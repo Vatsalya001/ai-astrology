@@ -42,6 +42,7 @@ const (
 	HouseWholeSign   = "whole_sign"
 	ChartTypeRasi    = "D1"
 	ChartTypeNavamsa = "D9"
+	ChartTypeDasamsa = "D10"
 )
 
 // Key identifies a chart.
@@ -369,27 +370,46 @@ func splitByChartType(response *astroclient.ChartResponse) (map[string][]byte, e
 	}
 	payloads := map[string][]byte{ChartTypeRasi: rasi}
 
-	if response.Navamsa == nil {
-		return payloads, nil
+	if response.Navamsa != nil {
+		navamsa, err := encodeDivisional(response.Meta, response.Navamsa)
+		if err != nil {
+			return nil, fmt.Errorf("charts: encode navamsa: %w", err)
+		}
+		payloads[ChartTypeNavamsa] = navamsa
 	}
 
-	navamsa, err := json.Marshal(struct {
+	if response.Dasamsa != nil {
+		dasamsa, err := encodeDivisional(response.Meta, response.Dasamsa)
+		if err != nil {
+			return nil, fmt.Errorf("charts: encode dasamsa: %w", err)
+		}
+		payloads[ChartTypeDasamsa] = dasamsa
+	}
+
+	return payloads, nil
+}
+
+// encodeDivisional projects one divisional chart into a stored payload.
+//
+// It carries the SAME meta as the rasi, so every stored chart answers
+// "which engine produced this?" on its own without a join. The division
+// is a transformation of the rasi, not a separate computation, so the
+// engine version is genuinely the same one.
+func encodeDivisional(
+	meta astroclient.ChartMeta,
+	chart *astroclient.DivisionalChart,
+) ([]byte, error) {
+	return json.Marshal(struct {
 		Meta      astroclient.ChartMeta          `json:"meta"`
 		Ascendant *astroclient.AscendantPosition `json:"ascendant"`
 		Houses    *[]astroclient.HousePosition   `json:"houses"`
 		Planets   []astroclient.PlanetPosition   `json:"planets"`
 	}{
-		Meta:      response.Meta,
-		Ascendant: response.Navamsa.Ascendant,
-		Houses:    response.Navamsa.Houses,
-		Planets:   response.Navamsa.Planets,
+		Meta:      meta,
+		Ascendant: chart.Ascendant,
+		Houses:    chart.Houses,
+		Planets:   chart.Planets,
 	})
-	if err != nil {
-		return nil, fmt.Errorf("charts: encode navamsa: %w", err)
-	}
-	payloads[ChartTypeNavamsa] = navamsa
-
-	return payloads, nil
 }
 
 // failureCode reduces an error to an enum for analytics.

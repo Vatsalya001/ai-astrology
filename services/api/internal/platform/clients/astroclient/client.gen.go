@@ -270,6 +270,7 @@ type ChartRequest struct {
 	// Re-deriving it here would be a second implementation of the hardest
 	// part of the problem, free to disagree with the first.
 	Birth          BirthData `json:"birth"`
+	IncludeDasamsa *bool     `json:"include_dasamsa,omitempty"`
 	IncludeDashas  *bool     `json:"include_dashas,omitempty"`
 	IncludeNavamsa *bool     `json:"include_navamsa,omitempty"`
 	IncludeYogas   *bool     `json:"include_yogas,omitempty"`
@@ -278,6 +279,7 @@ type ChartRequest struct {
 // ChartResponse defines model for ChartResponse.
 type ChartResponse struct {
 	Ascendant *AscendantPosition `json:"ascendant"`
+	Dasamsa   *DivisionalChart   `json:"dasamsa,omitempty"`
 	Dashas    *[]DashaPeriodOut  `json:"dashas,omitempty"`
 	Houses    *[]HousePosition   `json:"houses"`
 

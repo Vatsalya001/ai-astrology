@@ -65,6 +65,15 @@ const chartJSON = `{
 	             "degree":5.0,"house":10,"nakshatra":"Magha","nakshatra_index":9,
 	             "pada":2,"is_retrograde":false,"is_combust":false,
 	             "dignity":"own","speed":0.98}],
+	"dasamsa": {
+	  "ascendant": {"longitude":100.5,"sign":"Cancer","sign_index":3,"degree":10.5,
+	                "nakshatra":"Pushya","pada":1},
+	  "houses": null,
+	  "planets": [{"planet":"Sun","longitude":190.0,"sign":"Libra","sign_index":6,
+	               "degree":10.0,"house":4,"nakshatra":"Swati","nakshatra_index":14,
+	               "pada":1,"is_retrograde":false,"is_combust":false,
+	               "dignity":"neutral","speed":0.98}]
+	},
 	"yogas": [],
 	"summary": {"sun_sign":"Leo","moon_sign":"Sagittarius","ascendant_sign":"Scorpio",
 	            "moon_nakshatra":"Mula","moon_nakshatra_pada":4}
@@ -705,5 +714,88 @@ func TestOnlyTheRasiCarriesADashaTree(t *testing.T) {
 	if onD9 != 0 {
 		t.Fatalf("%d dasha rows hang off the D9 chart; dashas are a property of "+
 			"the birth moment, not of a divisional chart", onD9)
+	}
+}
+
+// ─── D10 ─────────────────────────────────────────────────────────────
+
+// The Phase 3 gate requires D1, D9 and D10 all viewable, so the same
+// property that caught the D9 being a relabelled D1 has to hold for the
+// dasamsa: three requests, three genuinely different charts, one call to
+// astro-service.
+func TestTheStoredD10IsTheDasamsaAndDiffersFromBothOthers(t *testing.T) {
+	h, cleanup := newHarness(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	profile := h.createProfile(t)
+	before := h.astroCalls.Load()
+
+	payloads := map[string]string{}
+	for _, chartType := range []string{
+		charts.ChartTypeRasi, charts.ChartTypeNavamsa, charts.ChartTypeDasamsa,
+	} {
+		chart, err := h.charts.Get(ctx, h.userID, charts.Key{
+			ProfileID: profile.ID, ChartType: chartType,
+		})
+		if err != nil {
+			t.Fatalf("%s: %v", chartType, err)
+		}
+		payloads[chartType] = string(chart.Data)
+	}
+
+	// Three distinct payloads. Any two being equal means one chart type
+	// is a relabelled copy of another — the Phase 2 bug, in a new place.
+	seen := map[string]string{}
+	for chartType, payload := range payloads {
+		if other, clash := seen[payload]; clash {
+			t.Fatalf("%s and %s have byte-identical payloads; one is a relabelled "+
+				"copy of the other", chartType, other)
+		}
+		seen[payload] = chartType
+	}
+
+	if calls := h.astroCalls.Load() - before; calls != 1 {
+		t.Fatalf("fetching D1, D9 and D10 made %d calls to astro-service, want 1 — "+
+			"all three come out of one response, and separate calls could land on "+
+			"different ephemeris states", calls)
+	}
+}
+
+// The dasamsa is a divisional chart, so like the navamsa it carries no
+// dasha tree of its own.
+func TestTheDasamsaCarriesNoDashaTree(t *testing.T) {
+	h, cleanup := newHarness(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	profile := h.createProfile(t)
+	// D10 first: the first Get is the one that computes and stores.
+	for _, chartType := range []string{charts.ChartTypeDasamsa, charts.ChartTypeRasi} {
+		if _, err := h.charts.Get(ctx, h.userID, charts.Key{
+			ProfileID: profile.ID, ChartType: chartType,
+		}); err != nil {
+			t.Fatalf("%s: %v", chartType, err)
+		}
+	}
+
+	var onD10, onD1 int
+	count := func(chartType string, into *int) {
+		if err := h.pool.QueryRow(ctx,
+			`SELECT count(*) FROM dashas d
+			 JOIN charts c ON c.id = d.chart_id
+			 WHERE c.birth_profile_id = $1 AND c.chart_type = $2`,
+			profile.ID, chartType).Scan(into); err != nil {
+			t.Fatalf("count %s: %v", chartType, err)
+		}
+	}
+	count("D10", &onD10)
+	count("D1", &onD1)
+
+	if onD1 == 0 {
+		t.Fatal("no dasha rows on the rasi; the D10 having none proves nothing")
+	}
+	if onD10 != 0 {
+		t.Fatalf("%d dasha rows hang off the D10", onD10)
 	}
 }
