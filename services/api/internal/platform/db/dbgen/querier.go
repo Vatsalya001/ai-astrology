@@ -12,6 +12,21 @@ import (
 )
 
 type Querier interface {
+	// The whole tree in ONE round trip.
+	//
+	// 819 rows per chart — 9 mahadashas, 81 antardashas, 729
+	// pratyantardashas — inserted one at a time was 819 round trips inside
+	// the transaction, and measured as the dominant cost of a cold chart
+	// request: 564 ms against a 350 ms budget. COPY makes it one.
+	//
+	// `id` is supplied by the caller rather than defaulted, because a child
+	// row needs its parent's id BEFORE either is written. Generating the
+	// UUIDs in Go is what makes a single batch possible at all.
+	//
+	// Rows must arrive parents-first: the parent_id foreign key is checked
+	// per row, so a level-2 row ahead of its level-1 parent is rejected. A
+	// breadth-first flatten gives that ordering for free.
+	BulkInsertDashas(ctx context.Context, arg []BulkInsertDashasParams) (int64, error)
 	CancelUserDeletion(ctx context.Context, id pgtype.UUID) (User, error)
 	CountPlaces(ctx context.Context) (int64, error)
 	// Astrology queries. See docs/specs/PHASE-02-ASTROLOGY-ENGINE.md §3.
@@ -99,6 +114,13 @@ type Querier interface {
 	// Every row, including superseded links in a rotation chain. Used by the
 	// data export, where completeness is the point.
 	ListActiveSessions(ctx context.Context, userID pgtype.UUID) ([]Session, error)
+	// Every version, active and superseded, for the data export.
+	//
+	// ListActiveBirthProfiles deliberately hides superseded rows because the
+	// product only ever shows the current one. An export is the opposite
+	// case: the history is what explains a reading given before a correction,
+	// and dropping it hands back less than was actually stored.
+	ListAllBirthProfilesForUser(ctx context.Context, userID pgtype.UUID) ([]BirthProfile, error)
 	ListAuditLogsForUser(ctx context.Context, arg ListAuditLogsForUserParams) ([]AuditLog, error)
 	// The history behind one profile, newest first.
 	//

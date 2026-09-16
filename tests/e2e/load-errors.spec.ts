@@ -45,7 +45,7 @@ async function signUp(page: Page, letter: string): Promise<void> {
 }
 
 test('a 500 shows an error and keeps the user where they are', async ({ page }) => {
-  await signUp(page, 'i')
+  await signUp(page, 'q')
 
   for (const { path, api } of SCREENS) {
     await page.route(api, (route) =>
@@ -70,7 +70,7 @@ test('a 500 shows an error and keeps the user where they are', async ({ page }) 
 })
 
 test('an unreachable server is an error, not a sign-out', async ({ page }) => {
-  await signUp(page, 'j')
+  await signUp(page, 'r')
 
   // `abort` is what a dropped connection actually looks like to fetch: no
   // response at all, which surfaces as AuthError('NETWORK', 0). Status 0

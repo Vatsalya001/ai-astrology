@@ -501,3 +501,147 @@ func jsonMarshal(v any) (string, error) {
 func containsString(haystack, needle string) bool {
 	return strings.Contains(haystack, needle)
 }
+
+// The Phase 2 security checklist: "Data export includes birth profiles
+// and charts."
+//
+// It is the one obligation that fails SILENTLY when a phase adds a
+// table. Deletion has userOwnedTables to discover a new table and refuse
+// to pass; the export has no equivalent, because there is nothing to
+// discover — a missing section is an absent JSON key, and an absent key
+// looks exactly like "you have none of those".
+//
+// Which is what happened: birth profiles and charts landed in Phase 2
+// and the export never mentioned them. A user exercising their right to
+// a copy of their data would have been told, in effect, that the most
+// sensitive thing the product holds about them does not exist.
+func TestExportIncludesBirthProfilesAndCharts(t *testing.T) {
+	ctx := context.Background()
+	pool, stop := startPostgres(ctx, t)
+	defer stop()
+
+	exporter := NewExporter(dbgen.New(pool))
+
+	userID := seedFullUser(ctx, t, pool, "phase2export@example.com")
+	stranger := seedFullUser(ctx, t, pool, "notmine@example.com")
+
+	export, err := exporter.Export(ctx, userID)
+	if err != nil {
+		t.Fatalf("Export: %v", err)
+	}
+
+	if len(export.BirthProfiles) == 0 {
+		t.Fatal("birth profiles are missing from the export — the field returns [] " +
+			"and tells the user they have none")
+	}
+
+	profile := export.BirthProfiles[0]
+	// The details themselves, not just a count. An export that lists
+	// "1 birth profile" is not a copy of anybody's data.
+	if profile.BirthDate != "1994-08-17" {
+		t.Errorf("birth_date is %q, want the seeded 1994-08-17", profile.BirthDate)
+	}
+	if profile.BirthTime == nil || *profile.BirthTime != "14:35" {
+		t.Errorf("birth_time is %v, want 14:35", profile.BirthTime)
+	}
+	if profile.BirthPlace != "Jaipur" {
+		t.Errorf("birth_place is %q, want Jaipur", profile.BirthPlace)
+	}
+	if profile.Timezone != "Asia/Kolkata" {
+		t.Errorf("timezone is %q — without it the birth time is ambiguous, and an "+
+			"export that cannot be re-imported is not a copy", profile.Timezone)
+	}
+
+	if len(export.Charts) == 0 {
+		t.Fatal("charts are missing from the export")
+	}
+	chart := export.Charts[0]
+	if chart.EngineVersion == "" {
+		t.Error("the chart carries no engine_version; a chart without its " +
+			"provenance cannot be explained later")
+	}
+	if len(chart.Data) == 0 {
+		t.Error("the chart carries no data — a chart row with no chart in it")
+	}
+
+	// And it is scoped. An export that leaked another user's birth
+	// profile would be a data breach performed by the privacy feature.
+	strangerExport, err := exporter.Export(ctx, stranger)
+	if err != nil {
+		t.Fatalf("Export(stranger): %v", err)
+	}
+	for _, p := range export.BirthProfiles {
+		for _, q := range strangerExport.BirthProfiles {
+			if p.ID == q.ID {
+				t.Fatalf("birth profile %s appears in two users' exports", p.ID)
+			}
+		}
+	}
+}
+
+// Every user-owned table must be represented in the export.
+//
+// Deletion already has a guard like this — userOwnedTables discovers a
+// new table and refuses to pass until it is seeded. The export had none,
+// and that is exactly why birth profiles and charts were missing from it
+// for a whole phase: a missing section is an absent JSON key, and an
+// absent key is indistinguishable from "you have none of those".
+//
+// Discovered, not listed. An enumerated list in this file stops being
+// complete the moment someone forgets it, which is the failure mode
+// being guarded against.
+func TestEveryUserOwnedTableAppearsInTheExport(t *testing.T) {
+	ctx := context.Background()
+	pool, stop := startPostgres(ctx, t)
+	defer stop()
+
+	// Which export section carries each table. A table listed as "" is
+	// deliberately NOT exported, and needs a stated reason — the point is
+	// that leaving one out becomes a decision somebody wrote down rather
+	// than an omission nobody noticed.
+	carriedBy := map[string]string{
+		"users":            "profile",
+		"user_preferences": "preferences",
+		"auth_identities":  "auth_identities",
+		"sessions":         "sessions",
+		"audit_logs":       "audit_log",
+		"birth_profiles":   "birth_profiles",
+		// Charts hang off birth_profiles and have no user_id column, so
+		// they are not discovered here; TestExportIncludesBirthProfiles
+		// AndCharts asserts them directly.
+	}
+
+	userID := seedFullUser(ctx, t, pool, "sections@example.com")
+	export, err := NewExporter(dbgen.New(pool)).Export(ctx, userID)
+	if err != nil {
+		t.Fatalf("Export: %v", err)
+	}
+
+	encoded, err := json.Marshal(export)
+	if err != nil {
+		t.Fatalf("marshal export: %v", err)
+	}
+	var sections map[string]json.RawMessage
+	if err := json.Unmarshal(encoded, &sections); err != nil {
+		t.Fatalf("decode export: %v", err)
+	}
+
+	for _, table := range userOwnedTables(ctx, t, pool) {
+		key, known := carriedBy[table]
+		if !known {
+			t.Errorf("table %q has a user_id column but no entry in this test.\n"+
+				"Either add it to the export and name its section here, or add it "+
+				"with an empty section and say why it is not exported. A table that "+
+				"holds a person's data and never reaches their export is the whole "+
+				"failure this guard exists for.", table)
+			continue
+		}
+		if key == "" {
+			continue // deliberately not exported; the map entry is the record
+		}
+		if _, present := sections[key]; !present {
+			t.Errorf("table %q should be exported as %q, but the export has no such key",
+				table, key)
+		}
+	}
+}

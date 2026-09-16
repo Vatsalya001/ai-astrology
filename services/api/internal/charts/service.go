@@ -22,6 +22,7 @@ import (
 	"github.com/Vatsalya001/ai-astrology/services/api/internal/birthprofiles"
 	"github.com/Vatsalya001/ai-astrology/services/api/internal/platform/analytics"
 	"github.com/Vatsalya001/ai-astrology/services/api/internal/platform/clients"
+	"github.com/Vatsalya001/ai-astrology/services/api/internal/platform/clients/astroclient"
 	"github.com/Vatsalya001/ai-astrology/services/api/internal/platform/db/dbgen"
 )
 
@@ -263,12 +264,28 @@ func (s *Service) computeAndStore(
 		return Chart{}, err
 	}
 
-	data, err := json.Marshal(response)
+	// ONE response, BOTH charts.
+	//
+	// astro-service returns the navamsa alongside the rasi, because a D9
+	// is a ninth-part division OF the D1 — it is not a second
+	// computation. Deriving it here rather than asking again means:
+	//
+	//   - one HTTP call instead of two, and
+	//   - the two can never disagree. A second call lands on a different
+	//     instant, and a chart whose D9 came from a slightly different
+	//     ephemeris state is wrong in a way no field records.
+	//
+	// The earlier version sent no chart type to astro at all and stored
+	// the identical payload under both labels, so a client asking for the
+	// navamsa was served the rasi with the real navamsa buried in a field
+	// it was not reading. TestTheStoredD9IsTheNavamsaAndNotACopyOfTheD1
+	// is what found that.
+	payloads, err := splitByChartType(response)
 	if err != nil {
-		return Chart{}, fmt.Errorf("charts: encode: %w", err)
+		return Chart{}, err
 	}
 
-	// The chart row and its dasha tree are written in ONE transaction.
+	// Both rows and the dasha tree are written in ONE transaction.
 	//
 	// Separately, a chart whose tree failed to write is served happily
 	// forever — every read finds the chart, no read notices the missing
@@ -285,24 +302,33 @@ func (s *Service) computeAndStore(
 
 	txq := dbgen.New(tx)
 
-	row, err := txq.UpsertChart(ctx, dbgen.UpsertChartParams{
-		BirthProfileID:    toPgUUID(key.ProfileID),
-		ChartType:         key.ChartType,
-		CalculationSystem: key.System,
-		Ayanamsa:          key.Ayanamsa,
-		HouseSystem:       key.HouseSystem,
-		EngineVersion:     response.Meta.EngineVersion,
-		ChartData:         data,
-	})
-	if err != nil {
-		return Chart{}, fmt.Errorf("charts: persist: %w", err)
+	rows := make(map[string]dbgen.Chart, len(payloads))
+	for chartType, data := range payloads {
+		row, upsertErr := txq.UpsertChart(ctx, dbgen.UpsertChartParams{
+			BirthProfileID:    toPgUUID(key.ProfileID),
+			ChartType:         chartType,
+			CalculationSystem: key.System,
+			Ayanamsa:          key.Ayanamsa,
+			HouseSystem:       key.HouseSystem,
+			EngineVersion:     response.Meta.EngineVersion,
+			ChartData:         data,
+		})
+		if upsertErr != nil {
+			return Chart{}, fmt.Errorf("charts: persist %s: %w", chartType, upsertErr)
+		}
+		rows[chartType] = row
 	}
 
+	// Dashas hang off the RASI only. They are a property of the birth
+	// moment, not of a divisional chart, and a second tree under the D9
+	// would give FindDashaAt two rows per level to choose between.
+	//
 	// A chart without a birth time has no dashas at all — the Moon cannot
 	// be pinned to a nakshatra pada without one — so an absent tree is
 	// expected rather than a failure.
 	if response.Dashas != nil {
-		if _, err := storeDashaTree(ctx, txq, uuid.UUID(row.ID.Bytes), *response.Dashas); err != nil {
+		rasi := rows[ChartTypeRasi]
+		if _, err := storeDashaTree(ctx, txq, uuid.UUID(rasi.ID.Bytes), *response.Dashas); err != nil {
 			return Chart{}, err
 		}
 	}
@@ -317,7 +343,53 @@ func (s *Service) computeAndStore(
 		"cached":      false,
 	})
 
-	return toChart(row), nil
+	wanted, ok := rows[key.ChartType]
+	if !ok {
+		// Asked for a divisional chart this response does not carry. The
+		// only way here is include_navamsa having been switched off, which
+		// nothing does — but returning the rasi under a D9 label is the
+		// exact bug this function was just fixed for.
+		return Chart{}, fmt.Errorf("charts: astro-service returned no %s for this birth",
+			key.ChartType)
+	}
+	return toChart(wanted), nil
+}
+
+// splitByChartType turns one astro response into one payload per stored
+// chart.
+//
+// The D1 keeps the whole response — it is the provenance record, and the
+// AI layer reads it from Phase 5. The D9 is projected out as a chart in
+// its own right, carrying the same meta so that every stored chart
+// answers "which engine produced this?" on its own, without a join.
+func splitByChartType(response *astroclient.ChartResponse) (map[string][]byte, error) {
+	rasi, err := json.Marshal(response)
+	if err != nil {
+		return nil, fmt.Errorf("charts: encode rasi: %w", err)
+	}
+	payloads := map[string][]byte{ChartTypeRasi: rasi}
+
+	if response.Navamsa == nil {
+		return payloads, nil
+	}
+
+	navamsa, err := json.Marshal(struct {
+		Meta      astroclient.ChartMeta          `json:"meta"`
+		Ascendant *astroclient.AscendantPosition `json:"ascendant"`
+		Houses    *[]astroclient.HousePosition   `json:"houses"`
+		Planets   []astroclient.PlanetPosition   `json:"planets"`
+	}{
+		Meta:      response.Meta,
+		Ascendant: response.Navamsa.Ascendant,
+		Houses:    response.Navamsa.Houses,
+		Planets:   response.Navamsa.Planets,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("charts: encode navamsa: %w", err)
+	}
+	payloads[ChartTypeNavamsa] = navamsa
+
+	return payloads, nil
 }
 
 // failureCode reduces an error to an enum for analytics.

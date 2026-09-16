@@ -4,6 +4,7 @@ package charts_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -34,14 +35,38 @@ import (
 // matters here is how this service behaves when astro is SLOW, DOWN or
 // REJECTING — states a real service will not enter on request.
 
+// The rasi and the navamsa are DELIBERATELY different here — Scorpio
+// rising with the Sun in Leo against Capricorn rising with the Sun in
+// Aries. That is what a real D9 looks like relative to its D1 (checked
+// against astro-service for 1994-08-17), and it is the only way a test
+// can tell a stored D9 from a mislabelled copy of the D1.
 const chartJSON = `{
 	"meta": {"schema_version":1,"calculation_system":"vedic","ayanamsa":"lahiri",
 	         "ayanamsa_value":23.8,"house_system":"whole_sign",
 	         "engine_version":"skyfield-1.55+de421+schema1",
 	         "computed_at":"2026-01-01T00:00:00Z","time_accuracy":"exact"},
-	"ascendant": null, "houses": null, "dashas": null, "navamsa": null,
-	"planets": [], "yogas": [],
-	"summary": {"sun_sign":"Leo","moon_sign":"Sagittarius","ascendant_sign":null,
+	"ascendant": {"longitude":215.5,"sign":"Scorpio","sign_index":7,"degree":5.5,
+	              "nakshatra":"Anuradha","pada":1},
+	"houses": null,
+	"dashas": [{"planet":"Ketu","start":"1994-01-01T00:00:00Z","end":"2001-01-01T00:00:00Z",
+	            "level":1,
+	            "children":[{"planet":"Ketu","start":"1994-01-01T00:00:00Z",
+	                         "end":"1994-06-01T00:00:00Z","level":2}]}],
+	"navamsa": {
+	  "ascendant": {"longitude":279.5,"sign":"Capricorn","sign_index":9,"degree":9.5,
+	                "nakshatra":"Uttara Ashadha","pada":3},
+	  "houses": null,
+	  "planets": [{"planet":"Sun","longitude":10.0,"sign":"Aries","sign_index":0,
+	               "degree":10.0,"house":4,"nakshatra":"Ashwini","nakshatra_index":0,
+	               "pada":3,"is_retrograde":false,"is_combust":false,
+	               "dignity":"exalted","speed":0.98}]
+	},
+	"planets": [{"planet":"Sun","longitude":125.0,"sign":"Leo","sign_index":4,
+	             "degree":5.0,"house":10,"nakshatra":"Magha","nakshatra_index":9,
+	             "pada":2,"is_retrograde":false,"is_combust":false,
+	             "dignity":"own","speed":0.98}],
+	"yogas": [],
+	"summary": {"sun_sign":"Leo","moon_sign":"Sagittarius","ascendant_sign":"Scorpio",
 	            "moon_nakshatra":"Mula","moon_nakshatra_pada":4}
 }`
 
@@ -173,6 +198,17 @@ func seedUser(ctx context.Context, t *testing.T, pool *pgxpool.Pool) uuid.UUID {
 		t.Fatalf("seed user: %v", err)
 	}
 	return id
+}
+
+// createProfile makes one profile for the tests that only need "a
+// profile that exists".
+func (h *harness) createProfile(t *testing.T) birthprofiles.Profile {
+	t.Helper()
+	profile, err := h.profiles.Create(context.Background(), jaipurInput(h.userID))
+	if err != nil {
+		t.Fatalf("create profile: %v", err)
+	}
+	return profile
 }
 
 func jaipurInput(userID uuid.UUID) birthprofiles.CreateInput {
@@ -535,3 +571,139 @@ func TestAnExactProfileWithoutATimeIsRefused(t *testing.T) {
 }
 
 func errorIs(err, target error) bool { return errors.Is(err, target) }
+
+// ─── D9 ──────────────────────────────────────────────────────────────
+
+// The gate asks for "D9 computed and stored". Storing the D1 payload
+// under a D9 label satisfies the words and nothing else: a client asking
+// for the navamsa gets the rasi, with the real navamsa buried in a field
+// it was not looking at.
+//
+// The two charts genuinely differ — a navamsa ascendant is a ninth-part
+// division of the rasi one — so asserting they differ is the whole test.
+func TestTheStoredD9IsTheNavamsaAndNotACopyOfTheD1(t *testing.T) {
+	h, cleanup := newHarness(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	profile := h.createProfile(t)
+
+	rasi, err := h.charts.Get(ctx, h.userID, charts.Key{
+		ProfileID: profile.ID, ChartType: charts.ChartTypeRasi,
+	})
+	if err != nil {
+		t.Fatalf("D1: %v", err)
+	}
+
+	navamsa, err := h.charts.Get(ctx, h.userID, charts.Key{
+		ProfileID: profile.ID, ChartType: charts.ChartTypeNavamsa,
+	})
+	if err != nil {
+		t.Fatalf("D9: %v", err)
+	}
+
+	if string(rasi.Data) == string(navamsa.Data) {
+		t.Fatal("the D1 and D9 payloads are byte-identical; the D9 row is a " +
+			"relabelled D1, and a client asking for the navamsa is served the rasi")
+	}
+
+	ascendantOf := func(raw []byte, label string) string {
+		var chart struct {
+			Ascendant *struct {
+				Sign string `json:"sign"`
+			} `json:"ascendant"`
+		}
+		if err := json.Unmarshal(raw, &chart); err != nil {
+			t.Fatalf("decode %s: %v", label, err)
+		}
+		if chart.Ascendant == nil {
+			t.Fatalf("%s has no ascendant", label)
+		}
+		return chart.Ascendant.Sign
+	}
+
+	if got := ascendantOf(rasi.Data, "D1"); got != "Scorpio" {
+		t.Fatalf("D1 ascendant is %s, want Scorpio", got)
+	}
+	if got := ascendantOf(navamsa.Data, "D9"); got != "Capricorn" {
+		t.Fatalf("D9 ascendant is %s, want Capricorn — the navamsa ascendant, "+
+			"not the rasi's", got)
+	}
+}
+
+// One astro call, two charts. The navamsa arrives inside the same
+// response, so fetching a D9 after a D1 must not call out again — and
+// more importantly must not be able to disagree with the D1 it was
+// derived from.
+func TestFetchingBothChartsCostsOneAstroCall(t *testing.T) {
+	h, cleanup := newHarness(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	profile := h.createProfile(t)
+	before := h.astroCalls.Load()
+
+	for _, chartType := range []string{charts.ChartTypeRasi, charts.ChartTypeNavamsa} {
+		if _, err := h.charts.Get(ctx, h.userID, charts.Key{
+			ProfileID: profile.ID, ChartType: chartType,
+		}); err != nil {
+			t.Fatalf("%s: %v", chartType, err)
+		}
+	}
+
+	if calls := h.astroCalls.Load() - before; calls != 1 {
+		t.Fatalf("fetching D1 and D9 made %d calls to astro-service, want 1 — "+
+			"the navamsa is in the same response, and a second call could "+
+			"return a chart computed from a different ephemeris state", calls)
+	}
+}
+
+// Dashas belong to the rasi. A dasha tree hanging off a D9 row is a
+// second, independently-stored copy of something that has one correct
+// value, and FindDashaAt would have two rows per level to choose from.
+func TestOnlyTheRasiCarriesADashaTree(t *testing.T) {
+	h, cleanup := newHarness(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	profile := h.createProfile(t)
+
+	// D9 FIRST, deliberately. The first Get is the one that computes and
+	// stores; the second is a cache hit and runs none of this code. Asking
+	// for the rasi first made an earlier version of this test vacuous —
+	// hanging the tree off the requested chart instead of the rasi still
+	// passed, because the requested chart WAS the rasi.
+	for _, chartType := range []string{charts.ChartTypeNavamsa, charts.ChartTypeRasi} {
+		if _, err := h.charts.Get(ctx, h.userID, charts.Key{
+			ProfileID: profile.ID, ChartType: chartType,
+		}); err != nil {
+			t.Fatalf("%s: %v", chartType, err)
+		}
+	}
+
+	// And the rasi must have one, or "zero on the D9" is trivially true.
+	var onD1 int
+	if err := h.pool.QueryRow(ctx,
+		`SELECT count(*) FROM dashas d
+		 JOIN charts c ON c.id = d.chart_id
+		 WHERE c.birth_profile_id = $1 AND c.chart_type = 'D1'`,
+		profile.ID).Scan(&onD1); err != nil {
+		t.Fatalf("count D1: %v", err)
+	}
+	if onD1 == 0 {
+		t.Fatal("no dasha rows on the rasi; the D9 having none proves nothing")
+	}
+
+	var onD9 int
+	if err := h.pool.QueryRow(ctx,
+		`SELECT count(*) FROM dashas d
+		 JOIN charts c ON c.id = d.chart_id
+		 WHERE c.birth_profile_id = $1 AND c.chart_type = 'D9'`,
+		profile.ID).Scan(&onD9); err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	if onD9 != 0 {
+		t.Fatalf("%d dasha rows hang off the D9 chart; dashas are a property of "+
+			"the birth moment, not of a divisional chart", onD9)
+	}
+}

@@ -734,8 +734,15 @@ const stubChartJSON = `{
            "ayanamsa_value":24.21,"house_system":"whole_sign",
            "engine_version":"skyfield-1.55+de421+schema1",
            "computed_at":"2026-01-01T00:00:00Z","time_accuracy":"exact"},
-  "ascendant": null, "houses": null, "navamsa": null,
+  "ascendant": null, "houses": null,
   "planets": [], "yogas": [],
+  "navamsa": {
+    "ascendant": null, "houses": null,
+    "planets": [{"planet":"Sun","longitude":10.0,"sign":"Aries","sign_index":0,
+                 "degree":10.0,"house":1,"nakshatra":"Ashwini","nakshatra_index":0,
+                 "pada":3,"is_retrograde":false,"is_combust":false,
+                 "dignity":"exalted","speed":0.98}]
+  },
   "summary": {"sun_sign":"Pisces","moon_sign":"Capricorn","ascendant_sign":"Aries",
               "moon_nakshatra":"Shravana","moon_nakshatra_pada":2},
   "dashas": [

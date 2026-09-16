@@ -1,16 +1,22 @@
-"""Property-based tests.
+"""Property-based tests for the settings layer.
 
-Phase 0 has little domain logic to property-test — the ephemeris arrives
-in Phase 2, where `hypothesis` does the real work (dashas summing to 120
-years for any Moon longitude, houses being a permutation of 1..12, Ketu
-being exactly opposite Rahu).
+The astrology properties this file once promised now live beside the
+code they constrain, because a property belongs next to the function it
+is a property OF:
 
-What exists now that genuinely benefits is the edit-distance function
-behind the typo guard. It is the kind of small numeric routine where
-example-based tests pass happily while an off-by-one hides in a branch
-nobody thought to write an example for.
+    dashas sum to 120 years      tests/test_dasha.py
+      for any Moon longitude       test_mahadashas_sum_to_one_hundred_
+                                   and_twenty_years
+    houses are a permutation     tests/test_chart.py
+      of 1..12                     test_houses_are_a_permutation_at_any_
+                                   time_and_place
+    Ketu is exactly opposite     tests/test_ephemeris.py
+      Rahu                         test_ketu_is_exactly_opposite_rahu
 
-These tests also prove the harness works before Phase 2 depends on it.
+This file keeps the edit-distance function behind the typo guard. It is
+the kind of small numeric routine where example-based tests pass happily
+while an off-by-one hides in a branch nobody thought to write an example
+for.
 """
 
 from __future__ import annotations

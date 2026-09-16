@@ -777,36 +777,39 @@ No dates, times, place names or coordinates in any payload. Enums and IDs only.
 
 Global DoD **plus**:
 
-- [ ] 30 golden fixtures pass exactly; 5 externally cross-validated
-- [ ] `app/core` is pure — no I/O, no ambient clock, enforced by lint
-- [ ] Every chart output carries `schema_version` and `engine_version`
-- [ ] Unknown birth time degrades honestly (nulls, not guesses)
-- [ ] Historical timezone offsets correct across all era fixtures
-- [ ] Chart computation < 200 ms; Go round trip < 350 ms cold; cached read < 10 ms
-- [ ] Cached charts still served when `astro-service` is down
-- [ ] ADR-003 closed with a real decision
+- [x] 30 golden fixtures pass exactly; 5 externally cross-validated
+- [x] `app/core` is pure — no I/O, no ambient clock, enforced by lint
+- [x] Every chart output carries `schema_version` and `engine_version`
+- [x] Unknown birth time degrades honestly (nulls, not guesses)
+- [x] Historical timezone offsets correct across all era fixtures
+- [x] Chart computation < 200 ms; Go round trip < 350 ms cold; cached read < 10 ms
+- [x] Cached charts still served when `astro-service` is down
+- [x] ADR-003 closed with a real decision
 
 ---
 
-## 18. Phase Gate 🔒
+## 18. Phase Gate 🔒 — CLOSED
 
-- [ ] A user can enter birth details and the system stores a versioned `birth_profiles` row
-- [ ] `GET /charts/{id}` returns a complete, schema-valid D1 chart
-- [ ] D9 computed and stored
-- [ ] Vimshottari computed to 3 levels; current dasha queryable by date
-- [ ] Transits refreshed every 6 h by the worker; Sade Sati detection verified
-- [ ] ≥10 yogas detected with positive and negative tests each
-- [ ] **All 30 golden fixtures pass; 5 cross-validated against an independent source**
-- [ ] **Hypothesis property tests green (120-year sum, house permutation, Rahu/Ketu opposition)**
-- [ ] Timezone fixtures green, including 1943 DST and pre-1906 LMT
-- [ ] Place search returns correct, population-ranked results in < 50 ms p95
-- [ ] Editing birth details creates v2 and preserves v1
-- [ ] Ownership enforced on every route; cross-user access returns 404
-- [ ] Unknown birth time returns null ascendant, houses and dashas
-- [ ] **Cached chart served successfully with `astro-service` stopped**
-- [ ] Generated Go client compiles from the Python OpenAPI; contract diff check passes
-- [ ] `astro-service` unreachable publicly; internal token enforced
-- [ ] User deletion cascades through profiles, charts and dashas
-- [ ] **ADR-003 (ephemeris licence) is `accepted`, not `proposed`**
-- [ ] `task verify` green
-- [ ] `docs/PROJECT_STATUS.md` and `.claude/state/current-phase.md` updated
+Evidence: `docs/TESTING-PHASE-2.md`. It records what was run, and names the
+twenty-three guards that were deliberately broken to prove they fire.
+
+- [x] A user can enter birth details and the system stores a versioned `birth_profiles` row
+- [x] `GET /charts/{id}` returns a complete, schema-valid D1 chart
+- [x] D9 computed and stored
+- [x] Vimshottari computed to 3 levels; current dasha queryable by date
+- [x] Transits refreshed every 6 h by the worker; Sade Sati detection verified
+- [x] ≥10 yogas detected with positive and negative tests each
+- [x] **All 30 golden fixtures pass; 5 cross-validated against an independent source**
+- [x] **Hypothesis property tests green (120-year sum, house permutation, Rahu/Ketu opposition)**
+- [x] Timezone fixtures green, including 1943 DST and pre-1906 LMT
+- [x] Place search returns correct, population-ranked results in < 50 ms p95
+- [x] Editing birth details creates v2 and preserves v1
+- [x] Ownership enforced on every route; cross-user access returns 404
+- [x] Unknown birth time returns null ascendant, houses and dashas
+- [x] **Cached chart served successfully with `astro-service` stopped**
+- [x] Generated Go client compiles from the Python OpenAPI; contract diff check passes
+- [x] `astro-service` unreachable publicly; internal token enforced
+- [x] User deletion cascades through profiles, charts and dashas
+- [x] **ADR-003 (ephemeris licence) is `accepted`, not `proposed`**
+- [x] `task verify` green
+- [x] `docs/PROJECT_STATUS.md` and `.claude/state/current-phase.md` updated

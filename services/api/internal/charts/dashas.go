@@ -82,24 +82,67 @@ func storeDashaTree(
 	if _, err := q.DeleteDashasForChart(ctx, toPgUUID(chartID)); err != nil {
 		return 0, fmt.Errorf("charts: clear dasha tree: %w", err)
 	}
-	return insertDashaLevel(ctx, q, chartID, nil, periods)
+
+	rows, err := flattenDashaTree(chartID, periods)
+	if err != nil {
+		return 0, err
+	}
+	if len(rows) == 0 {
+		return 0, nil
+	}
+
+	written, err := q.BulkInsertDashas(ctx, rows)
+	if err != nil {
+		return 0, fmt.Errorf("charts: insert %d dasha rows: %w", len(rows), err)
+	}
+	// COPY reporting fewer rows than it was given is not something the
+	// driver is supposed to do, so if it ever happens the tree is
+	// partial and the transaction must not commit.
+	if int(written) != len(rows) {
+		return int(written), fmt.Errorf(
+			"charts: %d dasha rows written of %d", written, len(rows))
+	}
+	return len(rows), nil
 }
 
-// insertDashaLevel writes one level and recurses into its children.
-func insertDashaLevel(
-	ctx context.Context,
-	q *dbgen.Queries,
+// flattenDashaTree turns the nested tree into rows, parents first.
+//
+// The ids are generated HERE rather than by the database, because a
+// child needs its parent's id before either row exists. That is what
+// makes a single bulk insert possible: with database-generated ids each
+// level has to be written and read back before the next can reference
+// it, which is 819 round trips per chart and was measured as the
+// dominant cost of a cold chart request.
+//
+// Breadth-first, so every parent precedes its children. Postgres checks
+// the parent_id foreign key per row, so a level-2 row arriving ahead of
+// its level-1 parent is rejected — ordering is a correctness
+// requirement here, not a tidiness one.
+func flattenDashaTree(
 	chartID uuid.UUID,
-	parentID *uuid.UUID,
 	periods []astroclient.DashaPeriodOut,
-) (int, error) {
-	written := 0
+) ([]dbgen.BulkInsertDashasParams, error) {
+	type pending struct {
+		period   astroclient.DashaPeriodOut
+		parentID *uuid.UUID
+	}
 
+	queue := make([]pending, 0, len(periods))
 	for _, period := range periods {
+		queue = append(queue, pending{period: period})
+	}
+
+	rows := make([]dbgen.BulkInsertDashasParams, 0, len(periods)*16)
+
+	for len(queue) > 0 {
+		node := queue[0]
+		queue = queue[1:]
+		period := node.period
+
 		if period.Level < 1 || period.Level > MaxDashaLevel {
 			// The CHECK constraint would catch this, but as a 500 naming a
 			// constraint. Caught here it names the planet and the level.
-			return written, fmt.Errorf(
+			return nil, fmt.Errorf(
 				"charts: dasha %s has level %d, outside 1..%d",
 				period.Planet, period.Level, MaxDashaLevel)
 		}
@@ -108,39 +151,34 @@ func insertDashaLevel(
 			// this is precisely the failure mode float accumulation across
 			// three levels of subdivision produces, and it looks plausible
 			// in a UI.
-			return written, fmt.Errorf(
+			return nil, fmt.Errorf(
 				"charts: dasha %s ends at %s, which is not after its start %s",
 				period.Planet, period.End.Format(time.RFC3339), period.Start.Format(time.RFC3339))
 		}
 
-		row, err := q.InsertDasha(ctx, dbgen.InsertDashaParams{
+		id := uuid.New()
+		rows = append(rows, dbgen.BulkInsertDashasParams{
+			ID:        toPgUUID(id),
 			ChartID:   toPgUUID(chartID),
 			System:    SystemVimshottari,
 			Planet:    period.Planet,
 			StartDate: period.Start,
 			EndDate:   period.End,
 			Level:     int16(period.Level),
-			ParentID:  optionalPgUUID(parentID),
+			ParentID:  optionalPgUUID(node.parentID),
 			Metadata:  []byte(`{}`),
 		})
-		if err != nil {
-			return written, fmt.Errorf("charts: insert dasha %s level %d: %w",
-				period.Planet, period.Level, err)
-		}
-		written++
 
 		if period.Children == nil {
 			continue
 		}
-		childID := uuid.UUID(row.ID.Bytes)
-		childCount, err := insertDashaLevel(ctx, q, chartID, &childID, *period.Children)
-		if err != nil {
-			return written + childCount, err
+		childParent := id
+		for _, child := range *period.Children {
+			queue = append(queue, pending{period: child, parentID: &childParent})
 		}
-		written += childCount
 	}
 
-	return written, nil
+	return rows, nil
 }
 
 // MoonSign returns the natal Moon's sign name for a profile.
