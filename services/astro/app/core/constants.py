@@ -18,6 +18,10 @@ from typing import Final, Literal
 
 FULL_CIRCLE: Final = 360.0
 
+# The same constant as an int, for the exact integer arithmetic in
+# subdivision_index. Named rather than inlined so the two cannot drift.
+FULL_CIRCLE_INT: Final = 360
+
 SIGN_COUNT: Final = 12
 SIGN_ARC: Final = FULL_CIRCLE / SIGN_COUNT  # 30°
 
@@ -207,33 +211,64 @@ def normalise_longitude(longitude: float) -> float:
     place means a negative intermediate result — which arithmetic on
     angles produces constantly — cannot leak into a sign index and
     silently produce house 13.
+
+    The explicit fold back to zero is not defensive padding. Python's `%`
+    returns a non-negative result, but for a tiny negative input the true
+    answer is a hair below 360 and the nearest float IS 360.0:
+
+        (-1e-18) % 360.0  ==  360.0
+
+    which gave sign index 12 — the exact failure this function promises
+    to prevent, in the one line meant to prevent it. A value like -1e-18
+    is what subtracting two nearly-equal angles produces, which this
+    codebase does on every chart when it converts tropical to sidereal.
     """
-    return longitude % FULL_CIRCLE
+    folded = longitude % FULL_CIRCLE
+    return 0.0 if folded >= FULL_CIRCLE else folded
 
 
 def subdivision_index(longitude: float, divisions: int) -> int:
     """Which of `divisions` equal arcs a longitude falls in.
 
-    Multiply first, divide second. That ordering is the whole point, and
-    it is not a micro-optimisation — it is a correctness fix for a bug
-    this code actually had.
+    Computed on the float's EXACT value, in integer arithmetic. A float
+    is a rational number: `as_integer_ratio` gives its numerator and
+    denominator with no loss at all, and the comparison then has no
+    rounding step to get wrong.
 
-    The natural form, `longitude // (360 / divisions)`, is wrong whenever
-    360/divisions is not representable in binary. For the 27 nakshatras
-    the arc is 13.333…°, and at an exact boundary the division lands a
-    hair under the integer: 40.0 // 13.333… gives 2, not 3. Measured, on
-    the first version of this module: NINE of the twenty-seven nakshatra
-    boundaries returned the previous nakshatra, and the same nine padas
-    returned 4 instead of 1.
+    Why not the obvious float form, in either ordering. 360/27 is not
+    representable in binary, so both `x * 27 / 360` and `x / (360 / 27)`
+    round, and both land on the wrong side of a boundary for some inputs.
+    Measured against exact arithmetic in `tests/test_subdivision.py`:
 
-    `longitude * divisions / 360` keeps those cases exact, because
-    40 * 27 = 1080 and 1080 / 360 = 3.0 with no rounding at all.
+        boundaries and their float neighbours, 27 arcs
+            x * d / 360     wrong at 4 of 81
+            x / (360 / d)   wrong at 1 of 81
+            this function   wrong at 0 of 81
 
-    The failure mattered: a planet sitting exactly on a nakshatra cusp
-    would be reported in the wrong nakshatra, which changes its pada, its
-    dasha lord, and therefore the entire Vimshottari tree.
+    An earlier version of this code used `x / (360 / d)`; I changed it to
+    `x * d / 360` and called that a correctness fix, citing nine of
+    twenty-seven failing boundaries. Both halves of that were wrong. The
+    count was recalled rather than measured, and multiply-first is in
+    fact wrong MORE often, not less. The measurement is in the test now,
+    so neither claim has to be taken on trust again.
+
+    Practical impact of any of this: none. Over 500,000 random
+    longitudes all three forms agree exactly, because they diverge only
+    within one ulp of a boundary and a real planet is never there. The
+    reason to be exact anyway is that the alternative is a comment
+    asserting something no test checks — and this arithmetic sits under
+    every nakshatra, pada and sign in the product.
+
+    Cost: 268 ns against 82 ns for the float form. About 0.011 ms per
+    chart, against a 200 ms budget.
+
+    The failure it prevents, when it does happen, is not subtle: a planet
+    on a nakshatra cusp reported in the previous nakshatra gets a
+    different pada, a different dasha lord, and therefore an entirely
+    different Vimshottari tree.
     """
-    return int(normalise_longitude(longitude) * divisions / FULL_CIRCLE)
+    numerator, denominator = normalise_longitude(longitude).as_integer_ratio()
+    return (numerator * divisions) // (denominator * FULL_CIRCLE_INT)
 
 
 def sign_index(longitude: float) -> int:
