@@ -154,10 +154,65 @@ def test_ascendant_is_always_a_valid_longitude(ephemeris_module, latitude, longi
 
 
 def test_houses_are_a_permutation_of_one_to_twelve(jaipur_chart) -> None:
-    """The spec's property."""
+    """The spec's property, on one known chart."""
     assert jaipur_chart.houses is not None
     assert [h.house for h in jaipur_chart.houses] == list(range(1, HOUSE_COUNT + 1))
     assert len({h.sign_index for h in jaipur_chart.houses}) == HOUSE_COUNT
+
+
+@settings(max_examples=40, deadline=None)
+@given(
+    year=st.integers(min_value=1900, max_value=2050),
+    month=st.integers(min_value=1, max_value=12),
+    day=st.integers(min_value=1, max_value=28),
+    hour=st.integers(min_value=0, max_value=23),
+    minute=st.integers(min_value=0, max_value=59),
+    # The full inhabited range, and then some. 66.5 degrees is the Arctic
+    # Circle; 78 is Ny-Alesund, which people do live at.
+    latitude=st.floats(min_value=-78.0, max_value=78.0),
+    longitude=st.floats(min_value=-180.0, max_value=180.0, exclude_max=True),
+)
+def test_houses_are_a_permutation_at_any_time_and_place(
+    ephemeris, ayanamsa, timescale, year, month, day, hour, minute, latitude, longitude
+) -> None:
+    """The same property, as a property rather than an example.
+
+    The test above checks one chart in Jaipur, which cannot fail for a
+    reason that depends on WHERE the chart is. The ascendant is computed
+    with an atan2 over the obliquity and the local sidereal time, and its
+    degenerate cases are all latitude-driven — near the poles the
+    quadrant house systems break down entirely, and whole-sign is
+    supposed to keep working. Fixtures 026 (Tromso, polar night) and 005
+    (Anchorage) exist for the same reason; this covers the space between
+    and beyond them.
+
+    Two assertions, because a permutation is two separate claims: every
+    house number appears exactly once, AND the twelve signs are distinct.
+    A rotation bug satisfies the first and fails the second.
+    """
+    # All three fixtures are session-scoped, which is what makes them
+    # safe to take alongside @given — the conftest's warning about
+    # combining hypothesis with fixtures is about FUNCTION-scoped ones.
+    t = timescale.utc(year, month, day, hour, minute)
+
+    rasi = compute_rasi(ephemeris, ayanamsa, t, latitude, longitude)
+
+    assert rasi.houses is not None, "whole-sign houses must exist at every latitude"
+    assert [h.house for h in rasi.houses] == list(range(1, HOUSE_COUNT + 1)), (
+        f"houses at lat {latitude:.3f} are not 1..12 in order"
+    )
+    assert len({h.sign_index for h in rasi.houses}) == HOUSE_COUNT, (
+        f"houses at lat {latitude:.3f} do not cover twelve distinct signs — "
+        "whole-sign houses are a rotation of the zodiac, so a repeat means "
+        "the rotation is wrong"
+    )
+
+    # And every graha lands in exactly one of them. A house number
+    # outside 1..12 is the "house 13" failure in a different disguise.
+    for planet in rasi.planets:
+        assert 1 <= planet.house <= HOUSE_COUNT, (
+            f"{planet.planet} is in house {planet.house} at lat {latitude:.3f}"
+        )
 
 
 def test_every_graha_is_in_exactly_one_house(jaipur_chart) -> None:

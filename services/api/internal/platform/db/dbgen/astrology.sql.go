@@ -12,6 +12,18 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+type BulkInsertDashasParams struct {
+	ID        pgtype.UUID
+	ChartID   pgtype.UUID
+	System    string
+	Planet    string
+	StartDate time.Time
+	EndDate   time.Time
+	Level     int16
+	ParentID  pgtype.UUID
+	Metadata  []byte
+}
+
 const countPlaces = `-- name: CountPlaces :one
 SELECT count(*) FROM places
 `
@@ -355,6 +367,57 @@ ORDER BY created_at
 
 func (q *Queries) ListActiveBirthProfiles(ctx context.Context, userID pgtype.UUID) ([]BirthProfile, error) {
 	rows, err := q.db.Query(ctx, listActiveBirthProfiles, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []BirthProfile{}
+	for rows.Next() {
+		var i BirthProfile
+		if err := rows.Scan(
+			&i.ID,
+			&i.UserID,
+			&i.Label,
+			&i.BirthDate,
+			&i.BirthTime,
+			&i.TimeAccuracy,
+			&i.BirthPlace,
+			&i.Latitude,
+			&i.Longitude,
+			&i.Timezone,
+			&i.UtcOffsetMin,
+			&i.UtcInstant,
+			&i.Source,
+			&i.Verified,
+			&i.Version,
+			&i.SupersededBy,
+			&i.IsActive,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAllBirthProfilesForUser = `-- name: ListAllBirthProfilesForUser :many
+SELECT id, user_id, label, birth_date, birth_time, time_accuracy, birth_place, latitude, longitude, timezone, utc_offset_min, utc_instant, source, verified, version, superseded_by, is_active, created_at FROM birth_profiles
+WHERE user_id = $1
+ORDER BY created_at, version
+`
+
+// Every version, active and superseded, for the data export.
+//
+// ListActiveBirthProfiles deliberately hides superseded rows because the
+// product only ever shows the current one. An export is the opposite
+// case: the history is what explains a reading given before a correction,
+// and dropping it hands back less than was actually stored.
+func (q *Queries) ListAllBirthProfilesForUser(ctx context.Context, userID pgtype.UUID) ([]BirthProfile, error) {
+	rows, err := q.db.Query(ctx, listAllBirthProfilesForUser, userID)
 	if err != nil {
 		return nil, err
 	}

@@ -1,8 +1,8 @@
 # Project Status
 
-**Updated:** 2026-09-14
-**Current phase:** 0 — Foundation
-**Gate:** ✅ **CLOSED — 20 of 20**
+**Updated:** 2026-09-16
+**Current phase:** 2 — Astrology Engine
+**Gate:** ✅ **CLOSED — 20 of 20** (Phase 0 ✅, Phase 1 ✅, Phase 2 ✅)
 **Repo:** https://github.com/Vatsalya001/ai-astrology (private)
 
 ---
@@ -370,9 +370,8 @@ the relevant cache and try again.
 
 ## Open decisions
 
-| ADR | Question | Due |
-|---|---|---|
-| [003](decisions/003-astrology-engine.md) | Swiss Ephemeris licence: AGPL, commercial, or MIT `skyfield` | **Before Phase 7** |
+None. [ADR-003](decisions/003-astrology-engine.md) closed on 2026-09-16: **`skyfield`
+(MIT)**, so the project carries no ephemeris licence obligation at Phase 7 or ever.
 
 **Nothing tested the app at phone width.** The suite ran one Playwright project,
 Desktop Chrome, while "mobile responsive" sat in the Definition of Done — for a
@@ -410,14 +409,74 @@ phone OTP need no third party and work today.
 
 ---
 
+---
+
+# Phase 2 — Astrology Engine ✅
+
+**Gate: CLOSED — 20 of 20 gate items, 8 of 8 Definition-of-Done items.**
+Evidence: [`TESTING-PHASE-2.md`](TESTING-PHASE-2.md).
+
+## What shipped
+
+- **astro-service**: skyfield + a vendored de421 kernel, Lahiri ayanamsa from the ICRC
+  anchor, whole-sign houses, navamsa, a three-level Vimshottari tree in `Decimal`,
+  graha drishti, 11 yogas, gochara and Sade Sati. No database, no network, no model.
+- **api-service**: versioned birth profiles, a place gazetteer, chart storage and
+  caching, a six-hourly `asynq` transit worker, and eleven endpoints behind an
+  ownership middleware.
+- **web**: the three-step birth flow, the computing screen, and the profile manager.
+- **30 golden fixtures**, cross-validated against published astronomical events before
+  being frozen.
+
+## What running it found that reading it did not
+
+The full list is in `TESTING-PHASE-2.md`. The worst:
+
+**The containerised astro-service had no ephemeris kernel.** The Dockerfile copied
+`app` and not `data`. The container started, answered `/health`, passed every compose
+health check, and 500'd on the first request that needed a planet — for the whole
+phase. No test had ever computed a real chart through the stack. The end-to-end suite
+task 2.21 asks for found it on its first run.
+
+**`scripts/ayana up` served a months-old image**, because `docker compose up` was
+missing `--build`. Six green ticks, stale code. CI never hit it: a fresh runner has no
+image to be stale.
+
+**`?type=D9` returned a relabelled D1.** The chart type never reached astro-service, so
+both rows held the identical payload and a client asking for the navamsa got the rasi.
+
+**819 database round trips per chart** for the dasha tree. Measured: 815 ms one-at-a-
+time against 26 ms for a single `COPY`.
+
+**The data export never mentioned birth profiles or charts**, which the §14 checklist
+requires. Deletion had a guard that discovers new tables; the export had none, because
+a missing section is an absent JSON key and an absent key reads as "you have none".
+
+## Measured against the §17 budgets
+
+| Budget | Measured |
+|---|---|
+| Chart computation < 200 ms | p95 **70.6 ms** |
+| Go round trip < 350 ms cold | **109–140 ms** |
+| Cached read < 10 ms | p95 **8.5 ms**, max **10.0 ms** |
+| Place search < 50 ms p95 | **2.7 ms** |
+
+## Corrections I had to make to my own earlier claims
+
+Two, both recorded in full in `TESTING-PHASE-2.md`:
+
+- I had "fixed" `subdivision_index` citing nine failing nakshatra boundaries. Measured
+  against exact rational arithmetic the count was three, and the fix was wrong **more**
+  often than what it replaced. It is now exact.
+- A golden-file tolerance I reported as landed had never been applied — a text edit
+  silently failed to match. The CI run that went green did so by luck on a runner that
+  happened to agree.
+
 ## Next
 
-**Phase 2 — Astrology Engine.** `docs/specs/PHASE-02-ASTROLOGY-ENGINE.md`.
+**Phase 3 — Kundli UI.** `docs/specs/PHASE-03-KUNDLI-UI.md`.
 
-Entirely Python, in `services/astro`. The Go service gains a generated client and
-nothing else. Two things decide whether this phase is any good:
-
-1. **Cross-validate every golden file against an independent reference before freezing
-   it.** A golden file that encodes your own bug makes that bug permanent.
-2. **`Decimal`, not float, for dasha arithmetic.** Error accumulates across three
-   levels of subdivision and produces dates wrong by days.
+Phase 2 built data entry only. Phase 3 is the visualisation: North and South Indian
+chart SVGs, the dasha timeline, the PDF worker. The chart SVG needs per-element
+`aria-label`s and a visually-hidden table duplicating the data — an SVG is meaningless
+to a screen reader otherwise.

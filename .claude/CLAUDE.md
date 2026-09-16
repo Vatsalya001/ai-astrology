@@ -2,7 +2,7 @@
 
 Read this at the start of every session. It is short on purpose.
 
-**Current phase: 2 — Astrology Engine.** Phases 0 and 1 are closed.
+**Current phase: 3 — Kundli UI.** Phases 0, 1 and 2 are closed.
 See `.claude/state/current-phase.md` for what carries forward.
 
 ---
@@ -105,5 +105,6 @@ accessibility considered · security reviewed · analytics events emitted · doc
 
 ## Open decisions
 
-- **[ADR-003](../docs/decisions/003-astrology-engine.md)** — Swiss Ephemeris licence.
-  AGPL vs commercial vs MIT `skyfield`. **Must be closed before Phase 7.**
+None. [ADR-003](../docs/decisions/003-astrology-engine.md) closed on 2026-09-16:
+**`skyfield` (MIT)**, so there is no ephemeris licence obligation to carry into
+Phase 7.

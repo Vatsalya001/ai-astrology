@@ -1,72 +1,81 @@
 # Current phase
 
 ```
-Phase: 1 — Authentication & User Profiles
-Gate:  ✅ CLOSED  (16 of 16 gate items + §10, §11, §13 checklists)
+Phase: 2 — Astrology Engine
+Gate:  ✅ CLOSED  (20 of 20 gate items, 8 of 8 Definition-of-Done items)
        Nothing open.
 ```
 
-Evidence for every item: `docs/TESTING-PHASE-1.md`. It records what was *run*, not
-what was read, and it names the guards that were deliberately broken to prove they
-fire.
+Evidence for every item: `docs/TESTING-PHASE-2.md`. It records what was *run*, not
+what was read, and it names the twenty-three guards that were deliberately broken to
+prove they fire.
 
-**The lesson from Phase 0 held again, and harder.** Reading the code said rate
-limiting was complete. Running it found `POST /users/me/challenge` accepting 25 of 25
-calls and sending 25 emails; `GlobalPerIP` declared as "the backstop, applies to every
-request" and wired to nothing; and `go test -tags=integration` reporting `ok` while
-skipping every test because Docker was unavailable. None of that was visible on the
-page. Execute the check.
+**The Phase 0 and Phase 1 lesson held a third time, and this was the worst of the
+three.** Reading the code said the chart API worked. Running it found that the
+containerised `astro-service` had **no ephemeris kernel at all** — the Dockerfile
+copied `app` and not `data` — so every chart request 500'd while the container
+reported healthy, for an entire phase. Nothing caught it because no test had ever
+computed a real chart through the whole stack. The end-to-end suite that task 2.21
+asks for is what found it, on its first run.
 
-## Social sign-in is deferred, not dropped
+Also found only by running it: `ayana up` serving a months-old image, a D9 that was a
+relabelled D1, 819 database round trips per chart, and a data export that never
+mentioned birth profiles or charts.
 
-Google OAuth was built and fully tested in PR 8c, then removed in PR 9a by the
-owner's decision: keep sign-in simple until the product exists, add social login
-at the end. The Phase 1 spec no longer carries it — `PHASE-10-MOBILE.md` does,
-as tasks 10.3a and 10.3b, one §11 security item and two gate items.
+## What Phase 3 inherits
 
-**Restoring it is `git revert` of PR 9a**, not a rewrite. The state-forgery,
-replay, expiry, 16-way-concurrency and unverified-email tests all come back with
-it. Do not rebuild this from scratch when Phase 10 arrives.
+**The chart pipeline is whole.** Birth details → versioned profile → UTC instant from
+real historical tzdata → astro-service → D1 and D9 stored in one transaction with an
+819-node dasha tree → served from storage, including while astro is stopped.
 
-Phase 10 is the right home anyway: Apple requires *Sign in with Apple* wherever
-an app offers a third-party social login, so Google and Apple have to ship
-together once iOS does.
+**Three rules the next phase must not break.**
 
-Sign-in today is email OTP and phone OTP. Both need no third party.
+1. **A chart is a pure function of its inputs.** That is why a stored one is served
+   without an HTTP call and is not "stale". If Phase 3 adds anything time-dependent to
+   a chart, that assumption dies and the caching design dies with it.
 
-## Next: Phase 2 — Astrology Engine
+2. **The transit table has no `user_id`, and must not gain one.** A planet's sign at an
+   instant is the same for everybody; only the house differs, and that is an integer
+   subtraction done at read time. It is what makes Sade Sati answerable during an
+   outage.
 
-Spec: `docs/specs/PHASE-02-ASTROLOGY-ENGINE.md`
+3. **Golden files are frozen, not regenerated.** `scripts/generate_golden.py` refuses to
+   run unless `test_external_reference.py` passes. If a golden file changes and that
+   suite still passes, the change is in chart assembly and a human has to say why.
 
-Entirely a Python phase in `services/astro`. The Go service gains a client, nothing
-more.
+## Numbers measured at the gate
 
-**Read the spec end to end first.** The task list, module layout and golden-file
-strategy are already written; do not redesign them ad hoc.
+| Budget | Measured |
+|---|---|
+| Chart computation < 200 ms | p95 70.6 ms |
+| Go round trip < 350 ms cold | 109–140 ms |
+| Cached read < 10 ms | p95 8.5 ms, max 10.0 ms |
+| Place search < 50 ms p95 | 2.7 ms |
 
-**Carried into Phase 2:**
+The cached read is the one to watch: it is at its budget at the maximum, and Phase 3
+puts a chart on every page load.
 
-- **ADR-003, the Swiss Ephemeris licence, must close before Phase 7** — AGPL versus
-  commercial versus MIT `skyfield`. It is not a Phase 2 blocker, but Phase 2 is where
-  the dependency actually gets chosen, so deciding late means rewriting maths.
-- `astro-service` has no model SDK, no API key and no HTTP client.
-  `tests/test_no_llm_imports.py` fails the build if one appears. Do not add one.
-- `app/core/` stays pure: no I/O, no database, no ambient clock. "Now" is passed in.
-  That purity is what makes golden-file testing possible.
-- Use `Decimal` for dasha arithmetic. Float error accumulates across three levels of
-  subdivision and produces dates wrong by days.
-- **Cross-validate every golden file against an independent reference before freezing
-  it.** A golden file that encodes your own bug makes that bug permanent.
-- The deletion integration test extends with every new user-owned table. Phase 2 adds
-  `birth_profiles` and `charts`; both belong in it before the phase closes.
+## Carried debt
 
-**Carried debt:**
+- Web CSP still has `script-src 'unsafe-inline'` (from Phase 1; blocks a **Phase 5**
+  gate item).
+- No ADR for hand-rolled auth (from Phase 1).
+- `memtest86+` unrun — nine data-corruption events on this machine, all recovered,
+  none explained. Owner action.
+- Production place seeding needs GeoNames' `admin1CodesASCII.txt`, or subdivisions
+  display as codes. The seeder warns; the E2E fixture ships a mapping.
 
-- The web CSP still carries `script-src 'unsafe-inline'`, because Next's App Router
-  cannot hydrate without it and the alternatives cost static rendering or need an ADR.
-  Acceptable while the app renders no untrusted content. **PHASE-05 carries a blocking
-  gate item** to replace it before the chat renders its first model response.
-- This machine has produced **nine** data-corruption events (a Go linker panic, a
-  Turbopack cache checksum mismatch, others in `docs/PROJECT_STATUS.md`). `memtest86+`
-  is still unrun. Before chasing a mysterious build failure, clear the relevant cache
-  and try again.
+## Next: Phase 3 — Kundli UI
+
+Spec: `docs/specs/PHASE-03-KUNDLI-UI.md`
+
+Phase 2 deliberately built **data entry only**. Phase 3 is the visualisation: the North
+and South Indian chart SVGs, the dasha timeline, the PDF worker.
+
+Two things that will decide whether it is any good:
+
+1. **The chart SVG needs per-element `aria-label`s and a visually-hidden table
+   duplicating the data.** An SVG is meaningless to a screen reader otherwise, and this
+   is in the frontend rules already.
+2. **The PDF is an `asynq` worker with `chromedp`, never in the request path.** The
+   queue exists now and the transit refresh is the worked example.
