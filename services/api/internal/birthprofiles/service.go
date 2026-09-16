@@ -193,6 +193,18 @@ func (s *Service) Get(ctx context.Context, userID, profileID uuid.UUID) (Profile
 	return toProfile(row), nil
 }
 
+// Owns reports whether the user owns the profile, and nothing else.
+//
+// It exists so the HTTP ownership middleware can gate a whole subtree
+// without becoming a data source — see httpapi.RequireProfileOwnership.
+// The query is scoped by user_id in SQL, so a foreign profile is
+// indistinguishable from a missing one right down at the row level, not
+// merely in the response.
+func (s *Service) Owns(ctx context.Context, userID, profileID uuid.UUID) error {
+	_, err := s.Get(ctx, userID, profileID)
+	return err
+}
+
 // Versions returns the history behind a profile, newest first.
 func (s *Service) Versions(ctx context.Context, userID, profileID uuid.UUID) ([]Profile, error) {
 	rows, err := s.q.ListBirthProfileVersions(ctx, dbgen.ListBirthProfileVersionsParams{

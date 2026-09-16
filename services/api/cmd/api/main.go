@@ -17,8 +17,10 @@ import (
 	"time"
 
 	"github.com/Vatsalya001/ai-astrology/services/api/internal/auth"
+	"github.com/Vatsalya001/ai-astrology/services/api/internal/birthprofiles"
 	"github.com/Vatsalya001/ai-astrology/services/api/internal/config"
 	"github.com/Vatsalya001/ai-astrology/services/api/internal/httpapi"
+	"github.com/Vatsalya001/ai-astrology/services/api/internal/places"
 	"github.com/Vatsalya001/ai-astrology/services/api/internal/platform/analytics"
 	"github.com/Vatsalya001/ai-astrology/services/api/internal/platform/audit"
 	"github.com/Vatsalya001/ai-astrology/services/api/internal/platform/clients"
@@ -188,6 +190,10 @@ func run() error {
 		WriteError: httpapi.AuthErrorWriter,
 	})
 
+	// ─── Phase 2 ────────────────────────────────────────────────
+	placeService := places.NewService(queries)
+	profileService := birthprofiles.NewService(queries).WithAnalytics(events)
+
 	handler := httpapi.NewRouter(httpapi.Deps{
 		Config:     cfg,
 		DB:         database,
@@ -203,6 +209,11 @@ func run() error {
 		FreshOTP:   freshOTP,
 		Limiter:    limiter,
 		TrustProxy: trustProxy,
+
+		BirthProfiles: birthprofiles.NewHandler(
+			profileService, placeAdapter{placeService}, httpapi.AuthErrorWriter),
+		Places:       places.NewHandler(placeService, httpapi.AuthErrorWriter),
+		ProfileOwner: profileService,
 	})
 
 	srv := &http.Server{
@@ -246,4 +257,25 @@ func run() error {
 
 	log.Info("shutdown complete")
 	return nil
+}
+
+// placeAdapter narrows the places service to what birthprofiles needs.
+//
+// The two packages describe the same row with different structs on
+// purpose: birthprofiles needs four fields and should not acquire an
+// opinion about population ranking or country codes. The adapter lives
+// here, in the composition root, so neither domain imports the other.
+type placeAdapter struct{ svc *places.Service }
+
+func (a placeAdapter) Get(ctx context.Context, id int32) (birthprofiles.Place, error) {
+	place, err := a.svc.Get(ctx, id)
+	if err != nil {
+		return birthprofiles.Place{}, err
+	}
+	return birthprofiles.Place{
+		Name:      place.Name,
+		Latitude:  place.Latitude,
+		Longitude: place.Longitude,
+		Timezone:  place.Timezone,
+	}, nil
 }

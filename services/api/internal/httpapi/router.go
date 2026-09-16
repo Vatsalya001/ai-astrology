@@ -5,7 +5,9 @@ import (
 	"time"
 
 	"github.com/Vatsalya001/ai-astrology/services/api/internal/auth"
+	"github.com/Vatsalya001/ai-astrology/services/api/internal/birthprofiles"
 	"github.com/Vatsalya001/ai-astrology/services/api/internal/config"
+	"github.com/Vatsalya001/ai-astrology/services/api/internal/places"
 	"github.com/Vatsalya001/ai-astrology/services/api/internal/platform/clients"
 	"github.com/Vatsalya001/ai-astrology/services/api/internal/platform/db"
 	"github.com/Vatsalya001/ai-astrology/services/api/internal/platform/redis"
@@ -41,10 +43,20 @@ type Deps struct {
 	Deleter    *users.Deleter
 	Exporter   *users.Exporter
 	FreshOTP   *auth.FreshOTP
+
 	// TrustProxy must match what the auth handler was built with. Both
 	// derive the client IP; if they disagreed, the limiter and the stored
 	// hash would key on different addresses for the same request.
 	TrustProxy bool
+
+	// ─── Phase 2 ────────────────────────────────────────────────
+	// Nil until wired, and nil means the routes are simply not mounted —
+	// a route that exists and 500s is worse than one that 404s.
+	BirthProfiles *birthprofiles.Handler
+	Places        *places.Handler
+	// ProfileOwner gates the chart and transit subtrees. Required
+	// whenever those are mounted; see mountAstrology.
+	ProfileOwner ProfileOwnership
 
 	// Limiter drives the per-IP backstop and the route-specific limits.
 	//
@@ -65,6 +77,34 @@ type Deps struct {
 //	CORS
 //	Timeout      — innermost, bounds the handler itself
 func NewRouter(d Deps) http.Handler {
+	r := newChiRouter(d)
+
+	// otelhttp wraps the whole router: it extracts W3C traceparent from
+	// inbound requests and starts a server span. Outermost so the span
+	// covers every middleware below it, and so TraceID can read the span
+	// ID that otelhttp just established.
+	//
+	// A no-op tracer provider is installed when OTEL_EXPORTER_OTLP_ENDPOINT
+	// is unset, so this costs almost nothing in development.
+	return otelhttp.NewHandler(r, "api",
+		otelhttp.WithSpanNameFormatter(func(_ string, r *http.Request) string {
+			// Method + path pattern, never the raw path: a path can carry
+			// an ID, and high-cardinality span names are useless anyway.
+			if rc := chi.RouteContext(r.Context()); rc != nil && rc.RoutePattern() != "" {
+				return r.Method + " " + rc.RoutePattern()
+			}
+			return r.Method
+		}),
+	)
+}
+
+// newChiRouter builds the route table.
+//
+// Split from NewRouter so the route table can be WALKED — otelhttp's
+// wrapper hides the chi.Routes interface, and the ownership test needs to
+// enumerate every mounted route rather than trust a hand-written list of
+// paths that would go stale the first time somebody adds an endpoint.
+func newChiRouter(d Deps) chi.Router {
 	// A programming error, so it fails at construction. The alternative is
 	// a nil-pointer panic on whichever request first reaches a limited
 	// route — in production, at an unpredictable moment, with a stack
@@ -120,9 +160,9 @@ func NewRouter(d Deps) http.Handler {
 
 		if d.Auth != nil {
 			mountAuth(r, d)
+			mountAstrology(r, d)
 		}
 
-		// Phase 2 mounts /birth-profiles, /charts, /places.
 		// Phase 5 mounts /ai and /conversations.
 	})
 
@@ -134,23 +174,7 @@ func NewRouter(d Deps) http.Handler {
 		WriteError(w, r, http.StatusMethodNotAllowed, CodeBadRequest, "Method not allowed.", nil)
 	})
 
-	// otelhttp wraps the whole router: it extracts W3C traceparent from
-	// inbound requests and starts a server span. Outermost so the span
-	// covers every middleware below it, and so TraceID can read the span
-	// ID that otelhttp just established.
-	//
-	// A no-op tracer provider is installed when OTEL_EXPORTER_OTLP_ENDPOINT
-	// is unset, so this costs almost nothing in development.
-	return otelhttp.NewHandler(r, "api",
-		otelhttp.WithSpanNameFormatter(func(_ string, r *http.Request) string {
-			// Method + path pattern, never the raw path: a path can carry
-			// an ID, and high-cardinality span names are useless anyway.
-			if rc := chi.RouteContext(r.Context()); rc != nil && rc.RoutePattern() != "" {
-				return r.Method + " " + rc.RoutePattern()
-			}
-			return r.Method
-		}),
-	)
+	return r
 }
 
 // probers lists every dependency the health endpoint reports on.
@@ -280,6 +304,60 @@ func mountAuth(r chi.Router, d Deps) {
 		if d.Exporter != nil && d.FreshOTP != nil {
 			r.Get("/me/export", d.Users.Export(d.Exporter, d.FreshOTP))
 		}
+	})
+}
+
+// mountAstrology registers the Phase 2 routes.
+//
+// Everything here is behind Authenticate, including the place search.
+// That is a decision rather than an oversight: onboarding happens after
+// sign-in in this product, so no legitimate anonymous caller needs the
+// gazetteer, and leaving it open would publish a 200k-row dataset behind
+// a prefix-scan endpoint for anyone who felt like mirroring it.
+func mountAstrology(r chi.Router, d Deps) {
+	if d.AuthIssuer == nil {
+		return
+	}
+	authenticate := auth.Authenticate(d.AuthIssuer, AuthMiddlewareErrorWriter)
+
+	if d.Places != nil {
+		r.Group(func(r chi.Router) {
+			r.Use(authenticate)
+			r.Get("/places/search", d.Places.Search)
+		})
+	}
+
+	if d.BirthProfiles == nil {
+		return
+	}
+	// A programming error, so it fails at construction rather than by
+	// serving somebody else's birth profile on the first request.
+	if d.ProfileOwner == nil {
+		panic("httpapi: Deps.ProfileOwner is required when the birth-profile routes are mounted")
+	}
+
+	r.Route("/birth-profiles", func(r chi.Router) {
+		// Mounted as a group rather than per-route, so a new endpoint
+		// cannot be added outside the guard by forgetting a line.
+		r.Use(authenticate)
+
+		// Collection routes. No {id}, so nothing to own: both are scoped
+		// to the caller by the service.
+		r.Post("/", d.BirthProfiles.Create)
+		r.Get("/", d.BirthProfiles.List)
+
+		// Everything addressing a specific profile goes behind the
+		// ownership check, as a group. The handlers below read the
+		// verified ID out of the request context and never out of the
+		// URL, so none of them can be reached with an unchecked one.
+		r.Group(func(r chi.Router) {
+			r.Use(RequireProfileOwnership(d.ProfileOwner, "id"))
+
+			r.Get("/{id}", d.BirthProfiles.Get)
+			r.Patch("/{id}", d.BirthProfiles.Update)
+			r.Delete("/{id}", d.BirthProfiles.Delete)
+			r.Get("/{id}/versions", d.BirthProfiles.Versions)
+		})
 	})
 }
 
