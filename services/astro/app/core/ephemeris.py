@@ -35,7 +35,7 @@ from skyfield.jpllib import SpiceKernel
 from skyfield.positionlib import Barycentric
 from skyfield.timelib import Time, Timescale
 
-from app.core.constants import BODIES, Planet, normalise_longitude
+from app.core.constants import BODIES, NODES, Planet, normalise_longitude
 
 #: Skyfield's name for each graha's target in the kernel.
 #:
@@ -96,6 +96,14 @@ class EphemerisProvider(Protocol):
         """Tropical positions for all nine grahas at an instant."""
         ...
 
+    def position_of(self, planet: Planet, t: Time) -> Position:
+        """One graha, without computing the others."""
+        ...
+
+    def longitude_of(self, planet: Planet, t: Time) -> float:
+        """Just the tropical longitude, without deriving speed."""
+        ...
+
 
 class SkyfieldEphemeris:
     """Positions from a JPL kernel via skyfield."""
@@ -118,6 +126,32 @@ class SkyfieldEphemeris:
     def kernel(self) -> SpiceKernel:
         """The loaded kernel, for callers that need their own geometry."""
         return self._kernel
+
+    def longitude_of(self, planet: Planet, t: Time) -> float:
+        """Just the tropical longitude — no speed, no latitude.
+
+        `position_of` derives daily motion by a central difference, which
+        costs two EXTRA ephemeris evaluations. The Sade Sati scan walks
+        decades asking only which sign Saturn is in, and never looks at
+        its speed, so paying for that is three times the work for nothing.
+        """
+        if planet in NODES:
+            rahu, ketu = self._nodes(t)
+            return rahu.longitude if planet is Planet.RAHU else ketu.longitude
+        return normalise_longitude(self._tropical_longitude(planet, t))
+
+    def position_of(self, planet: Planet, t: Time) -> Position:
+        """One graha, without computing the other eight.
+
+        The Sade Sati scan walks decades in five-day steps looking only
+        at Saturn. Going through `positions` made that nine times more
+        expensive than it needed to be — six minutes for the transit
+        suite — and the spec budgets 200ms for a whole chart.
+        """
+        if planet in NODES:
+            rahu, ketu = self._nodes(t)
+            return rahu if planet is Planet.RAHU else ketu
+        return self._observe(self._earth.at(t), planet, t)
 
     def positions(self, t: Time) -> dict[Planet, Position]:
         observer = self._earth.at(t)
