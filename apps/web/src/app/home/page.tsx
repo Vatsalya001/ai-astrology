@@ -4,64 +4,105 @@ import Link from 'next/link'
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 
+import { SadeSatiIndicator } from '@/components/chart/SadeSatiIndicator'
+import { AskBox } from '@/components/home/AskBox'
+import { CurrentPeriodCard } from '@/components/home/CurrentPeriodCard'
+import { TodayCard } from '@/components/home/TodayCard'
 import { LoadError } from '@/components/LoadError'
 import { Wordmark } from '@/components/Logo'
-import { Badge, Panel, SectionLabel } from '@/components/ui'
+import { ProfileSwitcher } from '@/components/ProfileSwitcher'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
+import { api } from '@/lib/api'
+import {
+  astrologyApi,
+  type BirthProfile,
+  type CurrentDashas,
+  type NatalTransits,
+} from '@/lib/astrology-api'
+import { resetAnalytics, track } from '@/lib/analytics'
+import { useLocale } from '@/lib/i18n/context'
+import { resolveProfile, useSelectedProfile } from '@/lib/profile-context'
+import { useTimeOfDay } from '@/lib/time-of-day'
 import { useRequireAuth } from '@/lib/use-require-auth'
 import { usersApi, type Profile } from '@/lib/users-api'
-import { useLocale } from '@/lib/i18n/context'
-import { resetAnalytics, track } from '@/lib/analytics'
+
+type State = 'loading' | 'ready' | 'error'
 
 /**
- * The authenticated shell.
+ * The dashboard.
  *
- * Phase 3 fills this with the chart. For now it proves the loop closes:
- * a signed-in user lands somewhere that knows who they are, and can sign
- * out again.
+ * ── Every card degrades on its own ──
+ *
+ * Four sources feed this screen: the user, the profile list, the current
+ * dasha periods and today's transits. Only the first two are required;
+ * the other two are `Promise.allSettled` because a transit refresh that
+ * has not run yet must not blank the dasha card, and a chart with no
+ * birth time must not blank the sky.
+ *
+ * Written with `Promise.all` first, which made the whole dashboard one
+ * failure away from an error page — and the most likely failure, a 503
+ * from transits before the worker's first run, is the one a new user
+ * meets on their very first visit.
  */
 export default function HomePage() {
   const router = useRouter()
   const onUnauthenticated = useRequireAuth()
-  const { t, fill } = useLocale()
+  const { t } = useLocale()
+  const { selectedId } = useSelectedProfile()
+  const timeOfDay = useTimeOfDay()
+
   const [profile, setProfile] = useState<Profile | null>(null)
-  // 'error' was declared here from the start and nothing ever set it —
-  // the same declared-never-populated pattern that hid the unpopulated
-  // `current` flag on the sessions list and `Identities` in the export.
-  // It is reachable now.
-  const [state, setState] = useState<'loading' | 'ready' | 'error'>('loading')
-  // Bumped by Retry; the effect depends on it, so the fetch re-runs.
+  const [profiles, setProfiles] = useState<BirthProfile[]>([])
+  const [dashas, setDashas] = useState<CurrentDashas | null>(null)
+  const [transits, setTransits] = useState<NatalTransits | null>(null)
+  const [aiEnabled, setAiEnabled] = useState(false)
+  const [state, setState] = useState<State>('loading')
   const [attempt, setAttempt] = useState(0)
 
   useEffect(() => {
     let cancelled = false
 
-    usersApi
-      .me()
-      .then((p) => {
+    Promise.all([usersApi.me(), astrologyApi.listProfiles()])
+      .then(async ([me, { birth_profiles: list }]) => {
         if (cancelled) return
-        setProfile(p)
+        setProfile(me)
+        setProfiles(list)
+
+        const chosen = resolveProfile(list, selectedId)
+
+        // Settled, not all: each of these is allowed to be missing, and
+        // the flag call is the least important thing on the page.
+        const [meta, current, sky] = await Promise.allSettled([
+          api.meta(),
+          chosen ? astrologyApi.currentDashas(chosen.id) : Promise.reject(new Error('no profile')),
+          chosen ? astrologyApi.transits(chosen.id) : Promise.reject(new Error('no profile')),
+        ])
+        if (cancelled) return
+
+        setAiEnabled(meta.status === 'fulfilled' && meta.value.features.ai_chat === true)
+        setDashas(current.status === 'fulfilled' ? current.value : null)
+        setTransits(sky.status === 'fulfilled' ? sky.value : null)
         setState('ready')
       })
       .catch((err: unknown) => {
         if (cancelled) return
-        // Only a real "signed out" redirects. A dropped connection or a
-        // 500 says nothing about the session, and throwing the user to
-        // /auth for one tells them they have been signed out when they
-        // have not.
+        // Only a real "signed out" redirects. A dropped connection says
+        // nothing about the session.
         if (!onUnauthenticated(err)) setState('error')
       })
 
     return () => {
       cancelled = true
     }
-  }, [onUnauthenticated, attempt])
+  }, [onUnauthenticated, attempt, selectedId])
+
+  const moonSign = transits?.transits.find((p) => p.planet === 'Moon')?.sign ?? null
 
   return (
     <>
       <header className="border-b border-border/60">
-        <div className="mx-auto flex max-w-4xl items-center justify-between px-6 py-5">
+        <div className="mx-auto flex max-w-2xl items-center justify-between px-4 py-4 sm:px-6">
           <Wordmark />
           <nav className="flex items-center gap-2">
             <Link
@@ -87,43 +128,80 @@ export default function HomePage() {
         </div>
       </header>
 
-      <main id="main" className="mx-auto max-w-4xl px-6 py-14">
-        {state === 'error' ? (
-          <LoadError onRetry={() => setAttempt((n) => n + 1)} />
-        ) : state === 'loading' ? (
-          <div aria-busy="true" aria-live="polite">
-            <span className="sr-only">{t.home.loading}</span>
-            <Skeleton className="h-10 w-64" />
-            <Skeleton className="mt-4 h-4 w-full max-w-md" />
-            <Skeleton className="mt-8 h-40 w-full" />
-          </div>
-        ) : (
-          <>
-            <SectionLabel>{t.home.sectionLabel}</SectionLabel>
-            <h1 className="font-serif text-4xl tracking-tight">
-              {profile?.name
-                ? fill(t.home.welcomeNamed, { name: profile.name })
-                : t.home.welcome}
-            </h1>
-            <p className="mt-3 max-w-xl text-sm leading-relaxed text-ink-muted">
-              {t.home.body}
-            </p>
+      <main id="main" className="mx-auto max-w-2xl space-y-4 px-4 py-8 sm:px-6">
+        {state === 'error' && <LoadError onRetry={() => setAttempt((n) => n + 1)} />}
 
-            <Panel className="mt-8">
-              <div className="mb-4 flex items-center gap-2.5">
-                <Badge tone="accent">Phase 2</Badge>
-                <h2 className="font-serif text-xl">{t.home.chartTitle}</h2>
-              </div>
-              <p className="text-sm leading-relaxed text-ink-muted">
-                {t.home.chartBody}
-              </p>
-              <Button disabled className="mt-5">
-                {t.home.chartCta}
+        {state === 'loading' && (
+          <div aria-busy="true" aria-live="polite" className="space-y-4">
+            <span className="sr-only">{t.home.loading}</span>
+            <Skeleton className="h-9 w-56" />
+            <Skeleton className="h-24 w-full" />
+            <Skeleton className="h-32 w-full" />
+            <Skeleton className="h-28 w-full" />
+          </div>
+        )}
+
+        {state === 'ready' && (
+          <>
+            <div className="flex flex-wrap items-baseline justify-between gap-3">
+              {/*
+                The greeting drops the time of day rather than guessing
+                one, on the server and for anybody whose clock it cannot
+                read. "Good morning" shown at midnight is worse than
+                "Hello".
+              */}
+              <h1 className="font-serif text-2xl tracking-tight">
+                {greeting(timeOfDay, profile?.name)}
+              </h1>
+              <ProfileSwitcher profiles={profiles} />
+            </div>
+
+            <TodayCard moonSign={moonSign} />
+
+            <AskBox enabled={aiEnabled} />
+
+            {dashas && <CurrentPeriodCard current={dashas} />}
+
+            {transits && <SadeSatiIndicator status={transits.sade_sati} />}
+
+            <div className="flex flex-wrap gap-2 pt-2">
+              <Button asChild>
+                <Link href="/kundli/planets">View my full Kundli</Link>
               </Button>
-            </Panel>
+              {/*
+                Disabled, not hidden. Same reasoning as the ask box: the
+                shape of the dashboard is settled now so Phase 8 ships a
+                marketplace rather than a marketplace plus a navigation
+                redesign.
+              */}
+              <Button variant="secondary" disabled>
+                Talk to an astrologer
+              </Button>
+            </div>
           </>
         )}
       </main>
     </>
   )
+}
+
+/**
+ * `Good morning, Priya` — or `Hello, Priya` when the clock is unknown.
+ *
+ * Both halves are optional and both absences are real: the time of day
+ * is null on the server, and the name is null for somebody who skipped
+ * it during onboarding. Four combinations, none of which may render a
+ * stray comma.
+ */
+export function greeting(time: ReturnType<typeof useTimeOfDay>, name?: string | null): string {
+  const opening =
+    time === 'morning'
+      ? 'Good morning'
+      : time === 'afternoon'
+        ? 'Good afternoon'
+        : time === 'evening'
+          ? 'Good evening'
+          : 'Hello'
+
+  return name?.trim() ? `${opening}, ${name.trim()}` : opening
 }
