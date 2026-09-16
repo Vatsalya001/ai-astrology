@@ -3,6 +3,7 @@ import { Inter, JetBrains_Mono, Cormorant_Garamond } from 'next/font/google'
 import '@/styles/globals.css'
 
 import { LocaleProvider } from '@/lib/i18n/context'
+import { ProfileProvider } from '@/lib/profile-context'
 
 /**
  * next/font self-hosts these at build time, so there is no request to
@@ -63,7 +64,16 @@ export default function RootLayout({
         >
           Skip to content
         </a>
-        <LocaleProvider>{children}</LocaleProvider>
+        {/*
+          ProfileProvider inside LocaleProvider: the switcher's own copy
+          comes from the dictionary, and nothing about which chart is
+          selected affects which language it is shown in. Both render
+          their server snapshot first — English, no selection — and both
+          correct during hydration.
+        */}
+        <LocaleProvider>
+          <ProfileProvider>{children}</ProfileProvider>
+        </LocaleProvider>
       </body>
     </html>
   )

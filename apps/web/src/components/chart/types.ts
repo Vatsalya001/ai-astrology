@@ -48,6 +48,21 @@ export interface AscendantPlacement {
   pada: number
 }
 
+export interface YogaPlacement {
+  name: string
+  /**
+   * `strong` or `moderate`. Never a number.
+   *
+   * astro-service is explicit about why: "a score would imply a
+   * precision the tradition does not have and the product could not
+   * defend". The UI must not reintroduce one — a five-star rating or a
+   * percentage is a number wearing a costume.
+   */
+  strength: string
+  involvedPlanets: string[]
+  involvedHouses: number[]
+}
+
 export interface ChartData {
   /**
    * Null when the birth time is unknown.
@@ -61,6 +76,15 @@ export interface ChartData {
   ascendant: AscendantPlacement | null
   houses: HousePlacement[] | null
   planets: PlanetPlacement[]
+  /**
+   * Empty is a real answer.
+   *
+   * Most charts have a few; some have none. An empty array means "the
+   * engine looked and found none", which is different from the absent
+   * key a divisional chart produces — and the screen says so rather
+   * than rendering nothing.
+   */
+  yogas: YogaPlacement[]
 }
 
 /**

@@ -1,6 +1,12 @@
 import type { HouseNumber, SignIndex } from '@ayana/astrology-geometry'
 
-import type { AscendantPlacement, ChartData, HousePlacement, PlanetPlacement } from './types'
+import type {
+  AscendantPlacement,
+  ChartData,
+  HousePlacement,
+  PlanetPlacement,
+  YogaPlacement,
+} from './types'
 
 /**
  * `chart_data` from the API, into the shape the renderer takes.
@@ -42,7 +48,49 @@ export function parseChartData(raw: unknown): ChartData | null {
     ascendant: parseAscendant(raw.ascendant),
     houses: parseHouses(raw.houses),
     planets: parsedPlanets,
+    yogas: parseYogas(raw.yogas),
   }
+}
+
+/**
+ * Missing and empty both become an empty list, deliberately.
+ *
+ * A divisional chart carries no yogas at all — they are read from the
+ * rasi — so the key is absent there, while a rasi with none present has
+ * `[]`. Both mean "nothing to show" to this screen, and distinguishing
+ * them would push a decision onto every caller that none of them can
+ * act on differently.
+ */
+function parseYogas(raw: unknown): YogaPlacement[] {
+  if (!Array.isArray(raw)) return []
+
+  const yogas: YogaPlacement[] = []
+  for (const entry of raw) {
+    if (!isRecord(entry)) continue
+    const name = str(entry.name)
+    if (name === null) continue
+
+    yogas.push({
+      name,
+      // Anything the engine did not send reads as `moderate` rather than
+      // as `strong`: overstating a combination is the worse direction to
+      // be wrong in.
+      strength: str(entry.strength) ?? 'moderate',
+      involvedPlanets: stringList(entry.involved_planets),
+      involvedHouses: numberList(entry.involved_houses),
+    })
+  }
+  return yogas
+}
+
+function stringList(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((v): v is string => typeof v === 'string') : []
+}
+
+function numberList(value: unknown): number[] {
+  return Array.isArray(value)
+    ? value.filter((v): v is number => typeof v === 'number' && Number.isInteger(v))
+    : []
 }
 
 function parsePlanet(raw: unknown): PlanetPlacement | null {

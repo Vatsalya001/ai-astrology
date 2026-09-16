@@ -1,4 +1,5 @@
 export { GLOSSARY, GLOSSARY_KEYS, type GlossaryKey } from './glossary'
+export { YOGAS, YOGA_KEYS, describeYoga, hasYoga, type YogaKey } from './yogas'
 export {
   PREDICTIVE_PHRASES,
   SENSITIVE_DOMAINS,
