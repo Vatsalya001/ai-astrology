@@ -178,6 +178,11 @@
           "birth": {
             "$ref": "#/components/schemas/BirthData"
           },
+          "include_dasamsa": {
+            "default": true,
+            "title": "Include Dasamsa",
+            "type": "boolean"
+          },
           "include_dashas": {
             "default": true,
             "title": "Include Dashas",
@@ -207,6 +212,16 @@
             "anyOf": [
               {
                 "$ref": "#/components/schemas/AscendantPosition"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "dasamsa": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DivisionalChart"
               },
               {
                 "type": "null"

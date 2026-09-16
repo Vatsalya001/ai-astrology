@@ -32,7 +32,7 @@ import pytest
 from skyfield.timelib import Timescale
 
 from app.core.ayanamsa import AyanamsaCalculator, AyanamsaSystem
-from app.core.chart import compute_navamsa, compute_rasi
+from app.core.chart import compute_dasamsa, compute_navamsa, compute_rasi
 from app.core.constants import Planet
 from app.core.dasha import build_vimshottari
 from app.core.ephemeris import SkyfieldEphemeris
@@ -151,6 +151,7 @@ def test_chart_matches_its_golden_file(
     assert _round(ayanamsa.at_time(t, AyanamsaSystem.LAHIRI)) == expected["ayanamsa_value"]
     _assert_rasi(rasi, expected["rasi"], profile["id"], "rasi")
     _assert_rasi(compute_navamsa(rasi), expected["navamsa"], profile["id"], "navamsa")
+    _assert_rasi(compute_dasamsa(rasi), expected["dasamsa"], profile["id"], "dasamsa")
 
 
 @pytest.mark.parametrize("profile", PROFILES, ids=IDS)

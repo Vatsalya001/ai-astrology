@@ -743,6 +743,13 @@ const stubChartJSON = `{
                  "pada":3,"is_retrograde":false,"is_combust":false,
                  "dignity":"exalted","speed":0.98}]
   },
+  "dasamsa": {
+    "ascendant": null, "houses": null,
+    "planets": [{"planet":"Sun","longitude":190.0,"sign":"Libra","sign_index":6,
+                 "degree":10.0,"house":1,"nakshatra":"Swati","nakshatra_index":14,
+                 "pada":1,"is_retrograde":false,"is_combust":false,
+                 "dignity":"neutral","speed":0.98}]
+  },
   "summary": {"sun_sign":"Pisces","moon_sign":"Capricorn","ascendant_sign":"Aries",
               "moon_nakshatra":"Shravana","moon_nakshatra_pada":2},
   "dashas": [
@@ -942,19 +949,21 @@ func TestTheChartTypeIsAnAllowlist(t *testing.T) {
 	defer cleanup()
 	alice := h.token(t, h.alice)
 
-	for _, chartType := range []string{"D1", "D9", "d1"} {
+	// D10 is a real divisional chart as of Phase 3 — the gate requires
+	// "D1, D9 and D10 all viewable".
+	for _, chartType := range []string{"D1", "D9", "D10", "d1", "d10"} {
 		rec := h.do(t, http.MethodGet,
 			"/api/v1/charts/"+h.profile.String()+"?type="+url.QueryEscape(chartType), alice, "")
 		if rec.Code != http.StatusOK {
 			t.Fatalf("type=%s returned %d: %s", chartType, rec.Code, rec.Body.String())
 		}
 	}
-	// D10 is a real divisional chart that Phase 2 does not compute, so it
+	// D60 is a real divisional chart this project does not compute, so it
 	// must be refused rather than cached as an empty D1. The last one is
 	// not expected to reach SQL — sqlc parameterises everything — but a
 	// value that would be catastrophic if it did belongs in the allowlist
 	// test rather than in a comment.
-	for _, chartType := range []string{"D10", "D60", "'; DROP TABLE charts; --"} {
+	for _, chartType := range []string{"D60", "D2", "'; DROP TABLE charts; --"} {
 		rec := h.do(t, http.MethodGet,
 			"/api/v1/charts/"+h.profile.String()+"?type="+url.QueryEscape(chartType), alice, "")
 		if rec.Code != http.StatusBadRequest {

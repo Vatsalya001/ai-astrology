@@ -46,7 +46,7 @@ func (h *Handler) WithClock(now func() time.Time) *Handler {
 	return h
 }
 
-// ─── GET /charts/{birthProfileId}?type=D1|D9 ─────────────────────────
+// ─── GET /charts/{birthProfileId}?type=D1|D9|D10 ─────────────────────
 
 // Get serves a chart, and keeps serving it while astro-service is down.
 //
@@ -259,8 +259,10 @@ func (h *Handler) parseChartType(w http.ResponseWriter, r *http.Request) (string
 		return ChartTypeRasi, true
 	case ChartTypeNavamsa:
 		return ChartTypeNavamsa, true
+	case ChartTypeDasamsa:
+		return ChartTypeDasamsa, true
 	default:
-		h.badRequest(w, r, "type must be D1 or D9.")
+		h.badRequest(w, r, "type must be D1, D9 or D10.")
 		return "", false
 	}
 }

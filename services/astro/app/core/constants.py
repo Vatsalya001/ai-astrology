@@ -294,6 +294,12 @@ def nakshatra_index(longitude: float) -> int:
 #: drift apart.
 PADA_COUNT: Final = NAKSHATRA_COUNT * PADAS_PER_NAKSHATRA
 
+# Ten dasamsas per sign, 120 around the circle. Named because 120 also
+# happens to be the Vimshottari cycle in years, and an unexplained 120
+# in this file would read as that.
+DASAMSAS_PER_SIGN: Final = 10
+DASAMSA_COUNT: Final = SIGN_COUNT * DASAMSAS_PER_SIGN
+
 
 def pada(longitude: float) -> int:
     """Which quarter of the nakshatra, 1-4."""

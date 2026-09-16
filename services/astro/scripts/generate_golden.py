@@ -33,7 +33,7 @@ from zoneinfo import ZoneInfo
 import skyfield.api as skyfield_api
 
 from app.core.ayanamsa import AyanamsaCalculator, AyanamsaSystem
-from app.core.chart import Rasi, compute_navamsa, compute_rasi
+from app.core.chart import Rasi, compute_dasamsa, compute_navamsa, compute_rasi
 from app.core.constants import Planet
 from app.core.dasha import build_vimshottari
 from app.core.ephemeris import SkyfieldEphemeris
@@ -182,6 +182,7 @@ def main() -> None:
             system=AyanamsaSystem.LAHIRI,
         )
         navamsa = compute_navamsa(rasi)
+        dasamsa = compute_dasamsa(rasi)
 
         directory = EXPECTED / profile["id"]
         directory.mkdir(parents=True, exist_ok=True)
@@ -195,6 +196,7 @@ def main() -> None:
             "ayanamsa_value": _round(ayanamsa.at_time(t, AyanamsaSystem.LAHIRI)),
             "rasi": rasi_to_json(rasi),
             "navamsa": rasi_to_json(navamsa),
+            "dasamsa": rasi_to_json(dasamsa),
         }
         (directory / "expected_d1.json").write_text(
             json.dumps(d1, indent=2) + "\n", encoding="utf-8"
