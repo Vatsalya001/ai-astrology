@@ -25,6 +25,25 @@ COPY pyproject.toml uv.lock ./
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-install-project --no-dev
 
+# ─── The ephemeris kernel ────────────────────────────────────────────
+#
+# Before the application code, because de421.bsp changes approximately
+# never and the source changes constantly — this way a code edit does
+# not re-copy 17 MB.
+#
+# It MUST be in the image. This service never downloads at runtime: it
+# has no HTTP client by design (ADR-001), and an ephemeris fetched at
+# boot would make chart computation depend on a network this service is
+# not allowed to reach.
+#
+# Its absence was invisible for an entire phase. The container starts,
+# answers /health, and passes every compose health check — it only fails
+# on the first request that actually needs a planet, with
+# "FileNotFoundError: ephemeris kernel missing at /app/data/de421.bsp".
+# Nothing caught it until an end-to-end test computed a real chart,
+# which is the whole argument for having one.
+COPY data ./data
+
 # ─── Application ─────────────────────────────────────────────────────
 COPY app ./app
 RUN --mount=type=cache,target=/root/.cache/uv \

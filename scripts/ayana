@@ -154,7 +154,18 @@ cmd_up() {
   #    docker-compose.yml, which is what makes step 3 safe: the API
   #    exits rather than retrying if Postgres is not accepting yet.
   say "Infrastructure"
-  docker compose up -d --wait > "$RUN_DIR/compose.log" 2>&1 \
+  # --build, not just up.
+  #
+  # astro-service and ai-service are built into their images with no
+  # source mount, so `docker compose up` happily starts a months-old
+  # image and every health check passes — the container is running, it
+  # is simply running the wrong code. That cost an afternoon: the whole
+  # Phase 2 chart API 404'd locally while the source had been there for
+  # days, and the stack reported six green ticks throughout.
+  #
+  # Docker's layer cache makes this close to free when nothing changed.
+  # CI never hit it because a fresh runner has no image to be stale.
+  docker compose up -d --build --wait > "$RUN_DIR/compose.log" 2>&1 \
     || { tail -20 "$RUN_DIR/compose.log"; die "docker compose failed"; }
 
   while read -r name status; do
@@ -192,6 +203,27 @@ cmd_up() {
       tail -10 "$RUN_DIR/migrate.log"
       die "migrations failed — see $RUN_DIR/migrate.log"
     fi
+  fi
+
+  # 3b. Places
+  #
+  # The birth-place search is unusable against an empty table, which
+  # makes the onboarding flow untestable end to end — the last step has
+  # nothing to select. Twenty hand-picked rows, not the 30 MB GeoNames
+  # dump: see tests/fixtures/places/README.md for why, and for how to
+  # load the real dataset.
+  #
+  # Idempotent by the query's ON CONFLICT, so restarting the stack does
+  # not duplicate anything.
+  say "Places"
+  if (cd services/api && go run ./cmd/seed-places \
+        --file ../../tests/fixtures/places/cities-e2e.txt \
+        --admin1 ../../tests/fixtures/places/admin1-e2e.txt) \
+        > "$RUN_DIR/seed-places.log" 2>&1; then
+    ok "$(grep -oE 'places=[0-9]+' "$RUN_DIR/seed-places.log" | tail -1 || echo 'places seeded')"
+  else
+    tail -10 "$RUN_DIR/seed-places.log"
+    die "could not seed places — see $RUN_DIR/seed-places.log"
   fi
 
   # 4. Go API

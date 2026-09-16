@@ -52,6 +52,8 @@ const (
 
 func main() {
 	file := flag.String("file", "", "path to the GeoNames cities dump (tab-separated)")
+	admin1File := flag.String("admin1", "",
+		"path to GeoNames admin1CodesASCII.txt; without it, subdivisions are stored as codes")
 	batchSize := flag.Int("batch", 1000, "rows per progress report")
 	flag.Parse()
 
@@ -77,7 +79,23 @@ func main() {
 	}
 	defer pool.Close()
 
-	imported, skipped, err := Import(ctx, dbgen.New(pool), *file, *batchSize, logger)
+	// GeoNames stores the first-level subdivision as a CODE — Rajasthan
+	// is "24" — and the cities dump carries nothing else. Without the
+	// companion file, the place search offers users "Jaipur, 24, IN",
+	// which tells them nothing and makes the two Jaipurs
+	// indistinguishable in exactly the case the search exists to solve.
+	admin1, err := loadAdmin1Names(*admin1File)
+	if err != nil {
+		logger.Error("load admin1 names", slog.Any("err", err))
+		os.Exit(1)
+	}
+	if len(admin1) == 0 {
+		logger.Warn("no admin1 name mapping supplied; subdivisions will display as codes",
+			slog.String("hint",
+				"curl -O https://download.geonames.org/export/dump/admin1CodesASCII.txt"))
+	}
+
+	imported, skipped, err := Import(ctx, dbgen.New(pool), *file, admin1, *batchSize, logger)
 	if err != nil {
 		logger.Error("import failed", slog.Any("err", err))
 		os.Exit(1)
@@ -95,6 +113,7 @@ func Import(
 	ctx context.Context,
 	q dbgen.Querier,
 	path string,
+	admin1 map[string]string,
 	batchSize int,
 	logger *slog.Logger,
 ) (imported int, skipped int, err error) {
@@ -114,7 +133,7 @@ func Import(
 	started := time.Now()
 
 	for line := 1; scanner.Scan(); line++ {
-		params, parseErr := parseLine(scanner.Text())
+		params, parseErr := parseLine(scanner.Text(), admin1)
 		if parseErr != nil {
 			skipped++
 			// Logged individually at debug; a malformed row is normal in a
@@ -149,7 +168,7 @@ func Import(
 	return imported, skipped, nil
 }
 
-func parseLine(line string) (dbgen.UpsertPlaceParams, error) {
+func parseLine(line string, admin1Names map[string]string) (dbgen.UpsertPlaceParams, error) {
 	fields := strings.Split(line, "\t")
 	if len(fields) < expectedColumns {
 		return dbgen.UpsertPlaceParams{},
@@ -189,8 +208,17 @@ func parseLine(line string) (dbgen.UpsertPlaceParams, error) {
 		return dbgen.UpsertPlaceParams{}, errors.New("no timezone")
 	}
 
+	// Resolve the subdivision code to its name when a mapping is
+	// available, and fall back to the raw code when it is not. Falling
+	// back rather than failing is deliberate: a missing mapping makes
+	// labels uglier, and refusing the whole import over it would make
+	// the search empty, which is worse.
 	var admin1 *string
-	if value := strings.TrimSpace(fields[colAdmin1]); value != "" {
+	if code := strings.TrimSpace(fields[colAdmin1]); code != "" {
+		value := code
+		if name, ok := admin1Names[fields[colCountry]+"."+code]; ok {
+			value = name
+		}
 		admin1 = &value
 	}
 
@@ -205,4 +233,53 @@ func parseLine(line string) (dbgen.UpsertPlaceParams, error) {
 		Timezone:    timezone,
 		Population:  int32(population),
 	}, nil
+}
+
+// loadAdmin1Names reads GeoNames' admin1CodesASCII.txt.
+//
+// Four tab-separated columns: "IN.24", "Rajasthan", "Rajasthan",
+// 1258899. The key is already "CC.code", which is exactly how the cities
+// dump identifies a subdivision, so no assembly is needed.
+//
+// An empty path returns an empty map rather than an error. The mapping
+// is genuinely optional — without it place labels carry codes, which is
+// ugly but works — and making it mandatory would mean a second 100 KB
+// download before anyone can seed anything.
+func loadAdmin1Names(path string) (map[string]string, error) {
+	if path == "" {
+		return map[string]string{}, nil
+	}
+
+	handle, err := os.Open(path)
+	if err != nil {
+		return nil, fmt.Errorf("open %s: %w", path, err)
+	}
+	defer func() { _ = handle.Close() }()
+
+	names := make(map[string]string, 4000)
+	scanner := bufio.NewScanner(handle)
+	scanner.Buffer(make([]byte, 0, 1<<16), 1<<16)
+
+	for scanner.Scan() {
+		fields := strings.Split(scanner.Text(), "\t")
+		if len(fields) < 2 {
+			continue
+		}
+		code := strings.TrimSpace(fields[0])
+		name := strings.TrimSpace(fields[1])
+		if code == "" || name == "" {
+			continue
+		}
+		names[code] = name
+	}
+
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("read %s: %w", path, err)
+	}
+	// A file that parsed to nothing is a wrong file, not an empty one.
+	// Reporting success here would silently leave every label as a code.
+	if len(names) == 0 {
+		return nil, fmt.Errorf("%s produced no admin1 names; is it admin1CodesASCII.txt?", path)
+	}
+	return names, nil
 }

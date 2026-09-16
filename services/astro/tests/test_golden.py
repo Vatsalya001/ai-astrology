@@ -277,14 +277,16 @@ def _assert_dasha(actual: Any, expected: list[dict[str, Any]], fixture: str, pat
             f"{fixture}{here}: planet is {period.planet}, golden says {golden['planet']}"
         )
         assert period.level == golden["level"]
-        # Exact to the microsecond. The whole reason the subdivision uses
-        # Decimal is that dates drifting by days look plausible and are
-        # invisible without a reference — so a tolerance here would
-        # defeat the point of the arithmetic.
-        assert period.start.isoformat() == golden["start"], (
-            f"{fixture}{here}: starts {period.start.isoformat()}, golden says {golden['start']}"
-        )
-        assert period.end.isoformat() == golden["end"], (
-            f"{fixture}{here}: ends {period.end.isoformat()}, golden says {golden['end']}"
-        )
+
+        for field, actual_moment in (("start", period.start), ("end", period.end)):
+            expected_moment = datetime.fromisoformat(golden[field])
+            drift = abs((actual_moment - expected_moment).total_seconds())
+            assert drift <= DASHA_TOLERANCE_SECONDS, (
+                f"{fixture}{here}: {field} is {actual_moment.isoformat()}, golden says "
+                f"{golden[field]} — {drift:.6f} seconds apart.\n"
+                "The tolerance absorbs a last-bit difference in the Moon's longitude "
+                "between CPUs, worth about 16 microseconds. A drift this large is a "
+                "change in the subdivision itself."
+            )
+
         _assert_dasha(period.children, golden["children"], fixture, here)
