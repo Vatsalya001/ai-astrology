@@ -6,6 +6,7 @@
         "properties": {
           "degree": {
             "exclusiveMaximum": 30.0,
+            "format": "double",
             "minimum": 0.0,
             "title": "Degree",
             "type": "number"
@@ -13,6 +14,7 @@
           "longitude": {
             "description": "Sidereal ecliptic longitude",
             "exclusiveMaximum": 360.0,
+            "format": "double",
             "minimum": 0.0,
             "title": "Longitude",
             "type": "number"
@@ -71,12 +73,14 @@
             "type": "string"
           },
           "latitude": {
+            "format": "double",
             "maximum": 90.0,
             "minimum": -90.0,
             "title": "Latitude",
             "type": "number"
           },
           "longitude": {
+            "format": "double",
             "maximum": 180.0,
             "minimum": -180.0,
             "title": "Longitude",
@@ -119,6 +123,7 @@
             "type": "string"
           },
           "ayanamsa_value": {
+            "format": "double",
             "title": "Ayanamsa Value",
             "type": "number"
           },
@@ -380,6 +385,7 @@
           "moon_longitude": {
             "description": "Sidereal ecliptic longitude",
             "exclusiveMaximum": 360.0,
+            "format": "double",
             "minimum": 0.0,
             "title": "Moon Longitude",
             "type": "number"
@@ -396,6 +402,7 @@
         "additionalProperties": false,
         "properties": {
           "balance_at_birth_days": {
+            "format": "double",
             "title": "Balance At Birth Days",
             "type": "number"
           },
@@ -549,6 +556,7 @@
           },
           "degree": {
             "exclusiveMaximum": 30.0,
+            "format": "double",
             "minimum": 0.0,
             "title": "Degree",
             "type": "number"
@@ -581,6 +589,7 @@
           "longitude": {
             "description": "Sidereal ecliptic longitude",
             "exclusiveMaximum": 360.0,
+            "format": "double",
             "minimum": 0.0,
             "title": "Longitude",
             "type": "number"
@@ -617,6 +626,7 @@
             "type": "integer"
           },
           "speed": {
+            "format": "double",
             "title": "Speed",
             "type": "number"
           }
@@ -692,6 +702,7 @@
         "properties": {
           "degree": {
             "exclusiveMaximum": 30.0,
+            "format": "double",
             "minimum": 0.0,
             "title": "Degree",
             "type": "number"
@@ -722,6 +733,7 @@
           "longitude": {
             "description": "Sidereal ecliptic longitude",
             "exclusiveMaximum": 360.0,
+            "format": "double",
             "minimum": 0.0,
             "title": "Longitude",
             "type": "number"
@@ -815,6 +827,7 @@
             "type": "string"
           },
           "ayanamsa_value": {
+            "format": "double",
             "title": "Ayanamsa Value",
             "type": "number"
           },

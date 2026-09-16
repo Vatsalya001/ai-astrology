@@ -199,10 +199,10 @@ func (e YogaResultStrength) Valid() bool {
 
 // AscendantPosition defines model for AscendantPosition.
 type AscendantPosition struct {
-	Degree float32 `json:"degree"`
+	Degree float64 `json:"degree"`
 
 	// Longitude Sidereal ecliptic longitude
-	Longitude float32 `json:"longitude"`
+	Longitude float64 `json:"longitude"`
 	Nakshatra string  `json:"nakshatra"`
 	Pada      int     `json:"pada"`
 	Sign      string  `json:"sign"`
@@ -222,8 +222,8 @@ type AscendantPosition struct {
 type BirthData struct {
 	Ayanamsa     *BirthDataAyanamsa     `json:"ayanamsa,omitempty"`
 	HouseSystem  *BirthDataHouseSystem  `json:"house_system,omitempty"`
-	Latitude     float32                `json:"latitude"`
-	Longitude    float32                `json:"longitude"`
+	Latitude     float64                `json:"latitude"`
+	Longitude    float64                `json:"longitude"`
 	TimeAccuracy *BirthDataTimeAccuracy `json:"time_accuracy,omitempty"`
 
 	// UtcInstant Birth instant in UTC. Must be timezone-aware.
@@ -244,7 +244,7 @@ type BirthDataTimeAccuracy string
 // ChartMeta Provenance. Every one of these fields answers "why did it say that?".
 type ChartMeta struct {
 	Ayanamsa          string                      `json:"ayanamsa"`
-	AyanamsaValue     float32                     `json:"ayanamsa_value"`
+	AyanamsaValue     float64                     `json:"ayanamsa_value"`
 	CalculationSystem *ChartMetaCalculationSystem `json:"calculation_system,omitempty"`
 	ComputedAt        time.Time                   `json:"computed_at"`
 	EngineVersion     string                      `json:"engine_version"`
@@ -323,12 +323,12 @@ type DashaRequest struct {
 	MaxLevel     *int      `json:"max_level,omitempty"`
 
 	// MoonLongitude Sidereal ecliptic longitude
-	MoonLongitude float32 `json:"moon_longitude"`
+	MoonLongitude float64 `json:"moon_longitude"`
 }
 
 // DashaResponse defines model for DashaResponse.
 type DashaResponse struct {
-	BalanceAtBirthDays float32          `json:"balance_at_birth_days"`
+	BalanceAtBirthDays float64          `json:"balance_at_birth_days"`
 	Periods            []DashaPeriodOut `json:"periods"`
 }
 
@@ -365,14 +365,14 @@ type HousePosition struct {
 // PlanetPosition defines model for PlanetPosition.
 type PlanetPosition struct {
 	Aspects      *[]int                `json:"aspects,omitempty"`
-	Degree       float32               `json:"degree"`
+	Degree       float64               `json:"degree"`
 	Dignity      PlanetPositionDignity `json:"dignity"`
 	House        int                   `json:"house"`
 	IsCombust    bool                  `json:"is_combust"`
 	IsRetrograde bool                  `json:"is_retrograde"`
 
 	// Longitude Sidereal ecliptic longitude
-	Longitude      float32 `json:"longitude"`
+	Longitude      float64 `json:"longitude"`
 	Nakshatra      string  `json:"nakshatra"`
 	NakshatraIndex int     `json:"nakshatra_index"`
 	Pada           int     `json:"pada"`
@@ -381,7 +381,7 @@ type PlanetPosition struct {
 
 	// SignIndex 0 = Aries
 	SignIndex int     `json:"sign_index"`
-	Speed     float32 `json:"speed"`
+	Speed     float64 `json:"speed"`
 }
 
 // PlanetPositionDignity defines model for PlanetPosition.Dignity.
@@ -401,13 +401,13 @@ type SadeSatiResultCurrentPhase string
 
 // TransitPosition defines model for TransitPosition.
 type TransitPosition struct {
-	Degree             float32 `json:"degree"`
+	Degree             float64 `json:"degree"`
 	HouseFromAscendant *int    `json:"house_from_ascendant"`
 	HouseFromMoon      int     `json:"house_from_moon"`
 	IsRetrograde       bool    `json:"is_retrograde"`
 
 	// Longitude Sidereal ecliptic longitude
-	Longitude float32 `json:"longitude"`
+	Longitude float64 `json:"longitude"`
 	Planet    string  `json:"planet"`
 	Sign      string  `json:"sign"`
 
@@ -432,7 +432,7 @@ type TransitRequestAyanamsa string
 type TransitResponse struct {
 	At            time.Time         `json:"at"`
 	Ayanamsa      string            `json:"ayanamsa"`
-	AyanamsaValue float32           `json:"ayanamsa_value"`
+	AyanamsaValue float64           `json:"ayanamsa_value"`
 	SadeSati      SadeSatiResult    `json:"sade_sati"`
 	Transits      []TransitPosition `json:"transits"`
 }

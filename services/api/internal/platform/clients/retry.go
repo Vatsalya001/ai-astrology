@@ -1,6 +1,7 @@
 package clients
 
 import (
+	"context"
 	"io"
 	"log/slog"
 	"math/rand/v2"
@@ -95,6 +96,33 @@ func shouldRetryStatus(code int) bool {
 	return code >= 500 || code == http.StatusTooManyRequests
 }
 
+// idempotentKey marks a request as safe to replay despite its method.
+type idempotentKeyType struct{}
+
+var idempotentKey idempotentKeyType
+
+// MarkIdempotent declares that re-sending this request cannot cause a
+// second side effect.
+//
+// Opt-in per call, never inferred from the endpoint. Every astro-service
+// route is a POST — the request body carries birth data far too large for
+// a query string — and every one of them is a pure computation: that
+// service has NO DATABASE AT ALL, which is invariant 2 in the
+// constitution and enforced by topology rather than by intent. There is
+// no write for a replay to duplicate.
+//
+// The method rule below is not weakened, because it is right for
+// everything else. A caller has to state the property explicitly, at the
+// call site, where someone reviewing a new endpoint will see it.
+func MarkIdempotent(ctx context.Context) context.Context {
+	return context.WithValue(ctx, idempotentKey, true)
+}
+
+func isMarkedIdempotent(ctx context.Context) bool {
+	marked, _ := ctx.Value(idempotentKey).(bool)
+	return marked
+}
+
 // canRetry reports whether re-sending is safe.
 //
 // Only idempotent methods, and only when the body can be replayed. A
@@ -102,11 +130,16 @@ func shouldRetryStatus(code int) bool {
 // happens to be a pure computation — that will stop being true, and the
 // failure mode (a silently duplicated write) is the kind nobody notices
 // until reconciliation.
+//
+// MarkIdempotent is the deliberate exception, and it is a decision the
+// caller records rather than one this function guesses.
 func canRetry(req *http.Request) bool {
 	switch req.Method {
 	case http.MethodGet, http.MethodHead, http.MethodOptions:
 	default:
-		return false
+		if !isMarkedIdempotent(req.Context()) {
+			return false
+		}
 	}
 
 	// An empty body may be represented as nil OR as http.NoBody, and the

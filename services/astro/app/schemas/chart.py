@@ -34,8 +34,30 @@ from pydantic import BaseModel, ConfigDict, Field
 #: meanings do.
 CHART_SCHEMA_VERSION = 1
 
-Longitude = Annotated[float, Field(ge=0, lt=360, description="Sidereal ecliptic longitude")]
-DegreeInSign = Annotated[float, Field(ge=0, lt=30)]
+#: Every float on the wire is an explicit double.
+#:
+#: Pydantic emits a bare `{"type": "number"}` for `float`, and
+#: oapi-codegen maps that to Go's float32. For degrees the narrowing is
+#: harmless — measured at 24 milliarcseconds worst case, six orders of
+#: magnitude below a pada boundary — but it is an accident rather than a
+#: decision, and it would not stay harmless. A Julian day is 2451545.0
+#: before the decimal point; float32 carries about seven significant
+#: digits in total, so such a field would lose the time of day entirely.
+#:
+#: Declaring the format once here means the next numeric field added to
+#: this contract cannot be silently narrowed.
+Double = Annotated[float, Field(json_schema_extra={"format": "double"})]
+
+Longitude = Annotated[
+    float,
+    Field(
+        ge=0,
+        lt=360,
+        json_schema_extra={"format": "double"},
+        description="Sidereal ecliptic longitude",
+    ),
+]
+DegreeInSign = Annotated[float, Field(ge=0, lt=30, json_schema_extra={"format": "double"})]
 SignIndex = Annotated[int, Field(ge=0, le=11, description="0 = Aries")]
 HouseNumber = Annotated[int, Field(ge=1, le=12)]
 Pada = Annotated[int, Field(ge=1, le=4)]
@@ -75,8 +97,8 @@ class BirthData(Strict):
         description="Birth instant in UTC. Must be timezone-aware.",
         examples=["1994-08-17T09:05:00Z"],
     )
-    latitude: Annotated[float, Field(ge=-90, le=90)]
-    longitude: Annotated[float, Field(ge=-180, le=180)]
+    latitude: Annotated[float, Field(ge=-90, le=90, json_schema_extra={"format": "double"})]
+    longitude: Annotated[float, Field(ge=-180, le=180, json_schema_extra={"format": "double"})]
 
     time_accuracy: TimeAccuracy = "exact"
     """`unknown` omits the ascendant, the houses and the dashas rather
@@ -120,7 +142,7 @@ class ChartMeta(Strict):
     schema_version: int = CHART_SCHEMA_VERSION
     calculation_system: Literal["vedic"] = "vedic"
     ayanamsa: str
-    ayanamsa_value: float
+    ayanamsa_value: Double
     """The actual offset applied, not just its name. Two releases can
     both say "lahiri" and disagree by arcseconds; this records which one
     ran."""
@@ -149,7 +171,7 @@ class PlanetPosition(Strict):
     is_retrograde: bool
     is_combust: bool
     dignity: Dignity
-    speed: float
+    speed: Double
     aspects: list[HouseNumber] = Field(default_factory=list)
 
 
@@ -244,13 +266,13 @@ class SadeSatiResult(Strict):
 class TransitResponse(Strict):
     at: datetime
     ayanamsa: str
-    ayanamsa_value: float
+    ayanamsa_value: Double
     transits: list[TransitPosition]
     sade_sati: SadeSatiResult
 
 
 class DashaResponse(Strict):
     periods: list[DashaPeriodOut]
-    balance_at_birth_days: float
+    balance_at_birth_days: Double
     """How much of the first mahadasha remained at birth. Derived rather
     than stored, so it cannot disagree with the tree."""
