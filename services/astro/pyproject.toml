@@ -23,6 +23,7 @@ dependencies = [
     "pydantic>=2.9",
     "pydantic-settings>=2.6",
     # Phase 2 adds: pyswisseph, timezonefinder
+    "skyfield>=1.55",
 ]
 
 [project.optional-dependencies]
@@ -65,6 +66,14 @@ warn_unreachable = true
 # missing-stub problems in every other dependency.
 [[tool.mypy.overrides]]
 module = ["opentelemetry.*", "sentry_sdk.*"]
+ignore_missing_imports = true
+
+# skyfield ships no py.typed marker, so mypy cannot see its annotations.
+# Scoped to skyfield alone rather than blanket-ignored: a global
+# ignore_missing_imports would hide a genuinely missing dependency
+# anywhere else, which is how a typo in an import survives a strict run.
+[[tool.mypy.overrides]]
+module = ["skyfield.*", "jplephem.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]
