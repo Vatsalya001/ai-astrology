@@ -77,6 +77,84 @@ export const en = {
     nameRequired: 'Please enter a name.',
   },
 
+  birth: {
+    // Three steps, one question per screen. This is the highest
+    // drop-off point in the whole product; every field costs conversion.
+    stepOf: 'Step {current} of {total}',
+
+    dateTitle: 'When were you born?',
+    dateSubtitle: 'Your date of birth, as it appears on your documents.',
+    dayLabel: 'Day',
+    monthLabel: 'Month',
+    yearLabel: 'Year',
+    dateInvalid: 'That date doesn’t exist. Please check the day and month.',
+    dateFuture: 'That date is in the future.',
+    dateTooOld: 'Please enter a year after 1900.',
+
+    timeTitle: 'What time were you born?',
+    timeSubtitle: 'As close as you know. Even fifteen minutes matters.',
+    hourLabel: 'Hour',
+    minuteLabel: 'Minute',
+    timeInvalid: 'Please enter a time between 00:00 and 23:59.',
+    unknownLabel: 'I don’t know my exact birth time',
+    // Says plainly what is lost rather than hiding it. The checkbox
+    // converts a dead end into a completed signup; pretending nothing
+    // changes converts it into a wrong chart.
+    unknownExplained:
+      'We’ll show your planetary positions. Your rising sign and dasha periods need an exact time — you can add it any time later.',
+
+    placeTitle: 'Where were you born?',
+    placeSubtitle: 'The town or city. We’ll work out the rest.',
+    placeLabel: 'Birth place',
+    placePlaceholder: 'Start typing a town or city',
+    placeKeepTyping: 'Keep typing to search.',
+    placeNoResults: 'No places found. Try a nearby larger town.',
+    placeSearching: 'Searching…',
+    placeSelected: 'Selected',
+    placeRequired: 'Please choose your birth place from the list.',
+    placeSearchFailed: 'We couldn’t search places just now.',
+
+    submit: 'See my Kundli',
+
+    computingTitle: 'Reading the sky',
+    computingSubtitle: 'Working out where every planet was at the moment you were born.',
+    computingFailed: 'We couldn’t compute your chart.',
+    computingRetry: 'Try again',
+  },
+
+  profiles: {
+    title: 'Birth profiles',
+    subtitle: 'Your details, and anyone else’s you’ve added.',
+    empty: 'Add your birth details to get started.',
+    emptyCta: 'Add birth details',
+    add: 'Add a profile',
+    edit: 'Edit',
+    remove: 'Remove',
+    removeConfirm: 'Remove this profile?',
+    // Soft delete, and it says so: the charts and readings that
+    // reference it stay explicable.
+    removeExplained:
+      'Past readings stay readable. You can add these details again at any time.',
+    versionLabel: 'Version {version}',
+    unknownTime: 'Birth time not set',
+    unknownTimeCta: 'Add the time',
+    // Persistent, not nagging. Shown once per profile card.
+    unknownTimeBanner:
+      'Your rising sign and dasha periods need an exact birth time.',
+    loading: 'Loading your profiles…',
+    failed: 'We couldn’t load your profiles.',
+
+    editTitle: 'Edit birth details',
+    // The warning is the point of the screen. Correcting a birth time
+    // creates a new version, and a reading given last month stays
+    // attached to the old one.
+    editWarning:
+      'Saving creates a new version. Readings you’ve already had stay based on the details they were computed from.',
+    editSaved: 'Saved as version {version}.',
+    history: 'Version history',
+    historyEmpty: 'No earlier versions.',
+  },
+
   nav: {
     settings: 'Settings',
     signOut: 'Sign out',
@@ -251,6 +329,73 @@ export const hi: Dictionary = {
     languageLabel: 'पसंदीदा भाषा',
     finish: 'पूर्ण करें',
     nameRequired: 'कृपया एक नाम दर्ज करें।',
+  },
+
+  birth: {
+    stepOf: 'चरण {current} / {total}',
+
+    dateTitle: 'आपका जन्म कब हुआ था?',
+    dateSubtitle: 'आपकी जन्म तिथि, जैसी आपके दस्तावेज़ों में है।',
+    dayLabel: 'दिन',
+    monthLabel: 'महीना',
+    yearLabel: 'वर्ष',
+    dateInvalid: 'यह तिथि मौजूद नहीं है। कृपया दिन और महीना जाँचें।',
+    dateFuture: 'यह तिथि भविष्य में है।',
+    dateTooOld: 'कृपया 1900 के बाद का वर्ष दर्ज करें।',
+
+    timeTitle: 'आपका जन्म किस समय हुआ था?',
+    timeSubtitle: 'जितना आप जानते हैं। पंद्रह मिनट भी मायने रखते हैं।',
+    hourLabel: 'घंटा',
+    minuteLabel: 'मिनट',
+    timeInvalid: 'कृपया 00:00 से 23:59 के बीच का समय दर्ज करें।',
+    unknownLabel: 'मुझे अपना सही जन्म समय नहीं पता',
+    unknownExplained:
+      'हम आपके ग्रहों की स्थिति दिखाएँगे। आपकी लग्न राशि और दशा अवधि के लिए सही समय चाहिए — आप इसे बाद में कभी भी जोड़ सकते हैं।',
+
+    placeTitle: 'आपका जन्म कहाँ हुआ था?',
+    placeSubtitle: 'शहर या कस्बा। बाकी हम देख लेंगे।',
+    placeLabel: 'जन्म स्थान',
+    placePlaceholder: 'शहर या कस्बे का नाम लिखें',
+    placeKeepTyping: 'खोजने के लिए लिखते रहें।',
+    placeNoResults: 'कोई स्थान नहीं मिला। पास का कोई बड़ा शहर आज़माएँ।',
+    placeSearching: 'खोजा जा रहा है…',
+    placeSelected: 'चुना गया',
+    placeRequired: 'कृपया सूची से अपना जन्म स्थान चुनें।',
+    placeSearchFailed: 'हम अभी स्थान नहीं खोज सके।',
+
+    submit: 'मेरी कुंडली देखें',
+
+    computingTitle: 'आकाश पढ़ा जा रहा है',
+    computingSubtitle: 'आपके जन्म के क्षण हर ग्रह कहाँ था, यह निकाला जा रहा है।',
+    computingFailed: 'हम आपकी कुंडली नहीं बना सके।',
+    computingRetry: 'पुनः प्रयास करें',
+  },
+
+  profiles: {
+    title: 'जन्म प्रोफ़ाइल',
+    subtitle: 'आपका विवरण, और जिन्हें आपने जोड़ा है।',
+    empty: 'शुरू करने के लिए अपना जन्म विवरण जोड़ें।',
+    emptyCta: 'जन्म विवरण जोड़ें',
+    add: 'प्रोफ़ाइल जोड़ें',
+    edit: 'संपादित करें',
+    remove: 'हटाएँ',
+    removeConfirm: 'यह प्रोफ़ाइल हटाएँ?',
+    removeExplained:
+      'पुराने पठन पढ़े जा सकेंगे। आप यह विवरण कभी भी दोबारा जोड़ सकते हैं।',
+    versionLabel: 'संस्करण {version}',
+    unknownTime: 'जन्म समय दर्ज नहीं है',
+    unknownTimeCta: 'समय जोड़ें',
+    unknownTimeBanner:
+      'आपकी लग्न राशि और दशा अवधि के लिए सही जन्म समय चाहिए।',
+    loading: 'आपकी प्रोफ़ाइल लोड हो रही हैं…',
+    failed: 'हम आपकी प्रोफ़ाइल लोड नहीं कर सके।',
+
+    editTitle: 'जन्म विवरण संपादित करें',
+    editWarning:
+      'सहेजने पर एक नया संस्करण बनता है। आपको पहले मिले पठन उन्हीं विवरणों पर आधारित रहेंगे जिनसे वे बने थे।',
+    editSaved: 'संस्करण {version} के रूप में सहेजा गया।',
+    history: 'संस्करण इतिहास',
+    historyEmpty: 'कोई पुराना संस्करण नहीं।',
   },
 
   nav: {
