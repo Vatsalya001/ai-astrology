@@ -4,6 +4,7 @@
 package astroclient
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -11,13 +12,531 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
+
+	"github.com/oapi-codegen/runtime"
 )
+
+// Defines values for BirthDataAyanamsa.
+const (
+	BirthDataAyanamsaKp     BirthDataAyanamsa = "kp"
+	BirthDataAyanamsaLahiri BirthDataAyanamsa = "lahiri"
+	BirthDataAyanamsaRaman  BirthDataAyanamsa = "raman"
+)
+
+// Valid indicates whether the value is a known member of the BirthDataAyanamsa enum.
+func (e BirthDataAyanamsa) Valid() bool {
+	switch e {
+	case BirthDataAyanamsaKp:
+		return true
+	case BirthDataAyanamsaLahiri:
+		return true
+	case BirthDataAyanamsaRaman:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for BirthDataHouseSystem.
+const (
+	WholeSign BirthDataHouseSystem = "whole_sign"
+)
+
+// Valid indicates whether the value is a known member of the BirthDataHouseSystem enum.
+func (e BirthDataHouseSystem) Valid() bool {
+	switch e {
+	case WholeSign:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for BirthDataTimeAccuracy.
+const (
+	BirthDataTimeAccuracyApproximate BirthDataTimeAccuracy = "approximate"
+	BirthDataTimeAccuracyExact       BirthDataTimeAccuracy = "exact"
+	BirthDataTimeAccuracyUnknown     BirthDataTimeAccuracy = "unknown"
+)
+
+// Valid indicates whether the value is a known member of the BirthDataTimeAccuracy enum.
+func (e BirthDataTimeAccuracy) Valid() bool {
+	switch e {
+	case BirthDataTimeAccuracyApproximate:
+		return true
+	case BirthDataTimeAccuracyExact:
+		return true
+	case BirthDataTimeAccuracyUnknown:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ChartMetaCalculationSystem.
+const (
+	Vedic ChartMetaCalculationSystem = "vedic"
+)
+
+// Valid indicates whether the value is a known member of the ChartMetaCalculationSystem enum.
+func (e ChartMetaCalculationSystem) Valid() bool {
+	switch e {
+	case Vedic:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ChartMetaTimeAccuracy.
+const (
+	ChartMetaTimeAccuracyApproximate ChartMetaTimeAccuracy = "approximate"
+	ChartMetaTimeAccuracyExact       ChartMetaTimeAccuracy = "exact"
+	ChartMetaTimeAccuracyUnknown     ChartMetaTimeAccuracy = "unknown"
+)
+
+// Valid indicates whether the value is a known member of the ChartMetaTimeAccuracy enum.
+func (e ChartMetaTimeAccuracy) Valid() bool {
+	switch e {
+	case ChartMetaTimeAccuracyApproximate:
+		return true
+	case ChartMetaTimeAccuracyExact:
+		return true
+	case ChartMetaTimeAccuracyUnknown:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for PlanetPositionDignity.
+const (
+	Debilitated  PlanetPositionDignity = "debilitated"
+	Exalted      PlanetPositionDignity = "exalted"
+	Moolatrikona PlanetPositionDignity = "moolatrikona"
+	Neutral      PlanetPositionDignity = "neutral"
+	OwnSign      PlanetPositionDignity = "own_sign"
+)
+
+// Valid indicates whether the value is a known member of the PlanetPositionDignity enum.
+func (e PlanetPositionDignity) Valid() bool {
+	switch e {
+	case Debilitated:
+		return true
+	case Exalted:
+		return true
+	case Moolatrikona:
+		return true
+	case Neutral:
+		return true
+	case OwnSign:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for SadeSatiResultCurrentPhase.
+const (
+	Peak    SadeSatiResultCurrentPhase = "peak"
+	Rising  SadeSatiResultCurrentPhase = "rising"
+	Setting SadeSatiResultCurrentPhase = "setting"
+)
+
+// Valid indicates whether the value is a known member of the SadeSatiResultCurrentPhase enum.
+func (e SadeSatiResultCurrentPhase) Valid() bool {
+	switch e {
+	case Peak:
+		return true
+	case Rising:
+		return true
+	case Setting:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for TransitRequestAyanamsa.
+const (
+	TransitRequestAyanamsaKp     TransitRequestAyanamsa = "kp"
+	TransitRequestAyanamsaLahiri TransitRequestAyanamsa = "lahiri"
+	TransitRequestAyanamsaRaman  TransitRequestAyanamsa = "raman"
+)
+
+// Valid indicates whether the value is a known member of the TransitRequestAyanamsa enum.
+func (e TransitRequestAyanamsa) Valid() bool {
+	switch e {
+	case TransitRequestAyanamsaKp:
+		return true
+	case TransitRequestAyanamsaLahiri:
+		return true
+	case TransitRequestAyanamsaRaman:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for YogaResultStrength.
+const (
+	Moderate YogaResultStrength = "moderate"
+	Strong   YogaResultStrength = "strong"
+)
+
+// Valid indicates whether the value is a known member of the YogaResultStrength enum.
+func (e YogaResultStrength) Valid() bool {
+	switch e {
+	case Moderate:
+		return true
+	case Strong:
+		return true
+	default:
+		return false
+	}
+}
+
+// AscendantPosition defines model for AscendantPosition.
+type AscendantPosition struct {
+	Degree float32 `json:"degree"`
+
+	// Longitude Sidereal ecliptic longitude
+	Longitude float32 `json:"longitude"`
+	Nakshatra string  `json:"nakshatra"`
+	Pada      int     `json:"pada"`
+	Sign      string  `json:"sign"`
+
+	// SignIndex 0 = Aries
+	SignIndex int `json:"sign_index"`
+}
+
+// BirthData Everything needed to compute a chart.
+//
+// The instant is a single aware UTC timestamp rather than a local date,
+// a local time and a zone. Go owns timezone resolution — its stdlib
+// carries the full historical tzdata, including the 1942-45 Indian
+// wartime offset — and resolves it once when the profile is created.
+// Re-deriving it here would be a second implementation of the hardest
+// part of the problem, free to disagree with the first.
+type BirthData struct {
+	Ayanamsa     *BirthDataAyanamsa     `json:"ayanamsa,omitempty"`
+	HouseSystem  *BirthDataHouseSystem  `json:"house_system,omitempty"`
+	Latitude     float32                `json:"latitude"`
+	Longitude    float32                `json:"longitude"`
+	TimeAccuracy *BirthDataTimeAccuracy `json:"time_accuracy,omitempty"`
+
+	// UtcInstant Birth instant in UTC. Must be timezone-aware.
+	//
+	// Examples: 1994-08-17T09:05:00Z
+	UtcInstant time.Time `json:"utc_instant"`
+}
+
+// BirthDataAyanamsa defines model for BirthData.Ayanamsa.
+type BirthDataAyanamsa string
+
+// BirthDataHouseSystem defines model for BirthData.HouseSystem.
+type BirthDataHouseSystem string
+
+// BirthDataTimeAccuracy defines model for BirthData.TimeAccuracy.
+type BirthDataTimeAccuracy string
+
+// ChartMeta Provenance. Every one of these fields answers "why did it say that?".
+type ChartMeta struct {
+	Ayanamsa          string                      `json:"ayanamsa"`
+	AyanamsaValue     float32                     `json:"ayanamsa_value"`
+	CalculationSystem *ChartMetaCalculationSystem `json:"calculation_system,omitempty"`
+	ComputedAt        time.Time                   `json:"computed_at"`
+	EngineVersion     string                      `json:"engine_version"`
+	HouseSystem       string                      `json:"house_system"`
+	SchemaVersion     *int                        `json:"schema_version,omitempty"`
+	TimeAccuracy      ChartMetaTimeAccuracy       `json:"time_accuracy"`
+}
+
+// ChartMetaCalculationSystem defines model for ChartMeta.CalculationSystem.
+type ChartMetaCalculationSystem string
+
+// ChartMetaTimeAccuracy defines model for ChartMeta.TimeAccuracy.
+type ChartMetaTimeAccuracy string
+
+// ChartRequest defines model for ChartRequest.
+type ChartRequest struct {
+	// Birth Everything needed to compute a chart.
+	//
+	// The instant is a single aware UTC timestamp rather than a local date,
+	// a local time and a zone. Go owns timezone resolution — its stdlib
+	// carries the full historical tzdata, including the 1942-45 Indian
+	// wartime offset — and resolves it once when the profile is created.
+	// Re-deriving it here would be a second implementation of the hardest
+	// part of the problem, free to disagree with the first.
+	Birth          BirthData `json:"birth"`
+	IncludeDashas  *bool     `json:"include_dashas,omitempty"`
+	IncludeNavamsa *bool     `json:"include_navamsa,omitempty"`
+	IncludeYogas   *bool     `json:"include_yogas,omitempty"`
+}
+
+// ChartResponse defines model for ChartResponse.
+type ChartResponse struct {
+	Ascendant *AscendantPosition `json:"ascendant"`
+	Dashas    *[]DashaPeriodOut  `json:"dashas,omitempty"`
+	Houses    *[]HousePosition   `json:"houses"`
+
+	// Meta Provenance. Every one of these fields answers "why did it say that?".
+	Meta    ChartMeta        `json:"meta"`
+	Navamsa *DivisionalChart `json:"navamsa,omitempty"`
+	Planets []PlanetPosition `json:"planets"`
+
+	// Summary The four facts every UI card and AI context needs.
+	//
+	// Present so a consumer does not have to walk the whole structure for
+	// "what is my moon sign" — which is the most-asked question the chart
+	// can answer.
+	Summary ChartSummary  `json:"summary"`
+	Yogas   *[]YogaResult `json:"yogas,omitempty"`
+}
+
+// ChartSummary The four facts every UI card and AI context needs.
+//
+// Present so a consumer does not have to walk the whole structure for
+// "what is my moon sign" — which is the most-asked question the chart
+// can answer.
+type ChartSummary struct {
+	AscendantSign     *string `json:"ascendant_sign"`
+	MoonNakshatra     string  `json:"moon_nakshatra"`
+	MoonNakshatraPada int     `json:"moon_nakshatra_pada"`
+	MoonSign          string  `json:"moon_sign"`
+	SunSign           string  `json:"sun_sign"`
+}
+
+// DashaPeriodOut defines model for DashaPeriodOut.
+type DashaPeriodOut struct {
+	Children *[]DashaPeriodOut `json:"children,omitempty"`
+	End      time.Time         `json:"end"`
+	Level    int               `json:"level"`
+	Planet   string            `json:"planet"`
+	Start    time.Time         `json:"start"`
+}
+
+// DashaRequest Dashas alone, for a caller that already has the Moon's position.
+type DashaRequest struct {
+	BirthInstant time.Time `json:"birth_instant"`
+	MaxLevel     *int      `json:"max_level,omitempty"`
+
+	// MoonLongitude Sidereal ecliptic longitude
+	MoonLongitude float32 `json:"moon_longitude"`
+}
+
+// DashaResponse defines model for DashaResponse.
+type DashaResponse struct {
+	BalanceAtBirthDays float32          `json:"balance_at_birth_days"`
+	Periods            []DashaPeriodOut `json:"periods"`
+}
+
+// DivisionalChart A D9 or D10. No yogas — they are read from the rasi.
+type DivisionalChart struct {
+	Ascendant *AscendantPosition `json:"ascendant"`
+	Houses    *[]HousePosition   `json:"houses"`
+	Planets   []PlanetPosition   `json:"planets"`
+}
+
+// HTTPValidationError defines model for HTTPValidationError.
+type HTTPValidationError struct {
+	Detail *[]ValidationError `json:"detail,omitempty"`
+}
 
 // HealthResponse defines model for HealthResponse.
 type HealthResponse struct {
 	Service string `json:"service"`
 	Status  string `json:"status"`
 	Version string `json:"version"`
+}
+
+// HousePosition defines model for HousePosition.
+type HousePosition struct {
+	House   int       `json:"house"`
+	Lord    string    `json:"lord"`
+	Planets *[]string `json:"planets,omitempty"`
+	Sign    string    `json:"sign"`
+
+	// SignIndex 0 = Aries
+	SignIndex int `json:"sign_index"`
+}
+
+// PlanetPosition defines model for PlanetPosition.
+type PlanetPosition struct {
+	Aspects      *[]int                `json:"aspects,omitempty"`
+	Degree       float32               `json:"degree"`
+	Dignity      PlanetPositionDignity `json:"dignity"`
+	House        int                   `json:"house"`
+	IsCombust    bool                  `json:"is_combust"`
+	IsRetrograde bool                  `json:"is_retrograde"`
+
+	// Longitude Sidereal ecliptic longitude
+	Longitude      float32 `json:"longitude"`
+	Nakshatra      string  `json:"nakshatra"`
+	NakshatraIndex int     `json:"nakshatra_index"`
+	Pada           int     `json:"pada"`
+	Planet         string  `json:"planet"`
+	Sign           string  `json:"sign"`
+
+	// SignIndex 0 = Aries
+	SignIndex int     `json:"sign_index"`
+	Speed     float32 `json:"speed"`
+}
+
+// PlanetPositionDignity defines model for PlanetPosition.Dignity.
+type PlanetPositionDignity string
+
+// SadeSatiResult defines model for SadeSatiResult.
+type SadeSatiResult struct {
+	CurrentPhase   *SadeSatiResultCurrentPhase `json:"current_phase"`
+	HousesFromMoon int                         `json:"houses_from_moon"`
+	IsActive       bool                        `json:"is_active"`
+	MoonSign       string                      `json:"moon_sign"`
+	SaturnSign     string                      `json:"saturn_sign"`
+}
+
+// SadeSatiResultCurrentPhase defines model for SadeSatiResult.CurrentPhase.
+type SadeSatiResultCurrentPhase string
+
+// TransitPosition defines model for TransitPosition.
+type TransitPosition struct {
+	Degree             float32 `json:"degree"`
+	HouseFromAscendant *int    `json:"house_from_ascendant"`
+	HouseFromMoon      int     `json:"house_from_moon"`
+	IsRetrograde       bool    `json:"is_retrograde"`
+
+	// Longitude Sidereal ecliptic longitude
+	Longitude float32 `json:"longitude"`
+	Planet    string  `json:"planet"`
+	Sign      string  `json:"sign"`
+
+	// SignIndex 0 = Aries
+	SignIndex int `json:"sign_index"`
+}
+
+// TransitRequest defines model for TransitRequest.
+type TransitRequest struct {
+	At                 time.Time               `json:"at"`
+	Ayanamsa           *TransitRequestAyanamsa `json:"ayanamsa,omitempty"`
+	NatalAscendantSign *int                    `json:"natal_ascendant_sign,omitempty"`
+
+	// NatalMoonSign 0 = Aries
+	NatalMoonSign int `json:"natal_moon_sign"`
+}
+
+// TransitRequestAyanamsa defines model for TransitRequest.Ayanamsa.
+type TransitRequestAyanamsa string
+
+// TransitResponse defines model for TransitResponse.
+type TransitResponse struct {
+	At            time.Time         `json:"at"`
+	Ayanamsa      string            `json:"ayanamsa"`
+	AyanamsaValue float32           `json:"ayanamsa_value"`
+	SadeSati      SadeSatiResult    `json:"sade_sati"`
+	Transits      []TransitPosition `json:"transits"`
+}
+
+// ValidationError defines model for ValidationError.
+type ValidationError struct {
+	Ctx   *map[string]interface{}    `json:"ctx,omitempty"`
+	Input interface{}                `json:"input,omitempty"`
+	Loc   []ValidationError_Loc_Item `json:"loc"`
+	Msg   string                     `json:"msg"`
+	Type  string                     `json:"type"`
+}
+
+// ValidationErrorLoc0 defines model for ValidationError.Loc.0.
+type ValidationErrorLoc0 = string
+
+// ValidationErrorLoc1 defines model for ValidationError.Loc.1.
+type ValidationErrorLoc1 = int
+
+// ValidationError_Loc_Item defines model for ValidationError.loc.Item.
+type ValidationError_Loc_Item struct {
+	union json.RawMessage
+}
+
+// YogaResult defines model for YogaResult.
+type YogaResult struct {
+	InvolvedHouses  []int              `json:"involved_houses"`
+	InvolvedPlanets []string           `json:"involved_planets"`
+	Name            string             `json:"name"`
+	Strength        YogaResultStrength `json:"strength"`
+}
+
+// YogaResultStrength defines model for YogaResult.Strength.
+type YogaResultStrength string
+
+// ComputeChartV1ChartsComputePostJSONRequestBody defines body for ComputeChartV1ChartsComputePost for application/json ContentType.
+type ComputeChartV1ChartsComputePostJSONRequestBody = ChartRequest
+
+// ComputeDashasV1DashasComputePostJSONRequestBody defines body for ComputeDashasV1DashasComputePost for application/json ContentType.
+type ComputeDashasV1DashasComputePostJSONRequestBody = DashaRequest
+
+// ComputeTransitV1TransitsComputePostJSONRequestBody defines body for ComputeTransitV1TransitsComputePost for application/json ContentType.
+type ComputeTransitV1TransitsComputePostJSONRequestBody = TransitRequest
+
+// AsValidationErrorLoc0 returns the union data inside the ValidationError_Loc_Item as a ValidationErrorLoc0
+func (t ValidationError_Loc_Item) AsValidationErrorLoc0() (ValidationErrorLoc0, error) {
+	var body ValidationErrorLoc0
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromValidationErrorLoc0 overwrites any union data inside the ValidationError_Loc_Item as the provided ValidationErrorLoc0
+func (t *ValidationError_Loc_Item) FromValidationErrorLoc0(v ValidationErrorLoc0) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeValidationErrorLoc0 performs a merge with any union data inside the ValidationError_Loc_Item, using the provided ValidationErrorLoc0
+func (t *ValidationError_Loc_Item) MergeValidationErrorLoc0(v ValidationErrorLoc0) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsValidationErrorLoc1 returns the union data inside the ValidationError_Loc_Item as a ValidationErrorLoc1
+func (t ValidationError_Loc_Item) AsValidationErrorLoc1() (ValidationErrorLoc1, error) {
+	var body ValidationErrorLoc1
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromValidationErrorLoc1 overwrites any union data inside the ValidationError_Loc_Item as the provided ValidationErrorLoc1
+func (t *ValidationError_Loc_Item) FromValidationErrorLoc1(v ValidationErrorLoc1) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeValidationErrorLoc1 performs a merge with any union data inside the ValidationError_Loc_Item, using the provided ValidationErrorLoc1
+func (t *ValidationError_Loc_Item) MergeValidationErrorLoc1(v ValidationErrorLoc1) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+func (t ValidationError_Loc_Item) MarshalJSON() ([]byte, error) {
+	b, err := t.union.MarshalJSON()
+	return b, err
+}
+
+func (t *ValidationError_Loc_Item) UnmarshalJSON(b []byte) error {
+	err := t.union.UnmarshalJSON(b)
+	return err
 }
 
 // RequestEditorFn is the function signature for the RequestEditor callback function
@@ -105,6 +624,76 @@ type ClientInterface interface {
 	//
 	// Corresponds with GET /health (the `HealthHealthGet` operationId).
 	HealthHealthGet(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ComputeChartV1ChartsComputePostWithBody Compute Chart
+	//
+	// Birth data in, full chart out.
+	//
+	// Idempotent and stateless. Nothing is written anywhere — `api-service`
+	// owns every byte of persistence, and this service is a pure function
+	// that happens to be reachable over HTTP.
+	//
+	// Takes any type of body and a specified content type.
+	//
+	// Corresponds with POST /v1/charts/compute (the `ComputeChartV1ChartsComputePost` operationId).
+	ComputeChartV1ChartsComputePostWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ComputeChartV1ChartsComputePost Compute Chart
+	//
+	// Birth data in, full chart out.
+	//
+	// Idempotent and stateless. Nothing is written anywhere — `api-service`
+	// owns every byte of persistence, and this service is a pure function
+	// that happens to be reachable over HTTP.
+	//
+	// Takes a body of the `application/json` content type.
+	//
+	// Corresponds with POST /v1/charts/compute (the `ComputeChartV1ChartsComputePost` operationId).
+	ComputeChartV1ChartsComputePost(ctx context.Context, body ComputeChartV1ChartsComputePostJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ComputeDashasV1DashasComputePostWithBody Compute Dashas
+	//
+	// The Vimshottari tree from a Moon longitude.
+	//
+	// Separate from the chart endpoint so `api-service` can recompute a
+	// tree — after a birth-time correction, say — without recomputing every
+	// planet.
+	//
+	// Takes any type of body and a specified content type.
+	//
+	// Corresponds with POST /v1/dashas/compute (the `ComputeDashasV1DashasComputePost` operationId).
+	ComputeDashasV1DashasComputePostWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ComputeDashasV1DashasComputePost Compute Dashas
+	//
+	// The Vimshottari tree from a Moon longitude.
+	//
+	// Separate from the chart endpoint so `api-service` can recompute a
+	// tree — after a birth-time correction, say — without recomputing every
+	// planet.
+	//
+	// Takes a body of the `application/json` content type.
+	//
+	// Corresponds with POST /v1/dashas/compute (the `ComputeDashasV1DashasComputePost` operationId).
+	ComputeDashasV1DashasComputePost(ctx context.Context, body ComputeDashasV1DashasComputePostJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ComputeTransitV1TransitsComputePostWithBody Compute Transit
+	//
+	// Current positions against a natal chart, plus Sade Sati.
+	//
+	// Takes any type of body and a specified content type.
+	//
+	// Corresponds with POST /v1/transits/compute (the `ComputeTransitV1TransitsComputePost` operationId).
+	ComputeTransitV1TransitsComputePostWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ComputeTransitV1TransitsComputePost Compute Transit
+	//
+	// Current positions against a natal chart, plus Sade Sati.
+	//
+	// Takes a body of the `application/json` content type.
+	//
+	// Corresponds with POST /v1/transits/compute (the `ComputeTransitV1TransitsComputePost` operationId).
+	ComputeTransitV1TransitsComputePost(ctx context.Context, body ComputeTransitV1TransitsComputePostJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 }
 
 // HealthHealthGet Health
@@ -119,6 +708,136 @@ type ClientInterface interface {
 // Corresponds with GET /health (the `HealthHealthGet` operationId).
 func (c *Client) HealthHealthGet(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewHealthHealthGetRequest(c.Server)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// ComputeChartV1ChartsComputePostWithBody Compute Chart
+//
+// Birth data in, full chart out.
+//
+// Idempotent and stateless. Nothing is written anywhere — `api-service`
+// owns every byte of persistence, and this service is a pure function
+// that happens to be reachable over HTTP.
+//
+// Takes any type of body and a specified content type.
+//
+// Corresponds with POST /v1/charts/compute (the `ComputeChartV1ChartsComputePost` operationId).
+func (c *Client) ComputeChartV1ChartsComputePostWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewComputeChartV1ChartsComputePostRequestWithBody(c.Server, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// ComputeChartV1ChartsComputePost Compute Chart
+//
+// Birth data in, full chart out.
+//
+// Idempotent and stateless. Nothing is written anywhere — `api-service`
+// owns every byte of persistence, and this service is a pure function
+// that happens to be reachable over HTTP.
+//
+// Takes a body of the `application/json` content type.
+//
+// Corresponds with POST /v1/charts/compute (the `ComputeChartV1ChartsComputePost` operationId).
+func (c *Client) ComputeChartV1ChartsComputePost(ctx context.Context, body ComputeChartV1ChartsComputePostJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewComputeChartV1ChartsComputePostRequest(c.Server, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// ComputeDashasV1DashasComputePostWithBody Compute Dashas
+//
+// The Vimshottari tree from a Moon longitude.
+//
+// Separate from the chart endpoint so `api-service` can recompute a
+// tree — after a birth-time correction, say — without recomputing every
+// planet.
+//
+// Takes any type of body and a specified content type.
+//
+// Corresponds with POST /v1/dashas/compute (the `ComputeDashasV1DashasComputePost` operationId).
+func (c *Client) ComputeDashasV1DashasComputePostWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewComputeDashasV1DashasComputePostRequestWithBody(c.Server, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// ComputeDashasV1DashasComputePost Compute Dashas
+//
+// The Vimshottari tree from a Moon longitude.
+//
+// Separate from the chart endpoint so `api-service` can recompute a
+// tree — after a birth-time correction, say — without recomputing every
+// planet.
+//
+// Takes a body of the `application/json` content type.
+//
+// Corresponds with POST /v1/dashas/compute (the `ComputeDashasV1DashasComputePost` operationId).
+func (c *Client) ComputeDashasV1DashasComputePost(ctx context.Context, body ComputeDashasV1DashasComputePostJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewComputeDashasV1DashasComputePostRequest(c.Server, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// ComputeTransitV1TransitsComputePostWithBody Compute Transit
+//
+// Current positions against a natal chart, plus Sade Sati.
+//
+// Takes any type of body and a specified content type.
+//
+// Corresponds with POST /v1/transits/compute (the `ComputeTransitV1TransitsComputePost` operationId).
+func (c *Client) ComputeTransitV1TransitsComputePostWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewComputeTransitV1TransitsComputePostRequestWithBody(c.Server, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// ComputeTransitV1TransitsComputePost Compute Transit
+//
+// Current positions against a natal chart, plus Sade Sati.
+//
+// Takes a body of the `application/json` content type.
+//
+// Corresponds with POST /v1/transits/compute (the `ComputeTransitV1TransitsComputePost` operationId).
+func (c *Client) ComputeTransitV1TransitsComputePost(ctx context.Context, body ComputeTransitV1TransitsComputePostJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewComputeTransitV1TransitsComputePostRequest(c.Server, body)
 	if err != nil {
 		return nil, err
 	}
@@ -152,6 +871,126 @@ func NewHealthHealthGetRequest(server string) (*http.Request, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	return req, nil
+}
+
+// NewComputeChartV1ChartsComputePostRequest calls the generic ComputeChartV1ChartsComputePost builder with application/json body
+func NewComputeChartV1ChartsComputePostRequest(server string, body ComputeChartV1ChartsComputePostJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewComputeChartV1ChartsComputePostRequestWithBody(server, "application/json", bodyReader)
+}
+
+// NewComputeChartV1ChartsComputePostRequestWithBody constructs an http.Request for the ComputeChartV1ChartsComputePost method, with any body, and a specified content type
+func NewComputeChartV1ChartsComputePostRequestWithBody(server string, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/charts/compute")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
+// NewComputeDashasV1DashasComputePostRequest calls the generic ComputeDashasV1DashasComputePost builder with application/json body
+func NewComputeDashasV1DashasComputePostRequest(server string, body ComputeDashasV1DashasComputePostJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewComputeDashasV1DashasComputePostRequestWithBody(server, "application/json", bodyReader)
+}
+
+// NewComputeDashasV1DashasComputePostRequestWithBody constructs an http.Request for the ComputeDashasV1DashasComputePost method, with any body, and a specified content type
+func NewComputeDashasV1DashasComputePostRequestWithBody(server string, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/dashas/compute")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
+// NewComputeTransitV1TransitsComputePostRequest calls the generic ComputeTransitV1TransitsComputePost builder with application/json body
+func NewComputeTransitV1TransitsComputePostRequest(server string, body ComputeTransitV1TransitsComputePostJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewComputeTransitV1TransitsComputePostRequestWithBody(server, "application/json", bodyReader)
+}
+
+// NewComputeTransitV1TransitsComputePostRequestWithBody constructs an http.Request for the ComputeTransitV1TransitsComputePost method, with any body, and a specified content type
+func NewComputeTransitV1TransitsComputePostRequestWithBody(server string, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/transits/compute")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
 
 	return req, nil
 }
@@ -213,6 +1052,76 @@ type ClientWithResponsesInterface interface {
 	//
 	// Corresponds with GET /health (the `HealthHealthGet` operationId).
 	HealthHealthGetWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*HealthHealthGetResponse, error)
+
+	// ComputeChartV1ChartsComputePostWithBodyWithResponse Compute Chart
+	//
+	// Birth data in, full chart out.
+	//
+	// Idempotent and stateless. Nothing is written anywhere — `api-service`
+	// owns every byte of persistence, and this service is a pure function
+	// that happens to be reachable over HTTP.
+	//
+	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /v1/charts/compute (the `ComputeChartV1ChartsComputePost` operationId).
+	ComputeChartV1ChartsComputePostWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*ComputeChartV1ChartsComputePostResponse, error)
+
+	// ComputeChartV1ChartsComputePostWithResponse Compute Chart
+	//
+	// Birth data in, full chart out.
+	//
+	// Idempotent and stateless. Nothing is written anywhere — `api-service`
+	// owns every byte of persistence, and this service is a pure function
+	// that happens to be reachable over HTTP.
+	//
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /v1/charts/compute (the `ComputeChartV1ChartsComputePost` operationId).
+	ComputeChartV1ChartsComputePostWithResponse(ctx context.Context, body ComputeChartV1ChartsComputePostJSONRequestBody, reqEditors ...RequestEditorFn) (*ComputeChartV1ChartsComputePostResponse, error)
+
+	// ComputeDashasV1DashasComputePostWithBodyWithResponse Compute Dashas
+	//
+	// The Vimshottari tree from a Moon longitude.
+	//
+	// Separate from the chart endpoint so `api-service` can recompute a
+	// tree — after a birth-time correction, say — without recomputing every
+	// planet.
+	//
+	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /v1/dashas/compute (the `ComputeDashasV1DashasComputePost` operationId).
+	ComputeDashasV1DashasComputePostWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*ComputeDashasV1DashasComputePostResponse, error)
+
+	// ComputeDashasV1DashasComputePostWithResponse Compute Dashas
+	//
+	// The Vimshottari tree from a Moon longitude.
+	//
+	// Separate from the chart endpoint so `api-service` can recompute a
+	// tree — after a birth-time correction, say — without recomputing every
+	// planet.
+	//
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /v1/dashas/compute (the `ComputeDashasV1DashasComputePost` operationId).
+	ComputeDashasV1DashasComputePostWithResponse(ctx context.Context, body ComputeDashasV1DashasComputePostJSONRequestBody, reqEditors ...RequestEditorFn) (*ComputeDashasV1DashasComputePostResponse, error)
+
+	// ComputeTransitV1TransitsComputePostWithBodyWithResponse Compute Transit
+	//
+	// Current positions against a natal chart, plus Sade Sati.
+	//
+	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /v1/transits/compute (the `ComputeTransitV1TransitsComputePost` operationId).
+	ComputeTransitV1TransitsComputePostWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*ComputeTransitV1TransitsComputePostResponse, error)
+
+	// ComputeTransitV1TransitsComputePostWithResponse Compute Transit
+	//
+	// Current positions against a natal chart, plus Sade Sati.
+	//
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /v1/transits/compute (the `ComputeTransitV1TransitsComputePost` operationId).
+	ComputeTransitV1TransitsComputePostWithResponse(ctx context.Context, body ComputeTransitV1TransitsComputePostJSONRequestBody, reqEditors ...RequestEditorFn) (*ComputeTransitV1TransitsComputePostResponse, error)
 }
 
 type HealthHealthGetResponse struct {
@@ -256,6 +1165,150 @@ func (r HealthHealthGetResponse) ContentType() string {
 	return ""
 }
 
+type ComputeChartV1ChartsComputePostResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *ChartResponse
+	// JSON422 the response for an HTTP 422 `application/json` response
+	JSON422 *HTTPValidationError
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r ComputeChartV1ChartsComputePostResponse) GetJSON200() *ChartResponse {
+	return r.JSON200
+}
+
+// GetJSON422 returns the response for an HTTP 422 `application/json` response
+func (r ComputeChartV1ChartsComputePostResponse) GetJSON422() *HTTPValidationError {
+	return r.JSON422
+}
+
+// GetBody returns the raw response body bytes
+func (r ComputeChartV1ChartsComputePostResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r ComputeChartV1ChartsComputePostResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ComputeChartV1ChartsComputePostResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r ComputeChartV1ChartsComputePostResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type ComputeDashasV1DashasComputePostResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *DashaResponse
+	// JSON422 the response for an HTTP 422 `application/json` response
+	JSON422 *HTTPValidationError
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r ComputeDashasV1DashasComputePostResponse) GetJSON200() *DashaResponse {
+	return r.JSON200
+}
+
+// GetJSON422 returns the response for an HTTP 422 `application/json` response
+func (r ComputeDashasV1DashasComputePostResponse) GetJSON422() *HTTPValidationError {
+	return r.JSON422
+}
+
+// GetBody returns the raw response body bytes
+func (r ComputeDashasV1DashasComputePostResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r ComputeDashasV1DashasComputePostResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ComputeDashasV1DashasComputePostResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r ComputeDashasV1DashasComputePostResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type ComputeTransitV1TransitsComputePostResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *TransitResponse
+	// JSON422 the response for an HTTP 422 `application/json` response
+	JSON422 *HTTPValidationError
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r ComputeTransitV1TransitsComputePostResponse) GetJSON200() *TransitResponse {
+	return r.JSON200
+}
+
+// GetJSON422 returns the response for an HTTP 422 `application/json` response
+func (r ComputeTransitV1TransitsComputePostResponse) GetJSON422() *HTTPValidationError {
+	return r.JSON422
+}
+
+// GetBody returns the raw response body bytes
+func (r ComputeTransitV1TransitsComputePostResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r ComputeTransitV1TransitsComputePostResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ComputeTransitV1TransitsComputePostResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r ComputeTransitV1TransitsComputePostResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
 // HealthHealthGetWithResponse Health
 //
 // Liveness check.
@@ -274,6 +1327,112 @@ func (c *ClientWithResponses) HealthHealthGetWithResponse(ctx context.Context, r
 		return nil, err
 	}
 	return ParseHealthHealthGetResponse(rsp)
+}
+
+// ComputeChartV1ChartsComputePostWithBodyWithResponse Compute Chart
+//
+// Birth data in, full chart out.
+//
+// Idempotent and stateless. Nothing is written anywhere — `api-service`
+// owns every byte of persistence, and this service is a pure function
+// that happens to be reachable over HTTP.
+//
+// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /v1/charts/compute (the `ComputeChartV1ChartsComputePost` operationId).
+func (c *ClientWithResponses) ComputeChartV1ChartsComputePostWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*ComputeChartV1ChartsComputePostResponse, error) {
+	rsp, err := c.ComputeChartV1ChartsComputePostWithBody(ctx, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseComputeChartV1ChartsComputePostResponse(rsp)
+}
+
+// ComputeChartV1ChartsComputePostWithResponse Compute Chart
+//
+// Birth data in, full chart out.
+//
+// Idempotent and stateless. Nothing is written anywhere — `api-service`
+// owns every byte of persistence, and this service is a pure function
+// that happens to be reachable over HTTP.
+//
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /v1/charts/compute (the `ComputeChartV1ChartsComputePost` operationId).
+func (c *ClientWithResponses) ComputeChartV1ChartsComputePostWithResponse(ctx context.Context, body ComputeChartV1ChartsComputePostJSONRequestBody, reqEditors ...RequestEditorFn) (*ComputeChartV1ChartsComputePostResponse, error) {
+	rsp, err := c.ComputeChartV1ChartsComputePost(ctx, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseComputeChartV1ChartsComputePostResponse(rsp)
+}
+
+// ComputeDashasV1DashasComputePostWithBodyWithResponse Compute Dashas
+//
+// The Vimshottari tree from a Moon longitude.
+//
+// Separate from the chart endpoint so `api-service` can recompute a
+// tree — after a birth-time correction, say — without recomputing every
+// planet.
+//
+// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /v1/dashas/compute (the `ComputeDashasV1DashasComputePost` operationId).
+func (c *ClientWithResponses) ComputeDashasV1DashasComputePostWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*ComputeDashasV1DashasComputePostResponse, error) {
+	rsp, err := c.ComputeDashasV1DashasComputePostWithBody(ctx, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseComputeDashasV1DashasComputePostResponse(rsp)
+}
+
+// ComputeDashasV1DashasComputePostWithResponse Compute Dashas
+//
+// The Vimshottari tree from a Moon longitude.
+//
+// Separate from the chart endpoint so `api-service` can recompute a
+// tree — after a birth-time correction, say — without recomputing every
+// planet.
+//
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /v1/dashas/compute (the `ComputeDashasV1DashasComputePost` operationId).
+func (c *ClientWithResponses) ComputeDashasV1DashasComputePostWithResponse(ctx context.Context, body ComputeDashasV1DashasComputePostJSONRequestBody, reqEditors ...RequestEditorFn) (*ComputeDashasV1DashasComputePostResponse, error) {
+	rsp, err := c.ComputeDashasV1DashasComputePost(ctx, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseComputeDashasV1DashasComputePostResponse(rsp)
+}
+
+// ComputeTransitV1TransitsComputePostWithBodyWithResponse Compute Transit
+//
+// Current positions against a natal chart, plus Sade Sati.
+//
+// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /v1/transits/compute (the `ComputeTransitV1TransitsComputePost` operationId).
+func (c *ClientWithResponses) ComputeTransitV1TransitsComputePostWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*ComputeTransitV1TransitsComputePostResponse, error) {
+	rsp, err := c.ComputeTransitV1TransitsComputePostWithBody(ctx, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseComputeTransitV1TransitsComputePostResponse(rsp)
+}
+
+// ComputeTransitV1TransitsComputePostWithResponse Compute Transit
+//
+// Current positions against a natal chart, plus Sade Sati.
+//
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /v1/transits/compute (the `ComputeTransitV1TransitsComputePost` operationId).
+func (c *ClientWithResponses) ComputeTransitV1TransitsComputePostWithResponse(ctx context.Context, body ComputeTransitV1TransitsComputePostJSONRequestBody, reqEditors ...RequestEditorFn) (*ComputeTransitV1TransitsComputePostResponse, error) {
+	rsp, err := c.ComputeTransitV1TransitsComputePost(ctx, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseComputeTransitV1TransitsComputePostResponse(rsp)
 }
 
 // ParseHealthHealthGetResponse parses an HTTP response from a HealthHealthGetWithResponse call
@@ -296,6 +1455,105 @@ func ParseHealthHealthGetResponse(rsp *http.Response) (*HealthHealthGetResponse,
 			return nil, err
 		}
 		response.JSON200 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseComputeChartV1ChartsComputePostResponse parses an HTTP response from a ComputeChartV1ChartsComputePostWithResponse call
+func ParseComputeChartV1ChartsComputePostResponse(rsp *http.Response) (*ComputeChartV1ChartsComputePostResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ComputeChartV1ChartsComputePostResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest ChartResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest HTTPValidationError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON422 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseComputeDashasV1DashasComputePostResponse parses an HTTP response from a ComputeDashasV1DashasComputePostWithResponse call
+func ParseComputeDashasV1DashasComputePostResponse(rsp *http.Response) (*ComputeDashasV1DashasComputePostResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ComputeDashasV1DashasComputePostResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest DashaResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest HTTPValidationError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON422 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseComputeTransitV1TransitsComputePostResponse parses an HTTP response from a ComputeTransitV1TransitsComputePostWithResponse call
+func ParseComputeTransitV1TransitsComputePostResponse(rsp *http.Response) (*ComputeTransitV1TransitsComputePostResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ComputeTransitV1TransitsComputePostResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest TransitResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest HTTPValidationError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON422 = &dest
 
 	}
 

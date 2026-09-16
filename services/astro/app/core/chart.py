@@ -34,6 +34,7 @@ from app.core.constants import (
     SIGN_ARC,
     SIGN_LORDS,
     SIGNS,
+    Dignity,
     Planet,
     degree_in_sign,
     nakshatra_index,
@@ -62,7 +63,7 @@ class PlacedPlanet:
     pada: int
     is_retrograde: bool
     is_combust: bool
-    dignity: str
+    dignity: Dignity
     speed: float
 
 
@@ -149,7 +150,7 @@ def tropical_ascendant(t: Time, latitude: float, longitude_east: float) -> float
     return normalise_longitude(math.degrees(ascendant))
 
 
-def _dignity(planet: Planet, longitude: float) -> str:
+def _dignity(planet: Planet, longitude: float) -> Dignity:
     """Exalted, debilitated, own sign, moolatrikona, or neutral.
 
     The nodes are always neutral: dignity is ownership of a sign, and a

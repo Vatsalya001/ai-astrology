@@ -12,7 +12,7 @@ later phases both need them.
 from __future__ import annotations
 
 from enum import StrEnum
-from typing import Final
+from typing import Final, Literal
 
 # ─── the circle ──────────────────────────────────────────────────────
 
@@ -190,6 +190,14 @@ SPECIAL_ASPECTS: Final = {
 }
 
 UNIVERSAL_ASPECT: Final = 7
+
+#: The closed vocabulary of planetary dignity.
+#:
+#: A Literal rather than a bare str so a typo — "exalt", "own sign" —
+#: fails at the type level rather than travelling to the API boundary and
+#: being rejected there, or worse, reaching a UI that silently renders
+#: nothing for an unrecognised value.
+Dignity = Literal["exalted", "debilitated", "own_sign", "moolatrikona", "neutral"]
 
 
 def normalise_longitude(longitude: float) -> float:
