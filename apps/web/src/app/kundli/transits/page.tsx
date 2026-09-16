@@ -5,10 +5,12 @@ import { useEffect, useState } from 'react'
 
 import { TransitPanel } from '@/components/chart/TransitPanel'
 import { LoadError } from '@/components/LoadError'
+import { ProfileSwitcher } from '@/components/ProfileSwitcher'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
-import { astrologyApi, type NatalTransits } from '@/lib/astrology-api'
+import { astrologyApi, type BirthProfile, type NatalTransits } from '@/lib/astrology-api'
 import { AuthError } from '@/lib/auth-api'
+import { resolveProfile, useSelectedProfile } from '@/lib/profile-context'
 import { useRequireAuth } from '@/lib/use-require-auth'
 
 type State = 'loading' | 'ready' | 'error' | 'no-profile' | 'not-yet'
@@ -37,6 +39,8 @@ type State = 'loading' | 'ready' | 'error' | 'no-profile' | 'not-yet'
  */
 export default function TransitsPage() {
   const onUnauthenticated = useRequireAuth()
+  const { selectedId } = useSelectedProfile()
+  const [profiles, setProfiles] = useState<BirthProfile[]>([])
 
   const [data, setData] = useState<NatalTransits | null>(null)
   const [state, setState] = useState<State>('loading')
@@ -50,7 +54,17 @@ export default function TransitsPage() {
       .then(({ birth_profiles: profiles }) => {
         if (cancelled) return null
 
-        const first = profiles[0]
+        setProfiles(profiles)
+
+        /*
+          The SELECTED profile, not the first one.
+          `resolveProfile` falls back to the first when the stored id
+          names a profile that no longer exists — deleting one, or
+          editing one, which creates a new version with a new id.
+          Requesting the stale id gives a 404 that is indistinguishable
+          from "not yours", so the screen would show an error forever.
+        */
+        const first = resolveProfile(profiles, selectedId)
         if (!first) {
           setState('no-profile')
           return null
@@ -76,10 +90,14 @@ export default function TransitsPage() {
     return () => {
       cancelled = true
     }
-  }, [onUnauthenticated, attempt])
+  }, [onUnauthenticated, attempt, selectedId])
 
   return (
     <main className="mx-auto max-w-2xl px-4 py-8 sm:px-6">
+      <header className="mb-6 flex justify-end">
+        <ProfileSwitcher profiles={profiles} />
+      </header>
+
       {state === 'loading' && (
         <div className="space-y-3" aria-busy="true" aria-live="polite">
           <span className="sr-only">Loading transits…</span>

@@ -9,10 +9,12 @@ import { VargaSwitcher } from '@/components/chart/VargaSwitcher'
 import { parseChartData } from '@/components/chart/parse'
 import type { ChartData } from '@/components/chart/types'
 import { LoadError } from '@/components/LoadError'
+import { ProfileSwitcher } from '@/components/ProfileSwitcher'
 import { SectionLabel } from '@/components/ui'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { astrologyApi, type BirthProfile } from '@/lib/astrology-api'
+import { resolveProfile, useSelectedProfile } from '@/lib/profile-context'
 import { useRequireAuth } from '@/lib/use-require-auth'
 import { DEFAULT_VARGA, type VargaType } from '@/lib/varga'
 
@@ -34,9 +36,10 @@ type State = 'loading' | 'ready' | 'error' | 'no-profile' | 'unreadable'
  */
 export default function PlanetsPage() {
   const onUnauthenticated = useRequireAuth()
+  const { selectedId } = useSelectedProfile()
+  const [profiles, setProfiles] = useState<BirthProfile[]>([])
 
   const [varga, setVarga] = useState<VargaType>(DEFAULT_VARGA)
-  const [profile, setProfile] = useState<BirthProfile | null>(null)
   const [chart, setChart] = useState<ChartData | null>(null)
   const [state, setState] = useState<State>('loading')
   const [attempt, setAttempt] = useState(0)
@@ -67,12 +70,21 @@ export default function PlanetsPage() {
       .then(({ birth_profiles: profiles }) => {
         if (cancelled) return null
 
-        const first = profiles[0]
+        setProfiles(profiles)
+
+        /*
+          The SELECTED profile, not the first one.
+          `resolveProfile` falls back to the first when the stored id
+          names a profile that no longer exists — deleting one, or
+          editing one, which creates a new version with a new id.
+          Requesting the stale id gives a 404 that is indistinguishable
+          from "not yours", so the screen would show an error forever.
+        */
+        const first = resolveProfile(profiles, selectedId)
         if (!first) {
           setState('no-profile')
           return null
         }
-        setProfile(first)
         return astrologyApi.chart(first.id, varga)
       })
       .then((result) => {
@@ -97,7 +109,7 @@ export default function PlanetsPage() {
     return () => {
       cancelled = true
     }
-  }, [varga, attempt, onUnauthenticated])
+  }, [varga, attempt, onUnauthenticated, selectedId])
 
   function chooseVarga(next: VargaType) {
     setState('loading')
@@ -111,9 +123,9 @@ export default function PlanetsPage() {
 
   return (
     <main className="mx-auto max-w-4xl px-4 py-8 sm:px-6">
-      <header className="mb-6">
+      <header className="mb-6 flex flex-wrap items-baseline justify-between gap-3">
         <h1 className="font-serif text-2xl">Planets &amp; houses</h1>
-        {profile?.label && <p className="mt-1 text-sm text-ink-muted">{profile.label}</p>}
+        <ProfileSwitcher profiles={profiles} />
       </header>
 
       <VargaSwitcher

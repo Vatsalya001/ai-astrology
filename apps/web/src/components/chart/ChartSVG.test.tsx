@@ -43,9 +43,12 @@ const CHART: ChartData = {
     planet({ planet: 'Saturn', sign: 'Capricorn', signIndex: 9, house: 11, degree: 12.3, isRetrograde: true }),
     planet({ planet: 'Mercury', sign: 'Aquarius', signIndex: 10, house: 12, degree: 28.1, isCombust: true }),
   ],
+  // The diagram does not draw yogas; they are on ChartData because one
+  // response carries the whole chart.
+  yogas: [],
 }
 
-const NO_TIME: ChartData = { ascendant: null, houses: null, planets: CHART.planets }
+const NO_TIME: ChartData = { ascendant: null, houses: null, planets: CHART.planets, yogas: [] }
 
 describe('ChartSVG', () => {
   it('renders every planet in both styles', () => {
