@@ -21,7 +21,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from app import middleware, telemetry
-from app.api import health
+from app.api import charts, health
 from app.env_check import assert_no_typos
 from app.observability import configure as configure_logging
 from app.settings import settings
@@ -68,3 +68,8 @@ app = FastAPI(
 
 middleware.install(app, internal_token=settings.internal_token)
 app.include_router(health.router)
+
+# The chart endpoints. Internal only — this service must never be
+# reachable from the internet, which is enforced by the network topology
+# and asserted by the smoke suite's loopback check.
+app.include_router(charts.router)

@@ -1,6 +1,476 @@
 {
   "components": {
     "schemas": {
+      "AscendantPosition": {
+        "additionalProperties": false,
+        "properties": {
+          "degree": {
+            "exclusiveMaximum": 30.0,
+            "minimum": 0.0,
+            "title": "Degree",
+            "type": "number"
+          },
+          "longitude": {
+            "description": "Sidereal ecliptic longitude",
+            "exclusiveMaximum": 360.0,
+            "minimum": 0.0,
+            "title": "Longitude",
+            "type": "number"
+          },
+          "nakshatra": {
+            "title": "Nakshatra",
+            "type": "string"
+          },
+          "pada": {
+            "maximum": 4.0,
+            "minimum": 1.0,
+            "title": "Pada",
+            "type": "integer"
+          },
+          "sign": {
+            "title": "Sign",
+            "type": "string"
+          },
+          "sign_index": {
+            "description": "0 = Aries",
+            "maximum": 11.0,
+            "minimum": 0.0,
+            "title": "Sign Index",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "longitude",
+          "sign",
+          "sign_index",
+          "degree",
+          "nakshatra",
+          "pada"
+        ],
+        "title": "AscendantPosition",
+        "type": "object"
+      },
+      "BirthData": {
+        "additionalProperties": false,
+        "description": "Everything needed to compute a chart.\n\nThe instant is a single aware UTC timestamp rather than a local date,\na local time and a zone. Go owns timezone resolution \u2014 its stdlib\ncarries the full historical tzdata, including the 1942-45 Indian\nwartime offset \u2014 and resolves it once when the profile is created.\nRe-deriving it here would be a second implementation of the hardest\npart of the problem, free to disagree with the first.",
+        "properties": {
+          "ayanamsa": {
+            "default": "lahiri",
+            "enum": [
+              "lahiri",
+              "raman",
+              "kp"
+            ],
+            "title": "Ayanamsa",
+            "type": "string"
+          },
+          "house_system": {
+            "const": "whole_sign",
+            "default": "whole_sign",
+            "title": "House System",
+            "type": "string"
+          },
+          "latitude": {
+            "maximum": 90.0,
+            "minimum": -90.0,
+            "title": "Latitude",
+            "type": "number"
+          },
+          "longitude": {
+            "maximum": 180.0,
+            "minimum": -180.0,
+            "title": "Longitude",
+            "type": "number"
+          },
+          "time_accuracy": {
+            "default": "exact",
+            "enum": [
+              "exact",
+              "approximate",
+              "unknown"
+            ],
+            "title": "Time Accuracy",
+            "type": "string"
+          },
+          "utc_instant": {
+            "description": "Birth instant in UTC. Must be timezone-aware.",
+            "examples": [
+              "1994-08-17T09:05:00Z"
+            ],
+            "format": "date-time",
+            "title": "Utc Instant",
+            "type": "string"
+          }
+        },
+        "required": [
+          "utc_instant",
+          "latitude",
+          "longitude"
+        ],
+        "title": "BirthData",
+        "type": "object"
+      },
+      "ChartMeta": {
+        "additionalProperties": false,
+        "description": "Provenance. Every one of these fields answers \"why did it say that?\".",
+        "properties": {
+          "ayanamsa": {
+            "title": "Ayanamsa",
+            "type": "string"
+          },
+          "ayanamsa_value": {
+            "title": "Ayanamsa Value",
+            "type": "number"
+          },
+          "calculation_system": {
+            "const": "vedic",
+            "default": "vedic",
+            "title": "Calculation System",
+            "type": "string"
+          },
+          "computed_at": {
+            "format": "date-time",
+            "title": "Computed At",
+            "type": "string"
+          },
+          "engine_version": {
+            "title": "Engine Version",
+            "type": "string"
+          },
+          "house_system": {
+            "title": "House System",
+            "type": "string"
+          },
+          "schema_version": {
+            "default": 1,
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "time_accuracy": {
+            "enum": [
+              "exact",
+              "approximate",
+              "unknown"
+            ],
+            "title": "Time Accuracy",
+            "type": "string"
+          }
+        },
+        "required": [
+          "ayanamsa",
+          "ayanamsa_value",
+          "house_system",
+          "engine_version",
+          "computed_at",
+          "time_accuracy"
+        ],
+        "title": "ChartMeta",
+        "type": "object"
+      },
+      "ChartRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "birth": {
+            "$ref": "#/components/schemas/BirthData"
+          },
+          "include_dashas": {
+            "default": true,
+            "title": "Include Dashas",
+            "type": "boolean"
+          },
+          "include_navamsa": {
+            "default": true,
+            "title": "Include Navamsa",
+            "type": "boolean"
+          },
+          "include_yogas": {
+            "default": true,
+            "title": "Include Yogas",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "birth"
+        ],
+        "title": "ChartRequest",
+        "type": "object"
+      },
+      "ChartResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "ascendant": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AscendantPosition"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "dashas": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/DashaPeriodOut"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dashas"
+          },
+          "houses": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/HousePosition"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Houses"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ChartMeta"
+          },
+          "navamsa": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DivisionalChart"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "planets": {
+            "items": {
+              "$ref": "#/components/schemas/PlanetPosition"
+            },
+            "title": "Planets",
+            "type": "array"
+          },
+          "summary": {
+            "$ref": "#/components/schemas/ChartSummary"
+          },
+          "yogas": {
+            "items": {
+              "$ref": "#/components/schemas/YogaResult"
+            },
+            "title": "Yogas",
+            "type": "array"
+          }
+        },
+        "required": [
+          "meta",
+          "ascendant",
+          "houses",
+          "planets",
+          "summary"
+        ],
+        "title": "ChartResponse",
+        "type": "object"
+      },
+      "ChartSummary": {
+        "additionalProperties": false,
+        "description": "The four facts every UI card and AI context needs.\n\nPresent so a consumer does not have to walk the whole structure for\n\"what is my moon sign\" \u2014 which is the most-asked question the chart\ncan answer.",
+        "properties": {
+          "ascendant_sign": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ascendant Sign"
+          },
+          "moon_nakshatra": {
+            "title": "Moon Nakshatra",
+            "type": "string"
+          },
+          "moon_nakshatra_pada": {
+            "maximum": 4.0,
+            "minimum": 1.0,
+            "title": "Moon Nakshatra Pada",
+            "type": "integer"
+          },
+          "moon_sign": {
+            "title": "Moon Sign",
+            "type": "string"
+          },
+          "sun_sign": {
+            "title": "Sun Sign",
+            "type": "string"
+          }
+        },
+        "required": [
+          "sun_sign",
+          "moon_sign",
+          "ascendant_sign",
+          "moon_nakshatra",
+          "moon_nakshatra_pada"
+        ],
+        "title": "ChartSummary",
+        "type": "object"
+      },
+      "DashaPeriodOut": {
+        "additionalProperties": false,
+        "properties": {
+          "children": {
+            "items": {
+              "$ref": "#/components/schemas/DashaPeriodOut"
+            },
+            "title": "Children",
+            "type": "array"
+          },
+          "end": {
+            "format": "date-time",
+            "title": "End",
+            "type": "string"
+          },
+          "level": {
+            "maximum": 3.0,
+            "minimum": 1.0,
+            "title": "Level",
+            "type": "integer"
+          },
+          "planet": {
+            "title": "Planet",
+            "type": "string"
+          },
+          "start": {
+            "format": "date-time",
+            "title": "Start",
+            "type": "string"
+          }
+        },
+        "required": [
+          "planet",
+          "start",
+          "end",
+          "level"
+        ],
+        "title": "DashaPeriodOut",
+        "type": "object"
+      },
+      "DashaRequest": {
+        "additionalProperties": false,
+        "description": "Dashas alone, for a caller that already has the Moon's position.",
+        "properties": {
+          "birth_instant": {
+            "format": "date-time",
+            "title": "Birth Instant",
+            "type": "string"
+          },
+          "max_level": {
+            "default": 3,
+            "maximum": 3.0,
+            "minimum": 1.0,
+            "title": "Max Level",
+            "type": "integer"
+          },
+          "moon_longitude": {
+            "description": "Sidereal ecliptic longitude",
+            "exclusiveMaximum": 360.0,
+            "minimum": 0.0,
+            "title": "Moon Longitude",
+            "type": "number"
+          }
+        },
+        "required": [
+          "moon_longitude",
+          "birth_instant"
+        ],
+        "title": "DashaRequest",
+        "type": "object"
+      },
+      "DashaResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "balance_at_birth_days": {
+            "title": "Balance At Birth Days",
+            "type": "number"
+          },
+          "periods": {
+            "items": {
+              "$ref": "#/components/schemas/DashaPeriodOut"
+            },
+            "title": "Periods",
+            "type": "array"
+          }
+        },
+        "required": [
+          "periods",
+          "balance_at_birth_days"
+        ],
+        "title": "DashaResponse",
+        "type": "object"
+      },
+      "DivisionalChart": {
+        "additionalProperties": false,
+        "description": "A D9 or D10. No yogas \u2014 they are read from the rasi.",
+        "properties": {
+          "ascendant": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AscendantPosition"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "houses": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/HousePosition"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Houses"
+          },
+          "planets": {
+            "items": {
+              "$ref": "#/components/schemas/PlanetPosition"
+            },
+            "title": "Planets",
+            "type": "array"
+          }
+        },
+        "required": [
+          "ascendant",
+          "houses",
+          "planets"
+        ],
+        "title": "DivisionalChart",
+        "type": "object"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "title": "Detail",
+            "type": "array"
+          }
+        },
+        "title": "HTTPValidationError",
+        "type": "object"
+      },
       "HealthResponse": {
         "properties": {
           "service": {
@@ -22,6 +492,432 @@
           "version"
         ],
         "title": "HealthResponse",
+        "type": "object"
+      },
+      "HousePosition": {
+        "additionalProperties": false,
+        "properties": {
+          "house": {
+            "maximum": 12.0,
+            "minimum": 1.0,
+            "title": "House",
+            "type": "integer"
+          },
+          "lord": {
+            "title": "Lord",
+            "type": "string"
+          },
+          "planets": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Planets",
+            "type": "array"
+          },
+          "sign": {
+            "title": "Sign",
+            "type": "string"
+          },
+          "sign_index": {
+            "description": "0 = Aries",
+            "maximum": 11.0,
+            "minimum": 0.0,
+            "title": "Sign Index",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "house",
+          "sign",
+          "sign_index",
+          "lord"
+        ],
+        "title": "HousePosition",
+        "type": "object"
+      },
+      "PlanetPosition": {
+        "additionalProperties": false,
+        "properties": {
+          "aspects": {
+            "items": {
+              "maximum": 12.0,
+              "minimum": 1.0,
+              "type": "integer"
+            },
+            "title": "Aspects",
+            "type": "array"
+          },
+          "degree": {
+            "exclusiveMaximum": 30.0,
+            "minimum": 0.0,
+            "title": "Degree",
+            "type": "number"
+          },
+          "dignity": {
+            "enum": [
+              "exalted",
+              "debilitated",
+              "own_sign",
+              "moolatrikona",
+              "neutral"
+            ],
+            "title": "Dignity",
+            "type": "string"
+          },
+          "house": {
+            "maximum": 12.0,
+            "minimum": 0.0,
+            "title": "House",
+            "type": "integer"
+          },
+          "is_combust": {
+            "title": "Is Combust",
+            "type": "boolean"
+          },
+          "is_retrograde": {
+            "title": "Is Retrograde",
+            "type": "boolean"
+          },
+          "longitude": {
+            "description": "Sidereal ecliptic longitude",
+            "exclusiveMaximum": 360.0,
+            "minimum": 0.0,
+            "title": "Longitude",
+            "type": "number"
+          },
+          "nakshatra": {
+            "title": "Nakshatra",
+            "type": "string"
+          },
+          "nakshatra_index": {
+            "maximum": 26.0,
+            "minimum": 0.0,
+            "title": "Nakshatra Index",
+            "type": "integer"
+          },
+          "pada": {
+            "maximum": 4.0,
+            "minimum": 1.0,
+            "title": "Pada",
+            "type": "integer"
+          },
+          "planet": {
+            "title": "Planet",
+            "type": "string"
+          },
+          "sign": {
+            "title": "Sign",
+            "type": "string"
+          },
+          "sign_index": {
+            "description": "0 = Aries",
+            "maximum": 11.0,
+            "minimum": 0.0,
+            "title": "Sign Index",
+            "type": "integer"
+          },
+          "speed": {
+            "title": "Speed",
+            "type": "number"
+          }
+        },
+        "required": [
+          "planet",
+          "longitude",
+          "sign",
+          "sign_index",
+          "degree",
+          "house",
+          "nakshatra",
+          "nakshatra_index",
+          "pada",
+          "is_retrograde",
+          "is_combust",
+          "dignity",
+          "speed"
+        ],
+        "title": "PlanetPosition",
+        "type": "object"
+      },
+      "SadeSatiResult": {
+        "additionalProperties": false,
+        "properties": {
+          "current_phase": {
+            "anyOf": [
+              {
+                "enum": [
+                  "rising",
+                  "peak",
+                  "setting"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Phase"
+          },
+          "houses_from_moon": {
+            "maximum": 12.0,
+            "minimum": 1.0,
+            "title": "Houses From Moon",
+            "type": "integer"
+          },
+          "is_active": {
+            "title": "Is Active",
+            "type": "boolean"
+          },
+          "moon_sign": {
+            "title": "Moon Sign",
+            "type": "string"
+          },
+          "saturn_sign": {
+            "title": "Saturn Sign",
+            "type": "string"
+          }
+        },
+        "required": [
+          "is_active",
+          "current_phase",
+          "saturn_sign",
+          "moon_sign",
+          "houses_from_moon"
+        ],
+        "title": "SadeSatiResult",
+        "type": "object"
+      },
+      "TransitPosition": {
+        "additionalProperties": false,
+        "properties": {
+          "degree": {
+            "exclusiveMaximum": 30.0,
+            "minimum": 0.0,
+            "title": "Degree",
+            "type": "number"
+          },
+          "house_from_ascendant": {
+            "anyOf": [
+              {
+                "maximum": 12.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "House From Ascendant"
+          },
+          "house_from_moon": {
+            "maximum": 12.0,
+            "minimum": 1.0,
+            "title": "House From Moon",
+            "type": "integer"
+          },
+          "is_retrograde": {
+            "title": "Is Retrograde",
+            "type": "boolean"
+          },
+          "longitude": {
+            "description": "Sidereal ecliptic longitude",
+            "exclusiveMaximum": 360.0,
+            "minimum": 0.0,
+            "title": "Longitude",
+            "type": "number"
+          },
+          "planet": {
+            "title": "Planet",
+            "type": "string"
+          },
+          "sign": {
+            "title": "Sign",
+            "type": "string"
+          },
+          "sign_index": {
+            "description": "0 = Aries",
+            "maximum": 11.0,
+            "minimum": 0.0,
+            "title": "Sign Index",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "planet",
+          "longitude",
+          "sign",
+          "sign_index",
+          "degree",
+          "is_retrograde",
+          "house_from_moon",
+          "house_from_ascendant"
+        ],
+        "title": "TransitPosition",
+        "type": "object"
+      },
+      "TransitRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "at": {
+            "format": "date-time",
+            "title": "At",
+            "type": "string"
+          },
+          "ayanamsa": {
+            "default": "lahiri",
+            "enum": [
+              "lahiri",
+              "raman",
+              "kp"
+            ],
+            "title": "Ayanamsa",
+            "type": "string"
+          },
+          "natal_ascendant_sign": {
+            "anyOf": [
+              {
+                "description": "0 = Aries",
+                "maximum": 11.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Natal Ascendant Sign"
+          },
+          "natal_moon_sign": {
+            "description": "0 = Aries",
+            "maximum": 11.0,
+            "minimum": 0.0,
+            "title": "Natal Moon Sign",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "at",
+          "natal_moon_sign"
+        ],
+        "title": "TransitRequest",
+        "type": "object"
+      },
+      "TransitResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "at": {
+            "format": "date-time",
+            "title": "At",
+            "type": "string"
+          },
+          "ayanamsa": {
+            "title": "Ayanamsa",
+            "type": "string"
+          },
+          "ayanamsa_value": {
+            "title": "Ayanamsa Value",
+            "type": "number"
+          },
+          "sade_sati": {
+            "$ref": "#/components/schemas/SadeSatiResult"
+          },
+          "transits": {
+            "items": {
+              "$ref": "#/components/schemas/TransitPosition"
+            },
+            "title": "Transits",
+            "type": "array"
+          }
+        },
+        "required": [
+          "at",
+          "ayanamsa",
+          "ayanamsa_value",
+          "transits",
+          "sade_sati"
+        ],
+        "title": "TransitResponse",
+        "type": "object"
+      },
+      "ValidationError": {
+        "properties": {
+          "ctx": {
+            "title": "Context",
+            "type": "object"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "title": "Location",
+            "type": "array"
+          },
+          "msg": {
+            "title": "Message",
+            "type": "string"
+          },
+          "type": {
+            "title": "Error Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError",
+        "type": "object"
+      },
+      "YogaResult": {
+        "additionalProperties": false,
+        "properties": {
+          "involved_houses": {
+            "items": {
+              "maximum": 12.0,
+              "minimum": 1.0,
+              "type": "integer"
+            },
+            "title": "Involved Houses",
+            "type": "array"
+          },
+          "involved_planets": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Involved Planets",
+            "type": "array"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "strength": {
+            "enum": [
+              "strong",
+              "moderate"
+            ],
+            "title": "Strength",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "strength",
+          "involved_planets",
+          "involved_houses"
+        ],
+        "title": "YogaResult",
         "type": "object"
       }
     }
@@ -52,6 +948,132 @@
         "summary": "Health",
         "tags": [
           "ops"
+        ]
+      }
+    },
+    "/v1/charts/compute": {
+      "post": {
+        "description": "Birth data in, full chart out.\n\nIdempotent and stateless. Nothing is written anywhere \u2014 `api-service`\nowns every byte of persistence, and this service is a pure function\nthat happens to be reachable over HTTP.",
+        "operationId": "compute_chart_v1_charts_compute_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChartRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChartResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Compute Chart",
+        "tags": [
+          "charts"
+        ]
+      }
+    },
+    "/v1/dashas/compute": {
+      "post": {
+        "description": "The Vimshottari tree from a Moon longitude.\n\nSeparate from the chart endpoint so `api-service` can recompute a\ntree \u2014 after a birth-time correction, say \u2014 without recomputing every\nplanet.",
+        "operationId": "compute_dashas_v1_dashas_compute_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DashaRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DashaResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Compute Dashas",
+        "tags": [
+          "charts"
+        ]
+      }
+    },
+    "/v1/transits/compute": {
+      "post": {
+        "description": "Current positions against a natal chart, plus Sade Sati.",
+        "operationId": "compute_transit_v1_transits_compute_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TransitRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TransitResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Compute Transit",
+        "tags": [
+          "charts"
         ]
       }
     }
