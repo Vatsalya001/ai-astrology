@@ -59,7 +59,15 @@ export async function ensureAccessToken(): Promise<string | null> {
   return refreshInFlight
 }
 
-async function authed<T>(
+/**
+ * One authenticated fetch, shared by every feature client.
+ *
+ * Exported so `astrology-api.ts` uses the same token handling, the same
+ * single 401 retry and the same error shape. A second copy would drift,
+ * and the way it would drift is by forgetting the retry — which shows up
+ * as users being signed out fifteen minutes into a session.
+ */
+export async function authed<T>(
   path: string,
   init: RequestInit & { retry?: boolean } = {},
 ): Promise<T> {

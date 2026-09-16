@@ -79,7 +79,15 @@ export interface EventMap {
   birth_time_unknown_selected: { user_id: string }
   // Note: result_count, never the query — a place search is location PII.
   place_search_performed: { result_count: number }
+  place_selected_via_map: { user_id: string }
+  // time_accuracy is the enum, never the time. The three values are the
+  // whole point of the field and identify nobody.
+  birth_profile_created: { user_id: string; time_accuracy: string }
   chart_generated: { user_id: string; chart_type: string; duration_ms: number }
+  // An error CODE. astro-service's message names fields, and a field
+  // name sitting next to a birth record is a sentence about a person.
+  chart_generation_failed: { error_code: string }
+  birth_profile_edited: { user_id: string; new_version: number }
 
   // Phase 3 — Kundli UI
   kundli_viewed: { user_id: string; chart_type: string }

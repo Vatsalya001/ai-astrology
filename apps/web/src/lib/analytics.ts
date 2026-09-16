@@ -38,5 +38,53 @@ export function identify(userId: string): void {
 
 /** Clears the identity on sign-out, so the next session is not attributed. */
 export function resetAnalytics(): void {
+  forgetUserId()
   client.reset()
+}
+
+/**
+ * Emits an event that needs the signed-in user's id.
+ *
+ * The id is fetched once and remembered. Without this, the natural
+ * spelling is `usersApi.me().then((me) => track(...))` at each call
+ * site, which costs a request per event — three of them in the birth
+ * flow alone — and tempts the next person into passing whatever id
+ * happens to be in scope instead.
+ *
+ * That temptation is not hypothetical: the first version of the birth
+ * flow passed the BIRTH PROFILE id as `user_id` on one event and an
+ * empty string on another. Both type-check. Neither is a user.
+ *
+ * An event is dropped rather than sent with a wrong or blank id. An
+ * analytics row attributed to nobody is noise; one attributed to the
+ * wrong id is worse, because it looks like a fact.
+ */
+export async function trackAsUser<E extends EventName>(
+  event: E,
+  payload: Omit<EventMap[E], 'user_id'>,
+): Promise<void> {
+  const userId = await currentUserId()
+  if (!userId) return
+  client.track(event, { ...payload, user_id: userId } as EventMap[E])
+}
+
+let cachedUserId: string | null = null
+
+async function currentUserId(): Promise<string | null> {
+  if (cachedUserId) return cachedUserId
+  try {
+    const { usersApi } = await import('./users-api')
+    const me = await usersApi.me()
+    cachedUserId = me.id
+    return cachedUserId
+  } catch {
+    // Not signed in, or the call failed. Either way there is no id, and
+    // an event without one is better dropped than guessed.
+    return null
+  }
+}
+
+/** Clears the memoised id. Called from resetAnalytics on sign-out. */
+function forgetUserId(): void {
+  cachedUserId = null
 }
