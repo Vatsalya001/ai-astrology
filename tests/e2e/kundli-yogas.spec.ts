@@ -254,4 +254,91 @@ test.describe('the profile switcher', () => {
       '00000000-0000-0000-0000-000000000000',
     )
   })
+
+  /**
+   * The skip link must land somewhere on every screen.
+   *
+   * `layout.tsx` renders `<a href="#main">` as the first focusable
+   * element — it exists for a keyboard user on a slow connection. All
+   * five kundli routes shipped their `<main>` without `id="main"`, so
+   * the link pointed at a fragment that did not exist and the one
+   * control most needed by the people it serves did nothing.
+   */
+  test('the skip link reaches main on every kundli route', async () => {
+    const page = shared
+
+    for (const route of ['/kundli/chart', '/kundli/planets', '/kundli/dashas', '/kundli/transits', '/kundli/yogas']) {
+      await page.goto(route)
+      await expect(page.locator('#main'), `${route} has no #main`).toHaveCount(1)
+
+      // And it is the <main>, not some other element that took the id.
+      const tag = await page.locator('#main').evaluate((el) => el.tagName)
+      expect(tag, route).toBe('MAIN')
+    }
+  })
+
+  /**
+   * Switching profile must not leave one person's sub-periods under
+   * another person's chart.
+   *
+   * The dashas page replaced only `levels[0]` and carried `prev[1]` and
+   * `prev[2]` through — correct for refetching the same chart, wrong for
+   * a profile switch, which runs the same effect. Nothing on screen said
+   * the lower tracks belonged to someone else.
+   */
+  test('switching profile clears the drilled-into dasha tracks', async () => {
+    const page = shared
+    await page.goto('/kundli/dashas')
+    await expect(page.getByRole('listitem')).toHaveCount(9, { timeout: 30_000 })
+
+    // Drill in, so there IS a second track to leak.
+    await page.getByRole('button', { name: /Venus mahadasha/i }).click()
+    await page.getByRole('dialog').getByRole('button', { name: /close/i }).click()
+
+    const antardashas = page.getByRole('region', { name: /Antardasha periods/i })
+    await expect(antardashas.getByRole('listitem')).toHaveCount(9, { timeout: 30_000 })
+
+    // Now switch to the other chart.
+    const switcher = page.getByRole('combobox', { name: /chart/i })
+    const options = await switcher
+      .locator('option')
+      .evaluateAll((els) => els.map((el) => (el as HTMLOptionElement).value))
+    const current = await switcher.inputValue()
+    const other = options.find((v) => v !== current)
+    expect(other, 'only one profile — the second was not created').toBeDefined()
+    await switcher.selectOption(other!)
+
+    await expect(page.getByRole('listitem').first()).toBeVisible({ timeout: 30_000 })
+
+    // The antardasha track is gone, not showing the other person's.
+    await expect(
+      page.getByText(/choose a mahadasha above/i),
+      'the previous profile’s antardashas survived the switch',
+    ).toBeVisible({ timeout: 30_000 })
+  })
+
+  /**
+   * The varga radios keep focus while a chart loads.
+   *
+   * Disabling the fieldset disabled the radio the user was standing on,
+   * and the browser blurs a focused element that becomes disabled — so
+   * ArrowRight threw focus to the document root and D10 was unreachable
+   * by keyboard.
+   */
+  test('keeps keyboard focus on the varga control while the chart reloads', async () => {
+    const page = shared
+    await page.goto('/kundli/planets')
+    await expect(page.getByRole('row')).toHaveCount(10, { timeout: 30_000 })
+
+    await page.getByRole('radio', { name: /rasi/i }).focus()
+    await page.keyboard.press('ArrowRight')
+
+    // Immediately after the change, while the refetch is in flight.
+    const focused = await page.evaluate(() => document.activeElement?.tagName ?? 'NONE')
+    expect(focused, 'focus left the radio group when the fieldset was disabled').toBe('INPUT')
+
+    // And a second arrow still moves, which it could not when blurred.
+    await page.keyboard.press('ArrowRight')
+    await expect(page.getByRole('radio', { name: /dasamsa/i })).toBeChecked({ timeout: 30_000 })
+  })
 })

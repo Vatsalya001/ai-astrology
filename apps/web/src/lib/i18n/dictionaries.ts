@@ -320,6 +320,7 @@ export const en = {
       'Dashas need a birth time. The sequence starts from the Moon’s exact position at birth, which cannot be pinned down without one.',
     dashasAddBirthTime: 'Add a birth time',
     dashaCurrent: 'Current period',
+    dashaLevelFailed: 'These periods could not be loaded.',
     dashaChooseParent: 'Choose a {parent} above to see its periods.',
     dashaPeriodsOf: '{level} periods',
 
@@ -328,6 +329,7 @@ export const en = {
       'Transits are read against your birth chart. Add your birth details and this fills in — a birth date is enough, a time is not needed here.',
     transitsNotYet:
       'Today’s sky is still being prepared. Positions are computed every six hours; this usually resolves within a few minutes of a fresh start.',
+    transitsPageTitle: 'Transits',
     transitsTitle: 'Right now in the sky',
     transitsFrame: 'Houses counted from your Moon in {sign}, the traditional frame for',
     transitsComputed: 'Computed {when}.',
@@ -673,6 +675,7 @@ export const hi: Dictionary = {
       'दशाओं के लिए जन्म समय चाहिए। क्रम जन्म के समय चंद्रमा की ठीक स्थिति से शुरू होता है, जो समय के बिना तय नहीं हो सकती।',
     dashasAddBirthTime: 'जन्म समय जोड़ें',
     dashaCurrent: 'वर्तमान दशा',
+    dashaLevelFailed: 'ये दशाएँ लोड नहीं हो सकीं।',
     dashaChooseParent: 'इसकी दशाएँ देखने के लिए ऊपर एक {parent} चुनें।',
     dashaPeriodsOf: '{level} काल',
 
@@ -681,6 +684,7 @@ export const hi: Dictionary = {
       'गोचर आपकी जन्म कुंडली के सापेक्ष पढ़े जाते हैं। जन्म विवरण जोड़ें और यह भर जाएगा — यहाँ जन्म तिथि पर्याप्त है, समय आवश्यक नहीं।',
     transitsNotYet:
       'आज का आकाश अभी तैयार हो रहा है। स्थितियाँ हर छह घंटे में गणना होती हैं; नई शुरुआत के कुछ मिनटों में यह ठीक हो जाता है।',
+    transitsPageTitle: 'गोचर',
     transitsTitle: 'इस समय आकाश में',
     transitsFrame: '{sign} में आपके चंद्रमा से गिने गए भाव, जो इसका पारंपरिक आधार है —',
     transitsComputed: '{when} पर गणना की गई।',

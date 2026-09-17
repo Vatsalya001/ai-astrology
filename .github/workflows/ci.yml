@@ -138,6 +138,25 @@ jobs:
             exit 1
           fi
 
+  integrity:
+    name: Working tree matches the index
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # A fresh checkout, so any mismatch here is the checkout itself
+      # being wrong rather than somebody's edit — which makes this the
+      # one place the check is unambiguous.
+      #
+      # It exists because two tracked files were observed holding wrong
+      # bytes on a developer machine on 2026-09-18 — the JPL ephemeris
+      # kernel and a golden fixture — while `git status`, `git diff` and
+      # `git update-index --really-refresh` all reported a clean tree.
+      # Only re-hashing found them, and both had surfaced until then as
+      # puzzling test failures.
+      - name: Every tracked file matches its blob
+        run: ./scripts/check-integrity.sh
+
   secrets:
     name: Secret scan
     runs-on: ubuntu-latest

@@ -97,7 +97,20 @@ export default function DashasPage() {
         }
 
         setCurrentAt(Date.parse(current.at))
-        setLevels((prev) => [{ periods: tree.periods, loading: false }, prev[1]!, prev[2]!])
+        /*
+          Every level replaced, not just the first.
+
+          This read `[{...}, prev[1]!, prev[2]!]`, which is right for a
+          refetch of the same chart and wrong for a profile switch: the
+          effect also re-runs on `selectedId`, so one person's
+          mahadashas rendered above another person's antardashas and
+          pratyantardashas, with nothing on screen to say so.
+        */
+        setLevels([
+          { periods: tree.periods, loading: false },
+          { periods: [], loading: false },
+          { periods: [], loading: false },
+        ])
         setState('ready')
       })
       .catch((err: unknown) => {
@@ -110,8 +123,12 @@ export default function DashasPage() {
     }
   }, [onUnauthenticated, attempt, selectedId])
 
+  /** Remembered so a failed level can be retried without re-tapping. */
+  const [lastParent, setLastParent] = useState<Record<number, string | null>>({})
+
   function drillDown(level: number, parentId: string | null) {
     if (!profileId || level > 2) return
+    setLastParent((prev) => ({ ...prev, [level]: parentId }))
 
     setLevels((prev) => {
       const next = [...prev]
@@ -136,7 +153,7 @@ export default function DashasPage() {
         if (!onUnauthenticated(err)) {
           setLevels((prev) => {
             const next = [...prev]
-            next[level] = { periods: [], loading: false }
+            next[level] = { periods: [], loading: false, failed: true }
             return next
           })
         }
@@ -144,7 +161,7 @@ export default function DashasPage() {
   }
 
   return (
-    <main className="mx-auto max-w-4xl px-4 py-8 sm:px-6">
+    <main id="main" className="mx-auto max-w-4xl px-4 py-8 sm:px-6">
       <header className="mb-6 flex flex-wrap items-baseline justify-between gap-3">
         <h1 className="font-serif text-2xl">{t.chart.dashasTitle}</h1>
         <ProfileSwitcher profiles={profiles} />
@@ -187,7 +204,12 @@ export default function DashasPage() {
       )}
 
       {state === 'ready' && (
-        <DashaTimeline levels={levels} currentAt={currentAt} onDrillDown={drillDown} />
+        <DashaTimeline
+          levels={levels}
+          currentAt={currentAt}
+          onDrillDown={drillDown}
+          onRetryLevel={(level) => drillDown(level, lastParent[level] ?? null)}
+        />
       )}
     </main>
   )

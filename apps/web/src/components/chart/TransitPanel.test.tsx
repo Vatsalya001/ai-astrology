@@ -98,16 +98,115 @@ describe('TransitPanel', () => {
   })
 
   /**
-   * Transits refresh every six hours by a worker.
+   * The instant the positions were COMPUTED for, not asked for.
    *
-   * A panel headed "right now in the sky" that is silently four hours
-   * stale is a small lie told confidently. The instant is one line, and
-   * it is the difference between a reader trusting the screen and a
-   * reader finding out later that they should not have.
+   * `data.at` is the query time — api-service defaults it to `now()` —
+   * while each row carries the six-hourly slot the refresher wrote it
+   * at. This panel rendered `data.at`, so a sky up to six hours old was
+   * stamped as computed this second, and a worker down for three days
+   * still read "computed just now".
+   *
+   * The original test set `at` EQUAL to the row timestamp, so the two
+   * were indistinguishable and it asserted only `/2026/`. They differ
+   * here by design — that is the whole point.
    */
-  it('shows when the positions were computed', () => {
-    renderPanel(data({ at: '2026-09-16T12:00:00Z' }))
-    expect(screen.getByText(/computed/i)).toHaveTextContent(/2026/)
+  /**
+   * Proved by what the output DEPENDS ON, not by a literal time.
+   *
+   * The rendered string is local — `12:00Z` reads as "5:30 PM" in
+   * Asia/Calcutta — so asserting a literal makes the test pass or fail
+   * on the machine's timezone rather than on the code. These two assert
+   * the dependency directly: changing `at` must change nothing, and
+   * changing the row timestamp must change the line.
+   */
+  it('ignores the request instant entirely', () => {
+    const row = '2026-09-16T12:00:00Z'
+
+    const first = render(
+      <LocaleProvider>
+        <TransitPanel
+          data={data({ at: '2026-09-16T17:55:00Z', transits: [position({ timestamp: row })] })}
+        />
+      </LocaleProvider>,
+    )
+    const withLateAt = screen.getByText(/computed/i).textContent
+    first.unmount()
+
+    render(
+      <LocaleProvider>
+        <TransitPanel
+          data={data({ at: '2026-09-16T12:00:01Z', transits: [position({ timestamp: row })] })}
+        />
+      </LocaleProvider>,
+    )
+    const withEarlyAt = screen.getByText(/computed/i).textContent
+
+    expect(
+      withLateAt,
+      'the request instant changed the line, so `data.at` is still being rendered',
+    ).toBe(withEarlyAt)
+  })
+
+  it('tracks the row timestamp', () => {
+    const first = render(
+      <LocaleProvider>
+        <TransitPanel
+          data={data({ transits: [position({ timestamp: '2026-09-16T00:00:00Z' })] })}
+        />
+      </LocaleProvider>,
+    )
+    const early = screen.getByText(/computed/i).textContent
+    first.unmount()
+
+    render(
+      <LocaleProvider>
+        <TransitPanel
+          data={data({ transits: [position({ timestamp: '2026-09-16T18:00:00Z' })] })}
+        />
+      </LocaleProvider>,
+    )
+    const late = screen.getByText(/computed/i).textContent
+
+    expect(early, 'the row timestamp does not drive the line').not.toBe(late)
+  })
+
+  /**
+   * The OLDEST row, because a partial refresh can leave one planet
+   * behind and the panel is only as fresh as its stalest position.
+   */
+  it('reports the oldest position when a refresh was partial', () => {
+    const only = render(
+      <LocaleProvider>
+        <TransitPanel
+          data={data({ transits: [position({ timestamp: '2026-09-16T06:00:00Z' })] })}
+        />
+      </LocaleProvider>,
+    )
+    const oldestAlone = screen.getByText(/computed/i).textContent
+    only.unmount()
+
+    render(
+      <LocaleProvider>
+        <TransitPanel
+          data={data({
+            transits: [
+              position({ planet: 'Saturn', timestamp: '2026-09-16T06:00:00Z' }),
+              position({ planet: 'Jupiter', timestamp: '2026-09-16T18:00:00Z' }),
+            ],
+          })}
+        />
+      </LocaleProvider>,
+    )
+
+    expect(
+      screen.getByText(/computed/i).textContent,
+      'the freshest row was reported, overstating how current the set is',
+    ).toBe(oldestAlone)
+  })
+
+  it('omits the line rather than inventing one when no row has a usable timestamp', () => {
+    renderPanel(data({ transits: [position({ timestamp: 'not-a-date' })] }))
+    expect(screen.queryByText(/computed/i)).toBeNull()
   })
 
   it('says nothing has been computed rather than showing an empty list', () => {

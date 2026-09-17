@@ -95,8 +95,15 @@ export default function TransitsPage() {
   }, [onUnauthenticated, attempt, selectedId])
 
   return (
-    <main className="mx-auto max-w-2xl px-4 py-8 sm:px-6">
-      <header className="mb-6 flex justify-end">
+    <main id="main" className="mx-auto max-w-2xl px-4 py-8 sm:px-6">
+      {/*
+        An h1, which this screen shipped without — its only heading was
+        the h2 inside TransitPanel, so the document's first and highest
+        heading was a level down and a screen reader navigating by
+        heading started midway.
+      */}
+      <header className="mb-6 flex flex-wrap items-baseline justify-between gap-3">
+        <h1 className="font-serif text-2xl">{t.chart.transitsPageTitle}</h1>
         <ProfileSwitcher profiles={profiles} />
       </header>
 

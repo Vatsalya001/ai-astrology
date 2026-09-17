@@ -46,6 +46,9 @@ function renderTimeline(
   const full: TimelineLevel[] = levels.map((l) => ({
     periods: l.periods ?? [],
     loading: l.loading ?? false,
+    // Carried through: the helper dropped it, so every `failed: true`
+    // fixture silently rendered as a healthy empty level.
+    failed: l.failed ?? false,
   }))
   render(
     <LocaleProvider>
@@ -302,3 +305,55 @@ describe('dasha level terms', () => {
     expect(new Set(LEVELS.map((l) => l.term)).size).toBe(LEVELS.length)
   })
 })
+
+/**
+ * A failed drill-down is not an un-drilled level.
+ *
+ * Before this, a failure reverted the track to `periods: []`, which
+ * renders "Choose a mahadasha above to see its periods" — the message
+ * for a level nobody has opened, shown to someone who just opened one.
+ * No error, nothing to retry, and the reader told to do the thing they
+ * had done.
+ */
+describe('a level whose fetch failed', () => {
+  it('says so instead of asking the reader to choose a parent', () => {
+    renderTimeline([
+      { periods: mahadashas() },
+      { periods: [], loading: false, failed: true },
+    ])
+
+    expect(screen.getByRole('alert')).toHaveTextContent(/could not be loaded/i)
+    expect(screen.queryByText(/choose a mahadasha above/i)).toBeNull()
+  })
+
+  it('offers a retry that names the level', async () => {
+    const user = userEvent.setup()
+    const onRetryLevel = vi.fn()
+
+    render(
+      <LocaleProvider>
+        <DashaTimeline
+          levels={[
+            { periods: mahadashas(), loading: false },
+            { periods: [], loading: false, failed: true },
+            { periods: [], loading: false },
+          ]}
+          currentAt={IN_JUPITER}
+          onDrillDown={vi.fn()}
+          onRetryLevel={onRetryLevel}
+        />
+      </LocaleProvider>,
+    )
+
+    await user.click(screen.getByRole('button', { name: /try again/i }))
+    expect(onRetryLevel).toHaveBeenCalledWith(1)
+  })
+
+  // An alert, so a screen reader is told rather than silently landing on
+  // a track whose content changed underneath it.
+  it('announces the failure', () => {
+    renderTimeline([{ periods: mahadashas() }, { periods: [], failed: true }])
+    expect(screen.getByRole('alert')).toBeInTheDocument()
+  })
+})
+

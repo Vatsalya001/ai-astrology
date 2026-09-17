@@ -43,6 +43,8 @@ export default function PlanetsPage() {
 
   const [varga, setVarga] = useState<VargaType>(DEFAULT_VARGA)
   const [chart, setChart] = useState<ChartData | null>(null)
+  /** Which profile the chart in state was fetched for. */
+  const [chartFor, setChartFor] = useState<string | null>(null)
   const [state, setState] = useState<State>('loading')
   const [attempt, setAttempt] = useState(0)
 
@@ -87,17 +89,19 @@ export default function PlanetsPage() {
           setState('no-profile')
           return null
         }
-        return astrologyApi.chart(first.id, varga)
+        return astrologyApi.chart(first.id, varga).then((chart) => ({ chart, profileId: first.id }))
       })
       .then((result) => {
         if (cancelled || !result) return
+        const { chart: fetched, profileId: first } = result
 
-        const parsed = parseChartData(result.chart_data)
+        const parsed = parseChartData(fetched.chart_data)
         if (!parsed) {
           setState('unreadable')
           return
         }
         setChart(parsed)
+        setChartFor(first)
         setState('ready')
       })
       .catch((err: unknown) => {
@@ -113,6 +117,22 @@ export default function PlanetsPage() {
     }
   }, [varga, attempt, onUnauthenticated, selectedId])
 
+  /*
+    A profile switch has to blank the table, not leave the previous
+    person's planets under the new person's header.
+
+    DERIVED during render rather than set from an effect. `selectedId`
+    changes in the ProfileSwitcher — a sibling, through context — so
+    there is no handler on this page to set 'loading' from, and the
+    obvious `useEffect(() => setState('loading'), [selectedId])` is the
+    cascading render `react-hooks/set-state-in-effect` forbids.
+    Comparing what the chart is FOR against what is selected needs no
+    effect and is strictly more correct: it also covers the window while
+    the new request is still in flight.
+  */
+  const resolvedId = resolveProfile(profiles, selectedId)?.id ?? null
+  const showingAnotherProfile = chart !== null && chartFor !== null && chartFor !== resolvedId
+
   function chooseVarga(next: VargaType) {
     setState('loading')
     setVarga(next)
@@ -124,20 +144,28 @@ export default function PlanetsPage() {
   }
 
   return (
-    <main className="mx-auto max-w-4xl px-4 py-8 sm:px-6">
+    <main id="main" className="mx-auto max-w-4xl px-4 py-8 sm:px-6">
       <header className="mb-6 flex flex-wrap items-baseline justify-between gap-3">
         <h1 className="font-serif text-2xl">{t.chart.planetsTitle}</h1>
         <ProfileSwitcher profiles={profiles} />
       </header>
 
-      <VargaSwitcher
-        value={varga}
-        onChange={chooseVarga}
-        disabled={state === 'loading'}
-        className="mb-8"
-      />
+      {/*
+        Not disabled while loading.
 
-      {state === 'loading' && <LoadingTable label={t.chart.loading} />}
+        Disabling the fieldset disables the radio the user is standing
+        on, and the browser blurs a focused element that becomes
+        disabled — so a keyboard user pressing ArrowRight lost focus to
+        the document root mid-interaction and could never reach D10 by
+        arrow key. The loading state is already carried by the skeleton
+        below, and a second request is handled by the cancellation flag
+        rather than by preventing one.
+      */}
+      <VargaSwitcher value={varga} onChange={chooseVarga} className="mb-8" />
+
+      {(state === 'loading' || showingAnotherProfile) && (
+        <LoadingTable label={t.chart.loading} />
+      )}
 
       {state === 'error' && <LoadError onRetry={retry} />}
 
@@ -172,7 +200,7 @@ export default function PlanetsPage() {
         </div>
       )}
 
-      {state === 'ready' && chart && (
+      {state === 'ready' && chart && !showingAnotherProfile && (
         <div className="space-y-10">
           <section aria-labelledby="planets-heading">
             <SectionLabel>
