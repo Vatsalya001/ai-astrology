@@ -4,6 +4,7 @@ import type { GlossaryKey } from '@ayana/content'
 
 import { AstroTerm } from '@/components/AstroTerm'
 import type { SadeSatiStatus } from '@/lib/astrology-api'
+import { useLocale } from '@/lib/i18n/context'
 import { cn } from '@/lib/utils'
 
 import { ordinal } from './glyphs'
@@ -38,10 +39,15 @@ import { ordinal } from './glyphs'
  * nothing to report it, on the screen that answers the most consequential
  * question the product answers.
  */
-export const PHASES: ReadonlyArray<{ key: string; label: string; term: GlossaryKey }> = [
-  { key: 'rising', label: 'Rising', term: 'sade_sati_rising' },
-  { key: 'peak', label: 'Peak', term: 'sade_sati_peak' },
-  { key: 'setting', label: 'Setting', term: 'sade_sati_setting' },
+export const PHASES: ReadonlyArray<{
+  key: string
+  /** Dictionary key for the visible label. */
+  labelKey: 'sadeSatiRising' | 'sadeSatiPeak' | 'sadeSatiSetting'
+  term: GlossaryKey
+}> = [
+  { key: 'rising', labelKey: 'sadeSatiRising', term: 'sade_sati_rising' },
+  { key: 'peak', labelKey: 'sadeSatiPeak', term: 'sade_sati_peak' },
+  { key: 'setting', labelKey: 'sadeSatiSetting', term: 'sade_sati_setting' },
 ] as const
 
 export function SadeSatiIndicator({
@@ -51,15 +57,19 @@ export function SadeSatiIndicator({
   status: SadeSatiStatus
   className?: string
 }) {
+  const { t, fill } = useLocale()
+
   if (!status.is_active) {
     return (
       <div className={cn('rounded-lg border border-border p-4', className)}>
         <h3 className="text-sm font-medium">
-          <AstroTerm term="sade_sati">Sade Sati</AstroTerm>
+          <AstroTerm term="sade_sati">{t.chart.sadeSatiTitle}</AstroTerm>
         </h3>
         <p className="mt-1 text-sm text-ink-muted">
-          Not currently running. Saturn is in {status.saturn_sign}, the{' '}
-          {ordinal(status.houses_from_moon)} sign from your Moon.
+          {fill(t.chart.sadeSatiInactive, {
+            sign: status.saturn_sign,
+            ordinal: ordinal(status.houses_from_moon),
+          })}
         </p>
       </div>
     )
@@ -70,12 +80,14 @@ export function SadeSatiIndicator({
   return (
     <div className={cn('rounded-lg border border-gold/35 bg-gold/5 p-4', className)}>
       <h3 className="text-sm font-medium">
-        <AstroTerm term="sade_sati">Sade Sati</AstroTerm>
+        <AstroTerm term="sade_sati">{t.chart.sadeSatiTitle}</AstroTerm>
       </h3>
 
       <p className="mt-1 text-sm text-ink-muted">
-        Saturn is in {status.saturn_sign}, the {ordinal(status.houses_from_moon)} sign from
-        your Moon.
+        {fill(t.chart.sadeSatiActive, {
+          sign: status.saturn_sign,
+          ordinal: ordinal(status.houses_from_moon),
+        })}
       </p>
 
       {/*
@@ -86,7 +98,7 @@ export function SadeSatiIndicator({
         position, so the state survives greyscale, colour blindness and a
         screen reader equally.
       */}
-      <ol className="mt-3 flex items-center gap-1" aria-label="Sade Sati phase">
+      <ol className="mt-3 flex items-center gap-1" aria-label={t.chart.sadeSatiPhaseLabel}>
         {PHASES.map((phase, i) => {
           const active = i === activeIndex
           const passed = activeIndex >= 0 && i < activeIndex
@@ -105,8 +117,8 @@ export function SadeSatiIndicator({
                 aria-current={active ? 'step' : undefined}
                 className={cn('truncate text-xs', active ? 'text-ink' : 'text-ink-muted')}
               >
-                {phase.label}
-                {active && <span className="sr-only"> — current phase</span>}
+                {t.chart[phase.labelKey]}
+                {active && <span className="sr-only">{t.chart.sadeSatiCurrentPhase}</span>}
               </span>
             </li>
           )
@@ -126,7 +138,7 @@ export function SadeSatiIndicator({
       */}
       {activeIndex < 0 && (
         <p className="mt-3 text-xs leading-relaxed text-ink-muted">
-          The phase was not reported for this reading.
+          {t.chart.sadeSatiNoPhase}
         </p>
       )}
     </div>

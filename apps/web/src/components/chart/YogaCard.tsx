@@ -47,7 +47,7 @@ export function YogaCard({
   yoga: YogaPlacement
   className?: string
 }) {
-  const { locale } = useLocale()
+  const { locale, t, fill } = useLocale()
   const [open, setOpen] = useState(false)
 
   const described = describeYoga(yoga.name, locale)
@@ -65,13 +65,11 @@ export function YogaCard({
           'focus-visible:ring-offset-2 focus-visible:ring-offset-background',
           className,
         )}
-        aria-label={[
-          described?.name ?? yoga.name,
-          `${yoga.strength} strength`,
-          yoga.involvedPlanets.length > 0 ? yoga.involvedPlanets.join(' and ') : null,
-        ]
-          .filter(Boolean)
-          .join(', ')}
+        aria-label={fill(t.chart.yogaCardLabel, {
+          name: described?.name ?? yoga.name,
+          strength: yoga.strength,
+          planets: yoga.involvedPlanets.join(' and '),
+        })}
       >
         <span className="flex items-baseline justify-between gap-3">
           <span className="font-medium text-ink">{described?.name ?? yoga.name}</span>
@@ -94,7 +92,7 @@ export function YogaCard({
                 strong ? 'bg-gold' : 'bg-ink-muted/60',
               )}
             />
-            {strong ? 'Strong' : 'Moderate'}
+            {strong ? t.chart.yogaStrong : t.chart.yogaModerate}
           </span>
         </span>
 
@@ -108,7 +106,7 @@ export function YogaCard({
             should never be seen.
           */
           <span className="mt-1 block text-sm text-ink-muted">
-            No description written for this combination yet.
+            {t.chart.yogaNoDescription}
           </span>
         )}
 
@@ -117,7 +115,7 @@ export function YogaCard({
             {yoga.involvedPlanets.join(', ')}
             {yoga.involvedPlanets.length > 0 && yoga.involvedHouses.length > 0 && ' · '}
             {yoga.involvedHouses.map((h) => ordinal(h)).join(', ')}
-            {yoga.involvedHouses.length > 0 && ' house'}
+            {yoga.involvedHouses.length > 0 && ` ${t.chart.colHouse.toLowerCase()}`}
             {yoga.involvedHouses.length > 1 && 's'}
           </span>
         )}
@@ -128,7 +126,7 @@ export function YogaCard({
           <DialogHeader>
             <DialogTitle>{described?.name ?? yoga.name}</DialogTitle>
             <DialogDescription>
-              {strong ? 'Strong' : 'Moderate'}
+              {strong ? t.chart.yogaStrong : t.chart.yogaModerate}
               {yoga.involvedPlanets.length > 0 && ` · ${yoga.involvedPlanets.join(', ')}`}
             </DialogDescription>
           </DialogHeader>

@@ -15,6 +15,7 @@ import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { astrologyApi, type BirthProfile } from '@/lib/astrology-api'
 import { resolveProfile, useSelectedProfile } from '@/lib/profile-context'
+import { useLocale } from '@/lib/i18n/context'
 import { useRequireAuth } from '@/lib/use-require-auth'
 import { DEFAULT_VARGA, type VargaType } from '@/lib/varga'
 
@@ -36,6 +37,7 @@ type State = 'loading' | 'ready' | 'error' | 'no-profile' | 'unreadable'
  */
 export default function PlanetsPage() {
   const onUnauthenticated = useRequireAuth()
+  const { t } = useLocale()
   const { selectedId } = useSelectedProfile()
   const [profiles, setProfiles] = useState<BirthProfile[]>([])
 
@@ -124,7 +126,7 @@ export default function PlanetsPage() {
   return (
     <main className="mx-auto max-w-4xl px-4 py-8 sm:px-6">
       <header className="mb-6 flex flex-wrap items-baseline justify-between gap-3">
-        <h1 className="font-serif text-2xl">Planets &amp; houses</h1>
+        <h1 className="font-serif text-2xl">{t.chart.planetsTitle}</h1>
         <ProfileSwitcher profiles={profiles} />
       </header>
 
@@ -135,18 +137,17 @@ export default function PlanetsPage() {
         className="mb-8"
       />
 
-      {state === 'loading' && <LoadingTable />}
+      {state === 'loading' && <LoadingTable label={t.chart.loading} />}
 
       {state === 'error' && <LoadError onRetry={retry} />}
 
       {state === 'no-profile' && (
         <div className="rounded-lg border border-border p-8 text-center">
           <p className="text-sm text-ink-muted">
-            There is no birth chart yet. Add your birth date, time and place and this fills
-            in.
+            {t.chart.planetsNoProfile}
           </p>
           <Button asChild className="mt-4">
-            <Link href="/onboarding/birth">Add birth details</Link>
+            <Link href="/onboarding/birth">{t.chart.addBirthDetails}</Link>
           </Button>
         </div>
       )}
@@ -159,15 +160,14 @@ export default function PlanetsPage() {
       {state === 'unreadable' && (
         <div role="alert" className="rounded-lg border border-border p-8 text-center">
           <p className="text-sm text-ink-muted">
-            This chart could not be read. Nothing is lost — your birth details are saved.
-            Recomputing usually fixes it.
+            {t.chart.unreadable}
           </p>
           <Button
             variant="secondary"
             className="mt-4"
             onClick={retry}
           >
-            Try again
+            {t.chart.tryAgain}
           </Button>
         </div>
       )}
@@ -176,14 +176,14 @@ export default function PlanetsPage() {
         <div className="space-y-10">
           <section aria-labelledby="planets-heading">
             <SectionLabel>
-              <span id="planets-heading">Planetary positions</span>
+              <span id="planets-heading">{t.chart.planetsSection}</span>
             </SectionLabel>
             <PlanetTable planets={chart.planets} className="mt-3" />
           </section>
 
           <section aria-labelledby="houses-heading">
             <SectionLabel>
-              <span id="houses-heading">Houses</span>
+              <span id="houses-heading">{t.chart.housesSection}</span>
             </SectionLabel>
             <HouseList houses={chart.houses} planets={chart.planets} className="mt-3" />
           </section>
@@ -200,10 +200,10 @@ export default function PlanetsPage() {
  * like the eventual content beats a spinner on a blank page, because the
  * layout does not jump when the data lands.
  */
-function LoadingTable() {
+function LoadingTable({ label }: { label: string }) {
   return (
     <div className="space-y-3" aria-busy="true" aria-live="polite">
-      <span className="sr-only">Loading chart…</span>
+      <span className="sr-only">{label}</span>
       {Array.from({ length: 9 }, (_, i) => (
         <Skeleton key={i} className="h-10 w-full" />
       ))}

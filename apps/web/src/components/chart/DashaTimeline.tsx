@@ -133,7 +133,7 @@ function Track({
   currentAt: number
   onSelect: (span: Span, id: string) => void
 }) {
-  const { locale } = useLocale()
+  const { locale, t, fill } = useLocale()
 
   const { placed, ids, ticks, marker } = useMemo(() => {
     const spans: Span[] = []
@@ -179,7 +179,9 @@ function Track({
           {levelInfo(level).name}
         </p>
         <p className="text-sm text-ink-muted">
-          Choose a {levelInfo(level - 1).name.toLowerCase()} above to see its periods.
+          {fill(t.chart.dashaChooseParent, {
+            parent: levelInfo(level - 1).name.toLowerCase(),
+          })}
         </p>
       </div>
     )
@@ -188,7 +190,7 @@ function Track({
   const current = spanAt(placed, currentAt)
 
   return (
-    <section aria-label={`${levelInfo(level).name} periods`}>
+    <section aria-label={fill(t.chart.dashaPeriodsOf, { level: levelInfo(level).name })}>
       <p className="mb-2 text-xs uppercase tracking-wide text-ink-muted">
         <AstroTerm term={levelInfo(level).term}>{levelInfo(level).name}</AstroTerm>
       </p>
@@ -219,7 +221,7 @@ function Track({
                 aria-label={[
                   `${span.planet} ${levelInfo(level).name.toLowerCase()}`,
                   formatSpan(span, locale),
-                  span === current ? 'current period' : null,
+                  span === current ? t.chart.dashaCurrent : null,
                 ]
                   .filter(Boolean)
                   .join(', ')}
@@ -283,7 +285,7 @@ function PeriodSheet({
   currentAt: number
   onClose: () => void
 }) {
-  const { locale } = useLocale()
+  const { locale, t, fill } = useLocale()
   if (!entry) return null
 
   const { span, level } = entry
@@ -303,8 +305,10 @@ function PeriodSheet({
         {isCurrent && (
           <div>
             <div className="flex items-center justify-between text-xs text-ink-muted">
-              <span>Current period</span>
-              <span className="tabular-nums">{Math.round(progress * 100)}% elapsed</span>
+              <span>{t.chart.dashaCurrent}</span>
+              <span className="tabular-nums">
+                {fill(t.home.periodElapsed, { percent: Math.round(progress * 100) })}
+              </span>
             </div>
             {/*
               A real progress bar with a value, not a styled div. The

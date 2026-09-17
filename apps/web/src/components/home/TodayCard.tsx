@@ -36,7 +36,7 @@ export function TodayCard({
   moonSign: string | null
   className?: string
 }) {
-  const { locale } = useLocale()
+  const { locale, t, fill } = useLocale()
   const day = moonSign ? moonDay(moonSign, locale) : null
 
   return (
@@ -48,17 +48,17 @@ export function TodayCard({
         id="today-heading"
         className="text-xs uppercase tracking-wide text-ink-muted"
       >
-        Today
+        {t.home.todayLabel}
       </h2>
 
       {moonSign === null ? (
         <p className="mt-2 text-sm text-ink-muted">
-          Today&rsquo;s sky is still being prepared. Positions are computed every six hours.
+          {t.home.todayNoSky}
         </p>
       ) : (
         <>
           <p className="mt-2 font-serif text-lg text-ink">
-            <AstroTerm term="gochara">Moon</AstroTerm> in {moonSign}
+            <AstroTerm term="gochara">{fill(t.home.todayMoonIn, { sign: moonSign })}</AstroTerm>
           </p>
 
           {day ? (
@@ -71,9 +71,7 @@ export function TodayCard({
               absence rather than as a composed sentence, because
               composing one here would be the frontend writing astrology.
             */
-            <p className="mt-1 text-sm text-ink-muted">
-              No note written for this sign yet.
-            </p>
+            <p className="mt-1 text-sm text-ink-muted">{t.home.todayNoNote}</p>
           )}
         </>
       )}

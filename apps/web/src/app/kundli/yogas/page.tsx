@@ -12,6 +12,7 @@ import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { astrologyApi, type BirthProfile } from '@/lib/astrology-api'
 import { resolveProfile, useSelectedProfile } from '@/lib/profile-context'
+import { useLocale } from '@/lib/i18n/context'
 import { useRequireAuth } from '@/lib/use-require-auth'
 
 type State = 'loading' | 'ready' | 'error' | 'no-profile' | 'unreadable'
@@ -33,6 +34,7 @@ type State = 'loading' | 'ready' | 'error' | 'no-profile' | 'unreadable'
  */
 export default function YogasPage() {
   const onUnauthenticated = useRequireAuth()
+  const { t } = useLocale()
   const { selectedId } = useSelectedProfile()
 
   const [profiles, setProfiles] = useState<BirthProfile[]>([])
@@ -83,13 +85,13 @@ export default function YogasPage() {
   return (
     <main className="mx-auto max-w-2xl px-4 py-8 sm:px-6">
       <header className="mb-6 flex flex-wrap items-baseline justify-between gap-3">
-        <h1 className="font-serif text-2xl">Yogas</h1>
+        <h1 className="font-serif text-2xl">{t.chart.yogasTitle}</h1>
         <ProfileSwitcher profiles={profiles} />
       </header>
 
       {state === 'loading' && (
         <div className="space-y-3" aria-busy="true" aria-live="polite">
-          <span className="sr-only">Looking for combinations…</span>
+          <span className="sr-only">{t.chart.yogasLoading}</span>
           {Array.from({ length: 4 }, (_, i) => (
             <Skeleton key={i} className="h-24 w-full" />
           ))}
@@ -101,10 +103,10 @@ export default function YogasPage() {
       {state === 'no-profile' && (
         <div className="rounded-lg border border-border p-8 text-center">
           <p className="text-sm text-ink-muted">
-            Yogas are read from your birth chart. Add your birth details and this fills in.
+            {t.chart.yogasNoProfile}
           </p>
           <Button asChild className="mt-4">
-            <Link href="/onboarding/birth">Add birth details</Link>
+            <Link href="/onboarding/birth">{t.chart.addBirthDetails}</Link>
           </Button>
         </div>
       )}
@@ -112,15 +114,14 @@ export default function YogasPage() {
       {state === 'unreadable' && (
         <div role="alert" className="rounded-lg border border-border p-8 text-center">
           <p className="text-sm text-ink-muted">
-            This chart could not be read. Your birth details are saved; recomputing usually
-            fixes it.
+            {t.chart.yogasUnreadable}
           </p>
           <Button
             variant="secondary"
             className="mt-4"
             onClick={() => setAttempt((n) => n + 1)}
           >
-            Try again
+            {t.chart.tryAgain}
           </Button>
         </div>
       )}
@@ -128,9 +129,7 @@ export default function YogasPage() {
       {state === 'ready' && chart && chart.yogas.length === 0 && (
         <div className="rounded-lg border border-border p-8 text-center">
           <p className="text-sm text-ink-muted">
-            The engine checked this chart for eleven classical combinations and found none
-            of them. That is ordinary — most of them need placements that are uncommon by
-            construction, which is what makes them worth naming when they do appear.
+            {t.chart.yogasNone}
           </p>
         </div>
       )}

@@ -7,6 +7,7 @@ import { northIndianHouses, southIndianSigns } from '@ayana/astrology-geometry'
 import { ChartSVG } from './ChartSVG'
 import { ordinal, planetLabel } from './glyphs'
 import type { ChartData, PlanetPlacement } from './types'
+import { en } from '@/lib/i18n/dictionaries'
 
 /**
  * What a rendered chart has to get right that geometry tests cannot see:
@@ -48,12 +49,27 @@ const CHART: ChartData = {
   yogas: [],
 }
 
+/**
+ * The REAL dictionary string, not an invented one.
+ *
+ * `captionText` is a required prop because the PDF worker renders this
+ * component through chromedp, outside React's provider tree, so it has
+ * to take the string — a default would let a caller forget and ship
+ * English into a Hindi PDF.
+ *
+ * Using the actual copy here means the caption assertion below tests
+ * what users see. A placeholder passed the "has an accessible name"
+ * check while saying nothing about the duplication, which is the entire
+ * reason the caption exists.
+ */
+const CAPTION = en.chart.srTableCaption
+
 const NO_TIME: ChartData = { ascendant: null, houses: null, planets: CHART.planets, yogas: [] }
 
 describe('ChartSVG', () => {
   it('renders every planet in both styles', () => {
     for (const style of ['north', 'south'] as const) {
-      const { unmount } = render(<ChartSVG chart={CHART} style={style} />)
+      const { unmount } = render(<ChartSVG chart={CHART} style={style} captionText={CAPTION} />)
       const table = screen.getByRole('table')
       for (const name of ['Sun', 'Saturn', 'Mercury']) {
         expect(within(table).getByRole('rowheader', { name }), `${style}: ${name}`).toBeInTheDocument()
@@ -67,7 +83,7 @@ describe('ChartSVG', () => {
   // would not be exposed at all. Following the spec's two a11y lines
   // literally produces a chart whose buttons no screen reader reaches.
   it('exposes the chart as a group so its children stay reachable', () => {
-    render(<ChartSVG chart={CHART} style="south" onPlanetTap={vi.fn()} />)
+    render(<ChartSVG chart={CHART} style="south" onPlanetTap={vi.fn()} captionText={CAPTION} />)
 
     const chart = screen.getByRole('group')
     expect(chart).toHaveAccessibleName(/South Indian birth chart/i)
@@ -76,7 +92,7 @@ describe('ChartSVG', () => {
   })
 
   it('summarises the chart in one sentence, not forty', () => {
-    render(<ChartSVG chart={CHART} style="north" />)
+    render(<ChartSVG chart={CHART} style="north" captionText={CAPTION} />)
     const name = screen.getByRole('group').getAttribute('aria-labelledby')!
     const summary = document.getElementById(name)!
 
@@ -90,7 +106,7 @@ describe('ChartSVG', () => {
   })
 
   it('duplicates the data as a captioned table', () => {
-    render(<ChartSVG chart={CHART} style="north" />)
+    render(<ChartSVG chart={CHART} style="north" captionText={CAPTION} />)
     const table = screen.getByRole('table')
 
     // The caption is what makes the repetition read as deliberate. A
@@ -105,12 +121,12 @@ describe('ChartSVG', () => {
   })
 
   it('includes the ascendant in the table, and omits it when there is none', () => {
-    const { unmount } = render(<ChartSVG chart={CHART} style="south" />)
+    const { unmount } = render(<ChartSVG chart={CHART} style="south" captionText={CAPTION} />)
     expect(within(screen.getByRole('table')).getByRole('rowheader', { name: 'Ascendant' }))
       .toBeInTheDocument()
     unmount()
 
-    render(<ChartSVG chart={NO_TIME} style="south" />)
+    render(<ChartSVG chart={NO_TIME} style="south" captionText={CAPTION} />)
     expect(within(screen.getByRole('table')).queryByRole('rowheader', { name: 'Ascendant' }))
       .not.toBeInTheDocument()
   })
@@ -119,14 +135,14 @@ describe('ChartSVG', () => {
   // distinguish red from green, and both of these change how a
   // placement is read.
   it('marks retrograde with a glyph and combustion with a ring', () => {
-    const { container } = render(<ChartSVG chart={CHART} style="south" />)
+    const { container } = render(<ChartSVG chart={CHART} style="south" captionText={CAPTION} />)
 
     expect(container.textContent).toContain('℞')
     expect(container.querySelector('circle')).toBeInTheDocument()
   })
 
   it('names retrograde and combustion in words too', () => {
-    const table = render(<ChartSVG chart={CHART} style="north" />).getByRole('table')
+    const table = render(<ChartSVG chart={CHART} style="north" captionText={CAPTION} />).getByRole('table')
     expect(within(table).getByRole('row', { name: /Mercury/ })).toHaveTextContent('combust')
   })
 
@@ -134,14 +150,14 @@ describe('ChartSVG', () => {
   // chart — whose entire structure is houses counted from it — cannot be
   // drawn. An empty diamond looks like a loading state or a bug.
   it('refuses to draw a North Indian chart without a birth time, and says why', () => {
-    render(<ChartSVG chart={NO_TIME} style="north" />)
+    render(<ChartSVG chart={NO_TIME} style="north" captionText={CAPTION} />)
 
     expect(screen.getByText(/needs an exact birth time/i)).toBeInTheDocument()
     expect(screen.queryByRole('group')).not.toBeInTheDocument()
   })
 
   it('still draws a South Indian chart without a birth time', () => {
-    render(<ChartSVG chart={NO_TIME} style="south" />)
+    render(<ChartSVG chart={NO_TIME} style="south" captionText={CAPTION} />)
 
     expect(screen.getByRole('group')).toBeInTheDocument()
     const name = screen.getByRole('group').getAttribute('aria-labelledby')!
@@ -154,7 +170,7 @@ describe('interaction', () => {
     const onPlanetTap = vi.fn()
     const user = userEvent.setup()
 
-    render(<ChartSVG chart={CHART} style="south" onPlanetTap={onPlanetTap} />)
+    render(<ChartSVG chart={CHART} style="south" onPlanetTap={onPlanetTap} captionText={CAPTION} />)
     await user.click(screen.getByRole('button', { name: planetLabel(CHART.planets[1]!) }))
 
     expect(onPlanetTap).toHaveBeenCalledWith(CHART.planets[1])
@@ -164,7 +180,7 @@ describe('interaction', () => {
     const onPlanetTap = vi.fn()
     const user = userEvent.setup()
 
-    render(<ChartSVG chart={CHART} style="south" onPlanetTap={onPlanetTap} />)
+    render(<ChartSVG chart={CHART} style="south" onPlanetTap={onPlanetTap} captionText={CAPTION} />)
     const saturn = screen.getByRole('button', { name: planetLabel(CHART.planets[1]!) })
 
     saturn.focus()
@@ -178,7 +194,7 @@ describe('interaction', () => {
     const onHouseTap = vi.fn()
     const user = userEvent.setup()
 
-    render(<ChartSVG chart={CHART} style="north" onHouseTap={onHouseTap} />)
+    render(<ChartSVG chart={CHART} style="north" onHouseTap={onHouseTap} captionText={CAPTION} />)
     await user.click(screen.getByRole('button', { name: /^11th house/ }))
 
     expect(onHouseTap).toHaveBeenCalledWith(11)
@@ -187,7 +203,7 @@ describe('interaction', () => {
   // A focusable element that does nothing is a tab stop a keyboard user
   // pays for and gets nothing back from. Twelve of them, on a chart.
   it('adds no tab stops when there is nothing to tap', () => {
-    render(<ChartSVG chart={CHART} style="north" />)
+    render(<ChartSVG chart={CHART} style="north" captionText={CAPTION} />)
     expect(screen.queryAllByRole('button')).toHaveLength(0)
   })
 })
@@ -197,7 +213,7 @@ describe('highlight', () => {
   // because retrofitting it means touching every render path.
   it('marks the named planets and houses', () => {
     const { container } = render(
-      <ChartSVG chart={CHART} style="north" highlight={['Saturn', 'house:10']} />,
+      <ChartSVG chart={CHART} style="north" highlight={['Saturn', 'house:10']} captionText={CAPTION} />,
     )
 
     const marked = container.querySelectorAll('.fill-gold')
@@ -210,7 +226,7 @@ describe('highlight', () => {
 
   it('ignores a house number outside 1..12 rather than shading nothing silently', () => {
     const { container } = render(
-      <ChartSVG chart={CHART} style="north" highlight={['house:13', 'house:0']} />,
+      <ChartSVG chart={CHART} style="north" highlight={['house:13', 'house:0']} captionText={CAPTION} />,
     )
     expect(container.querySelectorAll('.fill-gold\\/15')).toHaveLength(0)
   })
@@ -291,7 +307,7 @@ describe('planets land in the right region', () => {
   }
 
   it('draws a planet in its HOUSE region in the North Indian chart', () => {
-    const { container } = render(<ChartSVG chart={CHART} style="north" />)
+    const { container } = render(<ChartSVG chart={CHART} style="north" captionText={CAPTION} />)
 
     // Saturn is in the 11th house and in Capricorn (sign 9). Those are
     // different regions, which is what makes this test able to fail.
@@ -307,7 +323,7 @@ describe('planets land in the right region', () => {
   })
 
   it('draws the same planet in its SIGN cell in the South Indian chart', () => {
-    const { container } = render(<ChartSVG chart={CHART} style="south" />)
+    const { container } = render(<ChartSVG chart={CHART} style="south" captionText={CAPTION} />)
 
     const saturn = glyphAt(container, 'Sa')
     const capricorn = southIndianSigns().find((cell) => cell.sign === 9)!
@@ -323,7 +339,7 @@ describe('planets land in the right region', () => {
   it('stacks two planets sharing a region without overlapping', () => {
     // Sun and Mercury are both in Aquarius, both in the 12th — the
     // ordinary case, not an exotic one.
-    const { container } = render(<ChartSVG chart={CHART} style="south" />)
+    const { container } = render(<ChartSVG chart={CHART} style="south" captionText={CAPTION} />)
     const sun = glyphAt(container, 'Su')
     const mercury = glyphAt(container, 'Me')
 

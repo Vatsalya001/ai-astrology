@@ -9,6 +9,7 @@ import { ProfileSwitcher } from '@/components/ProfileSwitcher'
 import { Button } from '@/components/ui/button'
 import { astrologyApi, type BirthProfile, type DashaPeriod } from '@/lib/astrology-api'
 import { resolveProfile, useSelectedProfile } from '@/lib/profile-context'
+import { useLocale } from '@/lib/i18n/context'
 import { useRequireAuth } from '@/lib/use-require-auth'
 
 type State = 'loading' | 'ready' | 'error' | 'no-profile' | 'no-dashas'
@@ -33,6 +34,7 @@ type State = 'loading' | 'ready' | 'error' | 'no-profile' | 'no-dashas'
  */
 export default function DashasPage() {
   const onUnauthenticated = useRequireAuth()
+  const { t } = useLocale()
   const { selectedId } = useSelectedProfile()
   const [profiles, setProfiles] = useState<BirthProfile[]>([])
 
@@ -144,13 +146,13 @@ export default function DashasPage() {
   return (
     <main className="mx-auto max-w-4xl px-4 py-8 sm:px-6">
       <header className="mb-6 flex flex-wrap items-baseline justify-between gap-3">
-        <h1 className="font-serif text-2xl">Dasha periods</h1>
+        <h1 className="font-serif text-2xl">{t.chart.dashasTitle}</h1>
         <ProfileSwitcher profiles={profiles} />
       </header>
 
       {state === 'loading' && (
         <div aria-busy="true" aria-live="polite">
-          <span className="sr-only">Loading your dasha periods…</span>
+          <span className="sr-only">{t.chart.dashasLoading}</span>
           <div className="h-11 w-full animate-pulse rounded-md bg-elevated" />
         </div>
       )}
@@ -160,10 +162,10 @@ export default function DashasPage() {
       {state === 'no-profile' && (
         <div className="rounded-lg border border-border p-8 text-center">
           <p className="text-sm text-ink-muted">
-            Dashas are read from your birth chart. Add your birth details and this fills in.
+            {t.chart.dashasNoProfile}
           </p>
           <Button asChild className="mt-4">
-            <Link href="/onboarding/birth">Add birth details</Link>
+            <Link href="/onboarding/birth">{t.chart.addBirthDetails}</Link>
           </Button>
         </div>
       )}
@@ -176,11 +178,10 @@ export default function DashasPage() {
       {state === 'no-dashas' && (
         <div className="rounded-lg border border-border p-8 text-center">
           <p className="text-sm text-ink-muted">
-            Dashas need a birth time. The sequence starts from the Moon&rsquo;s exact
-            position at birth, which cannot be pinned down without one.
+            {t.chart.dashasNoBirthTime}
           </p>
           <Button asChild variant="secondary" className="mt-4">
-            <Link href="/settings/birth-profiles">Add a birth time</Link>
+            <Link href="/settings/birth-profiles">{t.chart.dashasAddBirthTime}</Link>
           </Button>
         </div>
       )}

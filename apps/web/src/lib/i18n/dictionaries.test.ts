@@ -100,10 +100,14 @@ describe('interpolation', () => {
   })
 
   it('works on the real templates that use it', () => {
-    expect(interpolate(en.home.welcomeNamed, { name: 'Priya' })).toContain('Priya')
+    expect(interpolate(en.home.greetWithName, { greeting: 'Hello', name: 'Priya' })).toContain(
+      'Priya',
+    )
     expect(interpolate(en.verify.resendIn, { seconds: 12 })).toContain('12')
     expect(interpolate(en.settings.deleteScheduled, { date: '2026-09-22' })).toContain('2026-09-22')
     // And in Hindi, where the placeholder sits in a different position.
-    expect(interpolate(dictionaries.hi.home.welcomeNamed, { name: 'प्रिया' })).toContain('प्रिया')
+    expect(
+      interpolate(dictionaries.hi.home.greetWithName, { greeting: 'नमस्ते', name: 'प्रिया' }),
+    ).toContain('प्रिया')
   })
 })

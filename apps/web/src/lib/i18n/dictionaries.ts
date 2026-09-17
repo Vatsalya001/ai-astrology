@@ -163,14 +163,40 @@ export const en = {
   },
 
   home: {
-    sectionLabel: 'Your account',
-    welcomeNamed: 'Welcome, {name}',
-    welcome: 'Welcome',
-    body: "You're signed in. Your birth chart arrives in Phase 2 — until then this is the shell that proves the account works.",
-    chartTitle: 'Your birth chart',
-    chartBody: 'Date, time and place. We resolve the exact historical timezone offset — a 30-minute error can change your entire chart.',
-    chartCta: 'Add your birth details',
     loading: 'Loading your account…',
+
+    // Four combinations: with and without a clock, with and without a
+    // name. The server knows neither, so both absences are real.
+    greetMorning: 'Good morning',
+    greetAfternoon: 'Good afternoon',
+    greetEvening: 'Good evening',
+    greetNeutral: 'Hello',
+    greetWithName: '{greeting}, {name}',
+
+    todayLabel: 'Today',
+    todayMoonIn: 'Moon in {sign}',
+    todayNoSky: 'Today’s sky is still being prepared. Positions are computed every six hours.',
+    todayNoNote: 'No note written for this sign yet.',
+
+    askTitle: 'Ask your AI astrologer',
+    askPlaceholder: 'What’s on your mind?',
+    askDisabled:
+      'Not available yet. Everything on this screen so far is computed from your chart, with no AI involved — that part comes later.',
+    askCareer: 'Career',
+    askLove: 'Love',
+    askMoney: 'Money',
+    askMarriage: 'Marriage',
+
+    periodLabel: 'Your current period',
+    periodNoBirthTime: 'Dasha periods need a birth time. Add one and this fills in.',
+    periodElapsed: '{percent}% elapsed',
+    periodElapsedLabel: '{planet} mahadasha elapsed',
+    periodAntardasha: 'Antardasha: {planet}',
+    periodAntardashaTo: 'Antardasha: {planet} (to {end})',
+    periodSeeAll: 'See all periods',
+
+    viewKundli: 'View my full Kundli',
+    talkToAstrologer: 'Talk to an astrologer',
   },
 
   landing: {
@@ -248,6 +274,88 @@ export const en = {
     // A screen reader otherwise announces "Nakshatra, button" and gives
     // the user nothing to decide with. {term} is the word itself.
     defineTerm: 'What “{term}” means',
+
+    // Shared across every Kundli screen.
+    loading: 'Loading chart…',
+    tryAgain: 'Try again',
+    addBirthDetails: 'Add birth details',
+    unreadable:
+      'This chart could not be read. Nothing is lost — your birth details are saved. Recomputing usually fixes it.',
+
+    planetsTitle: 'Planets & houses',
+    planetsNoProfile:
+      'There is no birth chart yet. Add your birth date, time and place and this fills in.',
+    planetsSection: 'Planetary positions',
+    housesSection: 'Houses',
+    planetsEmpty: 'No planetary positions for this chart.',
+    planetsCaption:
+      'Planetary positions: sign, degree, house, nakshatra and dignity for each planet.',
+    srTableCaption: 'Planetary positions — the same data as the chart above, as a table.',
+
+    colPlanet: 'Planet',
+    colSign: 'Sign',
+    colDegree: 'Degree',
+    colHouse: 'House',
+    colNakshatra: 'Nakshatra',
+    colStatus: 'Status',
+
+    housesNoBirthTime:
+      'Houses need a birth time. Without one the rising sign — and so every house — would be a guess, and a guess shown as a fact is worse than nothing. Add a birth time to your profile and this fills in.',
+    houseEmpty: 'empty',
+    housePlanetsHere: 'Planets here',
+    houseNoPlanets: 'None. An empty house is read through its lord — {lord} here — not as an absence.',
+    houseNumbered: '{ordinal} house',
+    houseRowLabel: '{ordinal} house, {sign}, ruled by {lord}, {occupants}',
+
+    vargaLegend: 'Chart',
+
+    dashasTitle: 'Dasha periods',
+    dashasLoading: 'Loading your dasha periods…',
+    dashasNoProfile:
+      'Dashas are read from your birth chart. Add your birth details and this fills in.',
+    dashasNoBirthTime:
+      'Dashas need a birth time. The sequence starts from the Moon’s exact position at birth, which cannot be pinned down without one.',
+    dashasAddBirthTime: 'Add a birth time',
+    dashaCurrent: 'Current period',
+    dashaChooseParent: 'Choose a {parent} above to see its periods.',
+    dashaPeriodsOf: '{level} periods',
+
+    transitsLoading: 'Loading transits…',
+    transitsNoProfile:
+      'Transits are read against your birth chart. Add your birth details and this fills in — a birth date is enough, a time is not needed here.',
+    transitsNotYet:
+      'Today’s sky is still being prepared. Positions are computed every six hours; this usually resolves within a few minutes of a fresh start.',
+    transitsTitle: 'Right now in the sky',
+    transitsFrame: 'Houses counted from your Moon in {sign}, the traditional frame for',
+    transitsComputed: 'Computed {when}.',
+    transitsEmpty: 'No transit positions have been computed yet. They refresh every six hours.',
+    transitsList: 'Transiting planets',
+    transitsFromMoon: '{ordinal} from Moon',
+    transitRowLabel: '{planet}, in {sign}, {ordinal} house from your Moon',
+
+    sadeSatiTitle: 'Sade Sati',
+    sadeSatiInactive:
+      'Not currently running. Saturn is in {sign}, the {ordinal} sign from your Moon.',
+    sadeSatiActive: 'Saturn is in {sign}, the {ordinal} sign from your Moon.',
+    sadeSatiPhaseLabel: 'Sade Sati phase',
+    sadeSatiCurrentPhase: ' — current phase',
+    sadeSatiRising: 'Rising',
+    sadeSatiPeak: 'Peak',
+    sadeSatiSetting: 'Setting',
+    sadeSatiNoPhase: 'The phase was not reported for this reading.',
+
+    yogasTitle: 'Yogas',
+    yogasLoading: 'Looking for combinations…',
+    yogasNoProfile:
+      'Yogas are read from your birth chart. Add your birth details and this fills in.',
+    yogasUnreadable:
+      'This chart could not be read. Your birth details are saved; recomputing usually fixes it.',
+    yogasNone:
+      'The engine checked this chart for eleven classical combinations and found none of them. That is ordinary — most of them need placements that are uncommon by construction, which is what makes them worth naming when they do appear.',
+    yogaStrong: 'Strong',
+    yogaModerate: 'Moderate',
+    yogaNoDescription: 'No description written for this combination yet.',
+    yogaCardLabel: '{name}, {strength} strength, {planets}',
   },
 
   /**
@@ -412,14 +520,38 @@ export const hi: Dictionary = {
   },
 
   home: {
-    sectionLabel: 'आपका खाता',
-    welcomeNamed: 'स्वागत है, {name}',
-    welcome: 'स्वागत है',
-    body: 'आप साइन इन हैं। आपकी जन्म कुंडली चरण 2 में आएगी — तब तक यह खाता काम करने का प्रमाण है।',
-    chartTitle: 'आपकी जन्म कुंडली',
-    chartBody: 'तारीख, समय और स्थान। हम सही ऐतिहासिक समय-क्षेत्र निकालते हैं — 30 मिनट की त्रुटि पूरी कुंडली बदल सकती है।',
-    chartCta: 'अपना जन्म विवरण जोड़ें',
     loading: 'आपका खाता लोड हो रहा है…',
+
+    greetMorning: 'सुप्रभात',
+    greetAfternoon: 'नमस्कार',
+    greetEvening: 'शुभ संध्या',
+    greetNeutral: 'नमस्ते',
+    greetWithName: '{greeting}, {name}',
+
+    todayLabel: 'आज',
+    todayMoonIn: '{sign} में चंद्रमा',
+    todayNoSky: 'आज का आकाश अभी तैयार हो रहा है। स्थितियाँ हर छह घंटे में गणना की जाती हैं।',
+    todayNoNote: 'इस राशि के लिए अभी कोई टिप्पणी नहीं लिखी गई है।',
+
+    askTitle: 'अपने AI ज्योतिषी से पूछें',
+    askPlaceholder: 'आपके मन में क्या है?',
+    askDisabled:
+      'अभी उपलब्ध नहीं। इस स्क्रीन पर अब तक सब कुछ आपकी कुंडली से गणना किया गया है, बिना किसी AI के — वह हिस्सा बाद में आएगा।',
+    askCareer: 'करियर',
+    askLove: 'प्रेम',
+    askMoney: 'धन',
+    askMarriage: 'विवाह',
+
+    periodLabel: 'आपकी वर्तमान दशा',
+    periodNoBirthTime: 'दशाओं के लिए जन्म समय चाहिए। एक जोड़ें और यह भर जाएगा।',
+    periodElapsed: '{percent}% बीत चुका',
+    periodElapsedLabel: '{planet} महादशा बीत चुकी',
+    periodAntardasha: 'अंतर्दशा: {planet}',
+    periodAntardashaTo: 'अंतर्दशा: {planet} ({end} तक)',
+    periodSeeAll: 'सभी दशाएँ देखें',
+
+    viewKundli: 'मेरी पूरी कुंडली देखें',
+    talkToAstrologer: 'ज्योतिषी से बात करें',
   },
 
   landing: {
@@ -495,6 +627,83 @@ export const hi: Dictionary = {
 
   chart: {
     defineTerm: '“{term}” का अर्थ',
+
+    loading: 'कुंडली लोड हो रही है…',
+    tryAgain: 'फिर कोशिश करें',
+    addBirthDetails: 'जन्म विवरण जोड़ें',
+    unreadable:
+      'यह कुंडली पढ़ी नहीं जा सकी। कुछ भी खोया नहीं — आपके जन्म विवरण सुरक्षित हैं। पुनर्गणना से आमतौर पर ठीक हो जाता है।',
+
+    planetsTitle: 'ग्रह और भाव',
+    planetsNoProfile:
+      'अभी कोई जन्म कुंडली नहीं है। अपनी जन्म तिथि, समय और स्थान जोड़ें और यह भर जाएगी।',
+    planetsSection: 'ग्रह स्थितियाँ',
+    housesSection: 'भाव',
+    planetsEmpty: 'इस कुंडली के लिए कोई ग्रह स्थिति नहीं।',
+    planetsCaption: 'ग्रह स्थितियाँ: हर ग्रह की राशि, अंश, भाव, नक्षत्र और बल।',
+    srTableCaption: 'ग्रह स्थितियाँ — ऊपर की कुंडली का ही डेटा, तालिका के रूप में।',
+
+    colPlanet: 'ग्रह',
+    colSign: 'राशि',
+    colDegree: 'अंश',
+    colHouse: 'भाव',
+    colNakshatra: 'नक्षत्र',
+    colStatus: 'स्थिति',
+
+    housesNoBirthTime:
+      'भावों के लिए जन्म समय चाहिए। उसके बिना लग्न — और इसलिए हर भाव — केवल अनुमान होगा, और अनुमान को तथ्य की तरह दिखाना कुछ न दिखाने से बुरा है। अपनी प्रोफ़ाइल में जन्म समय जोड़ें और यह भर जाएगा।',
+    houseEmpty: 'खाली',
+    housePlanetsHere: 'यहाँ के ग्रह',
+    houseNoPlanets: 'कोई नहीं। खाली भाव उसके स्वामी — यहाँ {lord} — से पढ़ा जाता है, अनुपस्थिति के रूप में नहीं।',
+    houseNumbered: '{ordinal} भाव',
+    houseRowLabel: '{ordinal} भाव, {sign}, स्वामी {lord}, {occupants}',
+
+    vargaLegend: 'कुंडली',
+
+    dashasTitle: 'दशा काल',
+    dashasLoading: 'आपकी दशाएँ लोड हो रही हैं…',
+    dashasNoProfile: 'दशाएँ आपकी जन्म कुंडली से पढ़ी जाती हैं। जन्म विवरण जोड़ें और यह भर जाएगा।',
+    dashasNoBirthTime:
+      'दशाओं के लिए जन्म समय चाहिए। क्रम जन्म के समय चंद्रमा की ठीक स्थिति से शुरू होता है, जो समय के बिना तय नहीं हो सकती।',
+    dashasAddBirthTime: 'जन्म समय जोड़ें',
+    dashaCurrent: 'वर्तमान दशा',
+    dashaChooseParent: 'इसकी दशाएँ देखने के लिए ऊपर एक {parent} चुनें।',
+    dashaPeriodsOf: '{level} काल',
+
+    transitsLoading: 'गोचर लोड हो रहे हैं…',
+    transitsNoProfile:
+      'गोचर आपकी जन्म कुंडली के सापेक्ष पढ़े जाते हैं। जन्म विवरण जोड़ें और यह भर जाएगा — यहाँ जन्म तिथि पर्याप्त है, समय आवश्यक नहीं।',
+    transitsNotYet:
+      'आज का आकाश अभी तैयार हो रहा है। स्थितियाँ हर छह घंटे में गणना होती हैं; नई शुरुआत के कुछ मिनटों में यह ठीक हो जाता है।',
+    transitsTitle: 'इस समय आकाश में',
+    transitsFrame: '{sign} में आपके चंद्रमा से गिने गए भाव, जो इसका पारंपरिक आधार है —',
+    transitsComputed: '{when} पर गणना की गई।',
+    transitsEmpty: 'अभी तक कोई गोचर स्थिति गणना नहीं हुई है। ये हर छह घंटे में ताज़ा होती हैं।',
+    transitsList: 'गोचर करते ग्रह',
+    transitsFromMoon: 'चंद्रमा से {ordinal}',
+    transitRowLabel: '{planet}, {sign} में, आपके चंद्रमा से {ordinal} भाव',
+
+    sadeSatiTitle: 'साढ़े साती',
+    sadeSatiInactive: 'अभी नहीं चल रही। शनि {sign} में है, आपके चंद्रमा से {ordinal} राशि।',
+    sadeSatiActive: 'शनि {sign} में है, आपके चंद्रमा से {ordinal} राशि।',
+    sadeSatiPhaseLabel: 'साढ़े साती चरण',
+    sadeSatiCurrentPhase: ' — वर्तमान चरण',
+    sadeSatiRising: 'आरोहण',
+    sadeSatiPeak: 'शिखर',
+    sadeSatiSetting: 'अवरोहण',
+    sadeSatiNoPhase: 'इस गणना के लिए चरण नहीं बताया गया।',
+
+    yogasTitle: 'योग',
+    yogasLoading: 'योग खोजे जा रहे हैं…',
+    yogasNoProfile: 'योग आपकी जन्म कुंडली से पढ़े जाते हैं। जन्म विवरण जोड़ें और यह भर जाएगा।',
+    yogasUnreadable:
+      'यह कुंडली पढ़ी नहीं जा सकी। आपके जन्म विवरण सुरक्षित हैं; पुनर्गणना से आमतौर पर ठीक हो जाता है।',
+    yogasNone:
+      'इंजन ने इस कुंडली में ग्यारह शास्त्रीय योग खोजे और उनमें से कोई नहीं मिला। यह सामान्य है — इनमें से अधिकांश के लिए ऐसी स्थितियाँ चाहिए जो स्वभाव से ही दुर्लभ हैं, और यही उन्हें तब उल्लेखनीय बनाता है जब वे बनते हैं।',
+    yogaStrong: 'प्रबल',
+    yogaModerate: 'मध्यम',
+    yogaNoDescription: 'इस योग के लिए अभी कोई विवरण नहीं लिखा गया है।',
+    yogaCardLabel: '{name}, {strength} बल, {planets}',
   },
 
   values: {

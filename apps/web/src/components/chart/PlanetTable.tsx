@@ -10,6 +10,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+import { useLocale } from '@/lib/i18n/context'
 import { cn } from '@/lib/utils'
 
 import { dignity, formatDegree, formatNakshatra } from './format'
@@ -63,12 +64,13 @@ export function PlanetTable({
   onSelect?: (planet: PlanetPlacement) => void
   className?: string
 }) {
+  const { t } = useLocale()
   const [open, setOpen] = useState<PlanetPlacement | null>(null)
 
   if (planets.length === 0) {
     return (
       <p className="rounded-lg border border-border p-6 text-sm text-ink-muted">
-        No planetary positions for this chart.
+        {t.chart.planetsEmpty}
       </p>
     )
   }
@@ -81,9 +83,7 @@ export function PlanetTable({
   return (
     <>
       <table role="table" className={cn('w-full text-sm', className)}>
-        <caption className="sr-only">
-          Planetary positions: sign, degree, house, nakshatra and dignity for each planet.
-        </caption>
+        <caption className="sr-only">{t.chart.planetsCaption}</caption>
 
         {/*
           Headers are hidden at mobile, not removed: the data-label
@@ -94,22 +94,22 @@ export function PlanetTable({
         <thead className="max-md:sr-only">
           <tr role="row" className="border-b border-border text-left text-ink-muted">
             <th role="columnheader" scope="col" className="py-2 pr-3 font-medium">
-              Planet
+              {t.chart.colPlanet}
             </th>
             <th role="columnheader" scope="col" className="py-2 pr-3 font-medium">
-              Sign
+              {t.chart.colSign}
             </th>
             <th role="columnheader" scope="col" className="py-2 pr-3 font-medium">
-              Degree
+              {t.chart.colDegree}
             </th>
             <th role="columnheader" scope="col" className="py-2 pr-3 font-medium">
-              House
+              {t.chart.colHouse}
             </th>
             <th role="columnheader" scope="col" className="py-2 pr-3 font-medium">
-              Nakshatra
+              {t.chart.colNakshatra}
             </th>
             <th role="columnheader" scope="col" className="py-2 font-medium">
-              Status
+              {t.chart.colStatus}
             </th>
           </tr>
         </thead>
@@ -125,7 +125,7 @@ export function PlanetTable({
                 'max-md:mb-3 max-md:block max-md:rounded-lg max-md:border max-md:p-3',
               )}
             >
-              <Cell label="Planet" className="py-2 pr-3 font-medium text-ink">
+              <Cell label={t.chart.colPlanet} className="py-2 pr-3 font-medium text-ink">
                 <button
                   type="button"
                   onClick={() => select(planet)}
@@ -144,15 +144,15 @@ export function PlanetTable({
                 </button>
               </Cell>
 
-              <Cell label="Sign" className="py-2 pr-3">
+              <Cell label={t.chart.colSign} className="py-2 pr-3">
                 {planet.sign}
               </Cell>
 
-              <Cell label="Degree" className="py-2 pr-3 tabular-nums">
+              <Cell label={t.chart.colDegree} className="py-2 pr-3 tabular-nums">
                 {formatDegree(planet.degree)}
               </Cell>
 
-              <Cell label="House" className="py-2 pr-3 tabular-nums">
+              <Cell label={t.chart.colHouse} className="py-2 pr-3 tabular-nums">
                 {/*
                   An em dash, never "0th". Without a birth time there is
                   no house to be in, and the reader is told why once at
@@ -161,13 +161,13 @@ export function PlanetTable({
                 {planet.house === null ? '—' : ordinal(planet.house)}
               </Cell>
 
-              <Cell label="Nakshatra" className="py-2 pr-3">
+              <Cell label={t.chart.colNakshatra} className="py-2 pr-3">
                 <AstroTerm term="nakshatra">
                   {formatNakshatra(planet.nakshatra, planet.pada)}
                 </AstroTerm>
               </Cell>
 
-              <Cell label="Status" className="py-2">
+              <Cell label={t.chart.colStatus} className="py-2">
                 <Status planet={planet} />
               </Cell>
             </tr>
