@@ -13,7 +13,22 @@ import { useRequireAuth } from '@/lib/use-require-auth'
 /** Must match the server's allowlists in internal/users/service.go. */
 const OPTIONS = {
   astrology_system: ['vedic', 'western'],
-  chart_style: ['north', 'south', 'east'],
+  /*
+    'east' is deliberately absent.
+
+    It was offered here, and `@ayana/astrology-geometry` exports
+    `ChartStyle = 'north' | 'south'` with no East Indian polygons at all
+    — so a reader could pick it, have it saved, and be handed a layout
+    nothing could render. That was invisible only because no screen
+    mounted ChartSVG until Phase 3 PR 10.
+
+    East Indian is a real style and belongs in the product. It is a
+    different polygon set in the geometry package, which is where it has
+    to be built; offering a choice the product cannot honour is worse
+    than offering two. `toChartStyle` handles accounts that already
+    stored it.
+  */
+  chart_style: ['north', 'south'],
   theme: ['dark', 'light', 'system'],
 } as const
 

@@ -83,9 +83,54 @@ export default function DeleteAccountPage() {
           <p className="text-sm">{fill(t.settings.deleteScheduled, { date: scheduledFor })}</p>
           <p className="mt-2 text-sm text-ink-muted">{t.settings.deleteGrace}</p>
         </Panel>
-        <Button className="mt-6" onClick={() => router.replace('/')}>
-          {t.nav.home}
-        </Button>
+
+        {/*
+          The way back.
+
+          This screen told the reader their account is going to be
+          deleted and then offered only "Home". `usersApi.cancelDeletion`
+          existed with no caller, `t.settings.deleteCancel` was written
+          in both locales, and `account_deletion_cancelled` was in the
+          analytics vocabulary — every part but the button.
+
+          The seven-day grace period the copy above promises was
+          unreachable from the UI, which makes the promise false. It is
+          the first action, not the second, because a reader on this
+          screen who wants to stop it wants to stop it now.
+        */}
+        <div className="mt-6 flex flex-wrap gap-2">
+          <Button
+            disabled={busy}
+            onClick={async () => {
+              setBusy(true)
+              setError(null)
+              try {
+                // The id before the call, not after: cancelling does not
+                // return a profile, and `me()` after a redirect is a
+                // second round trip for a field we already had.
+                const me = await usersApi.me()
+                await usersApi.cancelDeletion()
+                track('account_deletion_cancelled', { user_id: me.id })
+                router.replace('/home')
+              } catch {
+                setError(t.common.somethingWentWrong)
+                setBusy(false)
+              }
+            }}
+          >
+            {busy ? t.common.saving : t.settings.deleteCancel}
+          </Button>
+
+          <Button variant="secondary" onClick={() => router.replace('/')}>
+            {t.nav.home}
+          </Button>
+        </div>
+
+        {error && (
+          <p role="alert" className="mt-3 text-sm text-danger">
+            {error}
+          </p>
+        )}
       </div>
     )
   }

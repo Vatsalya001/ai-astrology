@@ -90,6 +90,14 @@ export interface EventMap {
   birth_profile_edited: { user_id: string; new_version: number }
 
   // Phase 3 — Kundli UI
+  /*
+    Sent by api-service, not the browser — which is why it was missing
+    here. `analytics-emitted.test.ts` found it: emitted by one service
+    and absent from the shared vocabulary, so it was untyped on the
+    TypeScript side and invisible to the vocabulary test.
+  */
+  onboarding_name_completed: { user_id: string }
+
   kundli_viewed: { user_id: string; chart_type: string }
   chart_style_switched: { from: string; to: string }
   glossary_term_opened: { term_key: string }

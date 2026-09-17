@@ -397,7 +397,7 @@ function PlanetGlyphs({
   return (
     <>
       {planets.map((planet, index) => {
-        const at = glyphPosition(cell, index, style)
+        const at = glyphPosition(cell, index, style, planets.length)
         const marked = highlighted.has(planet.planet)
         const interactive = Boolean(onPlanetTap)
 
@@ -466,9 +466,24 @@ function PlanetGlyphs({
  * broken.
  */
 function ChartDataTable({ chart, captionText }: { chart: ChartData; captionText: string }) {
+  /*
+    `sr-only` on a wrapping div, NOT on the <table>.
+
+    Tailwind's `sr-only` is `position:absolute; width:1px; height:1px;
+    overflow:hidden; clip:…`. A <table> ignores `width: 1px` — the table
+    layout algorithm sizes to its content — so the element measured 659px
+    on a 360px viewport and dragged `document.scrollWidth` to 674, making
+    the whole chart screen scroll sideways. A div honours the width and
+    clips the table inside it.
+
+    Latent since this component was written, and invisible until Phase 3
+    PR 10 finally mounted it on a route: a component nobody can open has
+    no layout.
+  */
   return (
-    <table className="sr-only">
-      <caption>{captionText}</caption>
+    <div className="sr-only">
+      <table>
+        <caption>{captionText}</caption>
       <thead>
         <tr>
           <th scope="col">Planet</th>
@@ -513,7 +528,8 @@ function ChartDataTable({ chart, captionText }: { chart: ChartData; captionText:
           </tr>
         ))}
       </tbody>
-    </table>
+      </table>
+    </div>
   )
 }
 

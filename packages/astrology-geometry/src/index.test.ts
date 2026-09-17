@@ -5,6 +5,7 @@ import {
   glyphPosition,
   houseOfSign,
   northIndianHouses,
+  pointInPolygon,
   signOfHouse,
   signedArea2,
   SIGN_COUNT,
@@ -251,27 +252,43 @@ describe('southIndianSigns', () => {
 describe('glyphPosition', () => {
   const cell = southIndianSigns()[0]!
 
-  it('stacks downward from the anchor', () => {
-    const first = glyphPosition(cell, 0, 'south')
-    const second = glyphPosition(cell, 1, 'south')
-    expect(first).toEqual({ x: cell.glyphAnchor.x, y: cell.glyphAnchor.y })
+  /**
+   * Centred on the anchor, not grown down from it.
+   *
+   * This asserted `first === anchor`, which only holds when the stack
+   * grows downward — and growing downward is what drew the third planet
+   * in a narrow North Indian triangle OUTSIDE its own house. See the
+   * containment tests below.
+   *
+   * A single glyph still sits exactly on the anchor; two straddle it.
+   */
+  it('centres the stack on the anchor', () => {
+    const alone = glyphPosition(cell, 0, 'south', 1)
+    expect(alone).toEqual({ x: cell.glyphAnchor.x, y: cell.glyphAnchor.y })
+
+    const first = glyphPosition(cell, 0, 'south', 2)
+    const second = glyphPosition(cell, 1, 'south', 2)
+
     expect(second.y).toBeGreaterThan(first.y)
     expect(second.x).toBe(first.x)
+    // Straddling: their midpoint is the anchor.
+    expect((first.y + second.y) / 2).toBeCloseTo(cell.glyphAnchor.y, 6)
   })
 
   // A stellium of six planets in one sign is ordinary, not exotic —
   // Phase 2's fixtures have them. A single column overflows the cell.
   it('wraps into a second column past four', () => {
-    const fourth = glyphPosition(cell, 3, 'south')
-    const fifth = glyphPosition(cell, 4, 'south')
+    const fourth = glyphPosition(cell, 3, 'south', 5)
+    const fifth = glyphPosition(cell, 4, 'south', 5)
     expect(fifth.x).toBeGreaterThan(fourth.x)
-    expect(fifth.y).toBe(cell.glyphAnchor.y)
+    // The fifth is alone in its column, so it sits on the anchor's row.
+    expect(fifth.y).toBeCloseTo(cell.glyphAnchor.y, 6)
   })
 
   it('never returns the same position twice for nine planets', () => {
     const seen = new Set(
       Array.from({ length: 9 }, (_, i) => {
-        const point = glyphPosition(cell, i, 'south')
+        const point = glyphPosition(cell, i, 'south', 9)
         return `${point.x},${point.y}`
       }),
     )
@@ -336,3 +353,87 @@ function contains(polygon: Point[], point: Point): boolean {
   }
   return inside
 }
+
+/**
+ * Glyphs stay inside the region they belong to.
+ *
+ * This is a geometry property, so it belongs here rather than in a React
+ * test — but it was found by rendering all 30 golden fixtures and
+ * checking each drawn glyph against its own polygon, because nothing
+ * here asked the question.
+ *
+ * The bug: `glyphPosition` stacked downward from the centroid, and the
+ * narrow North Indian triangles taper. House 11's apex is at x=75, so at
+ * the glyph column x=81.25 the polygon spans only y in [18.75, 31.25] —
+ * and the third of three planets landed at y=33, drawn in the
+ * NEIGHBOURING HOUSE. A reader sees a planet in the wrong house.
+ *
+ * It was invisible because the existing stacking test used two planets,
+ * which fits, and the visually-hidden table renders the house from the
+ * data and is therefore correct however the diagram is drawn.
+ */
+describe('glyphs stay inside their region', () => {
+  // The package's own predicate, not a copy — two implementations of
+  // point-in-polygon is two chances to get the winding wrong, and the
+  // test would then be checking its own copy rather than the code.
+  const inside = pointInPolygon
+
+  // Nine planets is the real maximum — a chart has exactly nine grahas,
+  // and all nine can share one house.
+  const COUNTS = [1, 2, 3, 4, 5, 6, 7, 8, 9]
+
+  it('keeps every North Indian glyph inside its house, for every crowding', () => {
+    const escaped: string[] = []
+
+    for (const cell of northIndianHouses()) {
+      for (const total of COUNTS) {
+        for (let i = 0; i < total; i++) {
+          const at = glyphPosition(cell, i, 'north', total)
+          if (!inside(cell.polygon, at)) {
+            escaped.push(`house ${cell.house}, glyph ${i + 1} of ${total} at ${at.x},${at.y}`)
+          }
+        }
+      }
+    }
+
+    expect(
+      escaped.slice(0, 8),
+      `${escaped.length} glyph position(s) fall outside their own house. A glyph drawn ` +
+        'outside its region is a planet shown in the wrong house.',
+    ).toEqual([])
+  })
+
+  it('keeps every South Indian glyph inside its sign cell, for every crowding', () => {
+    const escaped: string[] = []
+
+    for (const cell of southIndianSigns()) {
+      for (const total of COUNTS) {
+        for (let i = 0; i < total; i++) {
+          const at = glyphPosition(cell, i, 'south', total)
+          if (!inside(cell.polygon, at)) {
+            escaped.push(`sign ${cell.sign}, glyph ${i + 1} of ${total} at ${at.x},${at.y}`)
+          }
+        }
+      }
+    }
+
+    expect(escaped.slice(0, 8)).toEqual([])
+  })
+
+  // Two glyphs in one region must not land on each other, which is the
+  // property the centring must not break.
+  it('never places two glyphs of the same group at the same point', () => {
+    for (const cell of northIndianHouses()) {
+      for (const total of COUNTS) {
+        const seen = new Set<string>()
+        for (let i = 0; i < total; i++) {
+          const at = glyphPosition(cell, i, 'north', total)
+          const key = `${at.x},${at.y}`
+          expect(seen.has(key), `house ${cell.house}: glyph ${i} collides at ${key}`).toBe(false)
+          seen.add(key)
+        }
+      }
+    }
+  })
+})
+

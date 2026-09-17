@@ -282,6 +282,9 @@ export const en = {
     unreadable:
       'This chart could not be read. Nothing is lost — your birth details are saved. Recomputing usually fixes it.',
 
+    chartTitle: 'Your Kundli',
+    styleLegend: 'Style',
+    seePositions: 'See every position in a table',
     planetsTitle: 'Planets & houses',
     planetsNoProfile:
       'There is no birth chart yet. Add your birth date, time and place and this fills in.',
@@ -634,6 +637,9 @@ export const hi: Dictionary = {
     unreadable:
       'यह कुंडली पढ़ी नहीं जा सकी। कुछ भी खोया नहीं — आपके जन्म विवरण सुरक्षित हैं। पुनर्गणना से आमतौर पर ठीक हो जाता है।',
 
+    chartTitle: 'आपकी कुंडली',
+    styleLegend: 'शैली',
+    seePositions: 'हर स्थिति तालिका में देखें',
     planetsTitle: 'ग्रह और भाव',
     planetsNoProfile:
       'अभी कोई जन्म कुंडली नहीं है। अपनी जन्म तिथि, समय और स्थान जोड़ें और यह भर जाएगी।',
