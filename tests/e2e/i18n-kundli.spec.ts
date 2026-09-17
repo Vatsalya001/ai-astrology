@@ -74,10 +74,19 @@ async function addBirthProfile(page: Page): Promise<void> {
   await expect(page).toHaveURL(/\/home$/, { timeout: 30_000 })
 }
 
-/** Sets the stored locale the way the picker does, then reloads. */
+/**
+ * Sets the stored locale the way the picker does, then reloads.
+ *
+ * Waits for the network to settle before returning. Without it the
+ * caller asserts on content while the reload's own fetches are still in
+ * flight — which passed on an idle machine and failed intermittently
+ * under six parallel workers, on a different assertion each time. That
+ * shape is a test racing the page, not a bug in the page.
+ */
 async function useLocale(page: Page, locale: 'en' | 'hi'): Promise<void> {
   await page.evaluate((l) => window.localStorage.setItem('ayana.locale', l), locale)
   await page.reload()
+  await page.waitForLoadState('networkidle')
 }
 
 test.describe('switching to Hindi', () => {

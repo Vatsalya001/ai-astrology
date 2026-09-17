@@ -157,15 +157,16 @@ export default function ChartPage() {
   }
 
   return (
-    <main className="mx-auto max-w-2xl px-4 py-8 sm:px-6">
+    <main id="main" className="mx-auto max-w-2xl px-4 py-8 sm:px-6">
       <header className="mb-6 flex flex-wrap items-baseline justify-between gap-3">
         <h1 className="font-serif text-2xl">{t.chart.chartTitle}</h1>
         <ProfileSwitcher profiles={profiles} />
       </header>
 
       <div className="mb-6 flex flex-wrap gap-6">
-        <VargaSwitcher value={varga} onChange={chooseVarga} disabled={state === 'loading'} />
-        <StyleSwitcher value={style} onChange={chooseStyle} disabled={state === 'loading'} />
+        {/* Not disabled while loading — see the note on /kundli/planets. */}
+        <VargaSwitcher value={varga} onChange={chooseVarga} />
+        <StyleSwitcher value={style} onChange={chooseStyle} />
       </div>
 
       {state === 'loading' && (

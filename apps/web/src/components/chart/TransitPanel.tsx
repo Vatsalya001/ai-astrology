@@ -40,10 +40,34 @@ export function TransitPanel({
 }) {
   const { locale, t, fill } = useLocale()
 
-  const computedAt = new Intl.DateTimeFormat(locale, {
-    dateStyle: 'medium',
-    timeStyle: 'short',
-  }).format(new Date(data.at))
+  /*
+    The instant the positions were COMPUTED for, not the instant they
+    were asked for.
+
+    `data.at` is the query time — api-service defaults it to `now()` —
+    while each row carries the six-hourly slot the refresher wrote it
+    at. Rendering `data.at` stamped a sky up to six hours old as
+    computed this second, and if the worker had been down for three
+    days it still said "computed just now" over positions where the Moon
+    had moved more than a full sign. The header comment below promised
+    exactly the opposite.
+
+    The OLDEST row, not the newest: a partial refresh can leave one
+    planet behind, and the panel is only as fresh as its stalest
+    position. Taking the newest would overstate it.
+  */
+  const computedFor = data.transits.reduce<number | null>((oldest, position) => {
+    const at = Date.parse(position.timestamp)
+    if (!Number.isFinite(at)) return oldest
+    return oldest === null || at < oldest ? at : oldest
+  }, null)
+
+  const computedAt =
+    computedFor === null
+      ? null
+      : new Intl.DateTimeFormat(locale, { dateStyle: 'medium', timeStyle: 'short' }).format(
+          new Date(computedFor),
+        )
 
   return (
     <div className={cn('space-y-6', className)}>
@@ -52,7 +76,7 @@ export function TransitPanel({
         <p className="mt-1 text-xs text-ink-muted">
           {fill(t.chart.transitsFrame, { sign: data.natal_moon_sign })}{' '}
           <AstroTerm term="gochara">gochara</AstroTerm>.{' '}
-          {fill(t.chart.transitsComputed, { when: computedAt })}
+          {computedAt !== null && fill(t.chart.transitsComputed, { when: computedAt })}
         </p>
       </div>
 

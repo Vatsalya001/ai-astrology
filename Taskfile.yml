@@ -262,6 +262,15 @@ tasks:
       - cd {{.API_DIR}} && go build -o bin/api ./cmd/api && go build -o bin/worker ./cmd/worker
       - npm run build --workspace=web
 
+  integrity:
+    desc: Re-hash every tracked file against the index — finds bit flips git cannot see
+    # Not in `verify`: on a working tree with edits in it this reports
+    # every file you are changing, which is correct and useless as a
+    # gate. It belongs on a clean tree and in CI, where the checkout is
+    # fresh by construction.
+    cmds:
+      - ./scripts/check-integrity.sh
+
   verify:
     desc: The commit gate — lint, test and build everything
     # Starts from setup so this passes on a clean clone. That is a gate

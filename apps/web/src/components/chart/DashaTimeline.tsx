@@ -55,12 +55,22 @@ export interface TimelineLevel {
   /** Periods at this level, already filtered to the selected parent. */
   periods: Array<{ id: string; planet: string; start: string; end: string }>
   loading: boolean
+  /**
+   * The fetch for this level failed.
+   *
+   * Distinct from an empty `periods`, which means "no parent chosen
+   * yet". Collapsing them rendered "Choose a mahadasha above to see its
+   * periods" after a failed drill-down — telling the reader to do the
+   * thing they had just done, with no error and nothing to retry.
+   */
+  failed?: boolean
 }
 
 export function DashaTimeline({
   levels,
   currentAt,
   onDrillDown,
+  onRetryLevel,
   className,
 }: {
   /** Index 0 is mahadashas, 1 antardashas, 2 pratyantardashas. */
@@ -69,6 +79,8 @@ export function DashaTimeline({
   currentAt: number
   /** Called with the period whose children should be fetched next. */
   onDrillDown: (level: number, periodId: string | null) => void
+  /** Retry a level whose fetch failed. */
+  onRetryLevel?: (level: number) => void
   className?: string
 }) {
   const [open, setOpen] = useState<{ span: Span; level: number } | null>(null)
@@ -81,6 +93,8 @@ export function DashaTimeline({
           level={index}
           periods={level.periods}
           loading={level.loading}
+          failed={level.failed === true}
+          onRetry={onRetryLevel ? () => onRetryLevel(index) : undefined}
           currentAt={currentAt}
           onSelect={(span, id) => {
             setOpen({ span, level: index })
@@ -124,12 +138,16 @@ function Track({
   level,
   periods,
   loading,
+  failed,
+  onRetry,
   currentAt,
   onSelect,
 }: {
   level: number
   periods: Array<{ id: string; planet: string; start: string; end: string }>
   loading: boolean
+  failed: boolean
+  onRetry?: () => void
   currentAt: number
   onSelect: (span: Span, id: string) => void
 }) {
@@ -166,6 +184,37 @@ function Track({
           {levelInfo(level).name}
         </p>
         <div className="h-10 w-full animate-pulse rounded-md bg-elevated" />
+      </div>
+    )
+  }
+
+  /*
+    A failed fetch says so, and offers the way out.
+
+    Before this, a failure fell through to the "choose a parent" branch
+    below — which is the message for a level nobody has drilled into
+    yet, and reads as "you did not do the thing" to someone who just did.
+  */
+  if (failed) {
+    return (
+      <div role="alert">
+        <p className="mb-2 text-xs uppercase tracking-wide text-ink-muted">
+          {levelInfo(level).name}
+        </p>
+        <p className="text-sm text-ink-muted">{t.chart.dashaLevelFailed}</p>
+        {onRetry && (
+          <button
+            type="button"
+            onClick={onRetry}
+            className={cn(
+              'mt-2 text-sm text-primary underline-offset-4 hover:underline',
+              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+              'focus-visible:ring-offset-2 focus-visible:ring-offset-background rounded-sm',
+            )}
+          >
+            {t.chart.tryAgain}
+          </button>
+        )}
       </div>
     )
   }
