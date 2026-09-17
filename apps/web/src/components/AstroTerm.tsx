@@ -10,6 +10,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+import { track } from '@/lib/analytics'
 import { useLocale } from '@/lib/i18n/context'
 import { cn } from '@/lib/utils'
 
@@ -67,7 +68,13 @@ export function AstroTerm({
     <>
       <button
         type="button"
-        onClick={() => setOpen(true)}
+        onClick={() => {
+          // Which words readers actually tap is the only evidence for
+          // which glossary entries are worth expanding — and, in Phase
+          // 5, which terms the model should explain unprompted.
+          track('glossary_term_opened', { term_key: term })
+          setOpen(true)
+        }}
         className={cn(
           // A dotted underline rather than colour alone. Roughly 8% of
           // men cannot distinguish the gold from the body text, and a

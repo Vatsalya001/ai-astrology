@@ -1,5 +1,6 @@
 'use client'
 
+import { track } from '@/lib/analytics'
 import { useLocale } from '@/lib/i18n/context'
 import { cn } from '@/lib/utils'
 
@@ -56,6 +57,14 @@ export function AskBox({
       <input
         type="text"
         disabled={!enabled}
+        /*
+          Fires even while disabled — that is the entire point. This
+          measures latent demand for a feature that does not exist yet,
+          so the taps worth counting are the ones that go nowhere.
+          `onPointerDown`, not `onClick`: a disabled input dispatches no
+          click event at all.
+        */
+        onPointerDown={() => track('ai_chat_box_tapped', { enabled })}
         placeholder={t.home.askPlaceholder}
         aria-label={t.home.askTitle}
         aria-describedby={enabled ? undefined : 'ask-disabled-note'}

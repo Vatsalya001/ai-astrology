@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 
 import { PlaceSearch } from '@/components/PlaceSearch'
@@ -59,6 +59,26 @@ export default function BirthDetailsPage() {
     }
     setStep(step - 1)
   }
+
+  /*
+    Emitted once, when the flow is opened.
+
+    `birth_profile_step_completed` already reports steps 1, 2 and 3, and
+    without a "started" the funnel has no denominator — a drop-off on
+    step 1 is indistinguishable from nobody having opened the screen.
+    This is the highest drop-off point in the product, per the spec, so
+    that distinction is the whole reason to measure it.
+  */
+  useEffect(() => {
+    /*
+      `trackAsUser`, not `track`: the payload needs a user_id and this
+      screen has none to hand. That helper resolves the signed-in user
+      and DROPS the event if it cannot — which is the right trade here,
+      because a funnel denominator attributed to nobody is noise and one
+      attributed to the wrong id looks like a fact.
+    */
+    void trackAsUser('birth_profile_started', {})
+  }, [])
 
   function handleDateStep(e: React.FormEvent) {
     e.preventDefault()

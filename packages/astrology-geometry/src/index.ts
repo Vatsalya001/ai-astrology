@@ -242,7 +242,12 @@ export function toPoints(polygon: Point[]): string {
  * four. A stellium of six planets in one sign is common — Phase 2's
  * fixture set has them — and a single column would overflow the cell.
  */
-export function glyphPosition(cell: Cell, index: number, style: ChartStyle): Point {
+export function glyphPosition(
+  cell: Cell,
+  index: number,
+  style: ChartStyle,
+  total: number,
+): Point {
   const perColumn = 4
   const lineHeight = style === 'south' ? SIZE * 0.045 : SIZE * 0.04
   const columnWidth = SIZE * 0.075
@@ -250,10 +255,97 @@ export function glyphPosition(cell: Cell, index: number, style: ChartStyle): Poi
   const column = Math.floor(index / perColumn)
   const row = index % perColumn
 
-  return {
-    x: round(cell.glyphAnchor.x + column * columnWidth),
-    y: round(cell.glyphAnchor.y + row * lineHeight),
+  const columns = Math.max(1, Math.ceil(total / perColumn))
+  const rowsHere = Math.max(1, Math.min(total - column * perColumn, perColumn))
+
+  /*
+    Centred on the anchor, not grown down and to the right from it.
+
+    The North Indian houses are triangles and the narrow ones — 3, 5, 9,
+    11 — taper to a point. Stacking downward from the centroid runs out
+    of the polygon: in house 11, whose apex is at x=75, the valid band at
+    the glyph column x=81.25 is y in [18.75, 31.25], and the third glyph
+    landed at y=33. It was DRAWN IN THE NEIGHBOURING HOUSE.
+
+    That is a correctness bug a reader can see — a planet shown in the
+    wrong house — and it was invisible to every test: the visually-hidden
+    table renders `planet.house` from the data and so is right either
+    way, and the stacking test used two planets, which fits.
+
+    Centring makes the stack symmetric about the anchor, so n glyphs span
+    half the height in each direction. Found by rendering all 30 golden
+    fixtures and testing each glyph against its own polygon.
+  */
+  const wanted = {
+    x: cell.glyphAnchor.x + (column - (columns - 1) / 2) * columnWidth,
+    y: cell.glyphAnchor.y + (row - (rowsHere - 1) / 2) * lineHeight,
   }
+
+  /*
+    Then pulled back inside, if centring was not enough.
+
+    Centring fixes the common case. It does not fix a stellium: the
+    narrow triangles taper, and six glyphs at this line height simply do
+    not fit in house 11 however they are arranged. Without a clamp the
+    overflow lands in the NEIGHBOURING house, which draws a planet
+    somewhere it is not.
+
+    The trade is deliberate. A crowded house renders its glyphs bunched
+    against the edge, which is ugly and readable and obviously crowded.
+    The alternative is tidy and wrong. Real printed charts solve this by
+    shrinking the text in a crowded house; that is a renderer concern —
+    this package owns only where a glyph may be.
+  */
+  const point = pullInside(cell.polygon, cell.glyphAnchor, wanted)
+  return { x: round(point.x), y: round(point.y) }
+}
+
+/**
+ * The furthest point toward `wanted` that is still inside the polygon.
+ *
+ * Binary search along the segment from a known-interior point. Twenty
+ * iterations puts it within a millionth of the boundary, and the
+ * `INSET` keeps it a hair inside so a glyph never sits exactly on an
+ * edge shared with the next region.
+ */
+function pullInside(polygon: Point[], interior: Point, wanted: Point): Point {
+  if (pointInPolygon(polygon, wanted)) return wanted
+
+  const INSET = 0.98
+  let lo = 0
+  let hi = 1
+
+  for (let i = 0; i < 20; i++) {
+    const mid = (lo + hi) / 2
+    const at = {
+      x: interior.x + (wanted.x - interior.x) * mid,
+      y: interior.y + (wanted.y - interior.y) * mid,
+    }
+    if (pointInPolygon(polygon, at)) lo = mid
+    else hi = mid
+  }
+
+  const t = lo * INSET
+  return {
+    x: interior.x + (wanted.x - interior.x) * t,
+    y: interior.y + (wanted.y - interior.y) * t,
+  }
+}
+
+/**
+ * Ray casting. Exported because both the geometry tests and the
+ * renderer's fixture test ask the same question, and two copies of a
+ * point-in-polygon test is two chances to get the winding wrong.
+ */
+export function pointInPolygon(polygon: Point[], point: Point): boolean {
+  let inside = false
+  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+    const a = polygon[i]!
+    const b = polygon[j]!
+    if (a.y > point.y === b.y > point.y) continue
+    if (point.x < ((b.x - a.x) * (point.y - a.y)) / (b.y - a.y) + a.x) inside = !inside
+  }
+  return inside
 }
 
 function p(x: number, y: number): Point {
