@@ -2,6 +2,7 @@
 
 import { AstroTerm } from '@/components/AstroTerm'
 import { VARGAS, type VargaType } from '@/lib/varga'
+import { useLocale } from '@/lib/i18n/context'
 import { cn } from '@/lib/utils'
 
 /**
@@ -35,10 +36,12 @@ export function VargaSwitcher({
   disabled?: boolean
   className?: string
 }) {
+  const { t } = useLocale()
+
   return (
     <fieldset className={cn('min-w-0', className)} disabled={disabled}>
       <legend className="mb-2 text-xs uppercase tracking-wide text-ink-muted">
-        Chart
+        {t.chart.vargaLegend}
       </legend>
 
       <div className="flex flex-wrap gap-2">

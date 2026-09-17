@@ -38,7 +38,7 @@ export function TransitPanel({
   data: NatalTransits
   className?: string
 }) {
-  const { locale } = useLocale()
+  const { locale, t, fill } = useLocale()
 
   const computedAt = new Intl.DateTimeFormat(locale, {
     dateStyle: 'medium',
@@ -48,22 +48,23 @@ export function TransitPanel({
   return (
     <div className={cn('space-y-6', className)}>
       <div>
-        <h2 className="font-serif text-lg">Right now in the sky</h2>
+        <h2 className="font-serif text-lg">{t.chart.transitsTitle}</h2>
         <p className="mt-1 text-xs text-ink-muted">
-          Houses counted from your Moon in {data.natal_moon_sign}, the traditional frame for{' '}
-          <AstroTerm term="gochara">gochara</AstroTerm>. Computed {computedAt}.
+          {fill(t.chart.transitsFrame, { sign: data.natal_moon_sign })}{' '}
+          <AstroTerm term="gochara">gochara</AstroTerm>.{' '}
+          {fill(t.chart.transitsComputed, { when: computedAt })}
         </p>
       </div>
 
       {data.transits.length === 0 ? (
         <p className="rounded-lg border border-border p-6 text-sm text-ink-muted">
-          No transit positions have been computed yet. They refresh every six hours.
+          {t.chart.transitsEmpty}
         </p>
       ) : (
         /* Named, because the Sade Sati indicator below is also a list
            and a screen reader moving by landmark otherwise meets two
            unlabelled ones. */
-        <ul aria-label="Transiting planets" className="divide-y divide-border">
+        <ul aria-label={t.chart.transitsList} className="divide-y divide-border">
           {data.transits.map((position) => (
             <li
               key={position.planet}
@@ -74,9 +75,11 @@ export function TransitPanel({
                 fragments that are not a sentence.
               */
               aria-label={[
-                position.planet,
-                `in ${position.sign}`,
-                `${ordinal(position.house_from_moon)} house from your Moon`,
+                fill(t.chart.transitRowLabel, {
+                  planet: position.planet,
+                  sign: position.sign,
+                  ordinal: ordinal(position.house_from_moon),
+                }),
                 position.is_retrograde ? 'retrograde' : null,
               ]
                 .filter(Boolean)
@@ -104,7 +107,9 @@ export function TransitPanel({
               </span>
 
               <span className="shrink-0 text-xs text-ink-muted">
-                {ordinal(position.house_from_moon)} from Moon
+                {fill(t.chart.transitsFromMoon, {
+                  ordinal: ordinal(position.house_from_moon),
+                })}
               </span>
             </li>
           ))}

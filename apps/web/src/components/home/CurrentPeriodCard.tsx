@@ -32,7 +32,7 @@ export function CurrentPeriodCard({
   current: CurrentDashas
   className?: string
 }) {
-  const { locale } = useLocale()
+  const { locale, t, fill } = useLocale()
 
   const maha = current.mahadasha
   const antar = current.antardasha
@@ -51,11 +51,9 @@ export function CurrentPeriodCard({
         className={cn('rounded-lg border border-border p-4', className)}
       >
         <h2 id="period-heading" className="text-xs uppercase tracking-wide text-ink-muted">
-          Your current period
+          {t.home.periodLabel}
         </h2>
-        <p className="mt-2 text-sm text-ink-muted">
-          Dasha periods need a birth time. Add one and this fills in.
-        </p>
+        <p className="mt-2 text-sm text-ink-muted">{t.home.periodNoBirthTime}</p>
       </section>
     )
   }
@@ -69,7 +67,7 @@ export function CurrentPeriodCard({
       className={cn('rounded-lg border border-border p-4', className)}
     >
       <h2 id="period-heading" className="text-xs uppercase tracking-wide text-ink-muted">
-        Your current period
+        {t.home.periodLabel}
       </h2>
 
       <p className="mt-2 font-serif text-lg text-ink">
@@ -93,21 +91,22 @@ export function CurrentPeriodCard({
             aria-valuemin={0}
             aria-valuemax={100}
             aria-valuenow={Math.round(progress * 100)}
-            aria-label={`${maha.planet} mahadasha elapsed`}
+            aria-label={fill(t.home.periodElapsedLabel, { planet: maha.planet })}
             className="mt-1 h-2 w-full overflow-hidden rounded-full bg-elevated"
           >
             <div className="h-full bg-gold" style={{ width: `${progress * 100}%` }} />
           </div>
           <p className="mt-1 text-xs text-ink-muted">
-            {Math.round(progress * 100)}% elapsed
+            {fill(t.home.periodElapsed, { percent: Math.round(progress * 100) })}
           </p>
         </>
       )}
 
       {antar && (
         <p className="mt-3 text-sm text-ink-muted">
-          <AstroTerm term="antardasha">Antardasha</AstroTerm>: {antar.planet}
-          {antarEnd(antar, locale)}
+          <AstroTerm term="antardasha">
+            {antarLine(antar, locale, t.home.periodAntardasha, t.home.periodAntardashaTo, fill)}
+          </AstroTerm>
         </p>
       )}
 
@@ -119,14 +118,27 @@ export function CurrentPeriodCard({
           'focus-visible:ring-offset-2 focus-visible:ring-offset-background rounded-sm',
         )}
       >
-        See all periods
+        {t.home.periodSeeAll}
       </Link>
     </section>
   )
 }
 
-/** ` (to Nov 2026)`, or nothing if the dates are unusable. */
-function antarEnd(antar: { planet: string; start: string; end: string }, locale: string): string {
+/**
+ * `Antardasha: Saturn (to Nov 2026)` — or without the date.
+ *
+ * Two templates rather than one with an optional tail, because the end
+ * date sits in a different place in Hindi and a concatenated
+ * " (to Nov 2026)" would land in the wrong half of the sentence.
+ */
+function antarLine(
+  antar: { planet: string; start: string; end: string },
+  locale: string,
+  withoutEnd: string,
+  withEnd: string,
+  fill: (template: string, values: Record<string, string | number>) => string,
+): string {
   const span = toSpan(antar)
-  return span ? ` (to ${formatMonth(span.end, locale)})` : ''
+  if (!span) return fill(withoutEnd, { planet: antar.planet })
+  return fill(withEnd, { planet: antar.planet, end: formatMonth(span.end, locale) })
 }

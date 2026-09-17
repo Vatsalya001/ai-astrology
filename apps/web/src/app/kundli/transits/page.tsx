@@ -11,6 +11,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { astrologyApi, type BirthProfile, type NatalTransits } from '@/lib/astrology-api'
 import { AuthError } from '@/lib/auth-api'
 import { resolveProfile, useSelectedProfile } from '@/lib/profile-context'
+import { useLocale } from '@/lib/i18n/context'
 import { useRequireAuth } from '@/lib/use-require-auth'
 
 type State = 'loading' | 'ready' | 'error' | 'no-profile' | 'not-yet'
@@ -39,6 +40,7 @@ type State = 'loading' | 'ready' | 'error' | 'no-profile' | 'not-yet'
  */
 export default function TransitsPage() {
   const onUnauthenticated = useRequireAuth()
+  const { t } = useLocale()
   const { selectedId } = useSelectedProfile()
   const [profiles, setProfiles] = useState<BirthProfile[]>([])
 
@@ -100,7 +102,7 @@ export default function TransitsPage() {
 
       {state === 'loading' && (
         <div className="space-y-3" aria-busy="true" aria-live="polite">
-          <span className="sr-only">Loading transits…</span>
+          <span className="sr-only">{t.chart.transitsLoading}</span>
           {Array.from({ length: 7 }, (_, i) => (
             <Skeleton key={i} className="h-10 w-full" />
           ))}
@@ -112,11 +114,10 @@ export default function TransitsPage() {
       {state === 'no-profile' && (
         <div className="rounded-lg border border-border p-8 text-center">
           <p className="text-sm text-ink-muted">
-            Transits are read against your birth chart. Add your birth details and this
-            fills in — a birth date is enough, a time is not needed here.
+            {t.chart.transitsNoProfile}
           </p>
           <Button asChild className="mt-4">
-            <Link href="/onboarding/birth">Add birth details</Link>
+            <Link href="/onboarding/birth">{t.chart.addBirthDetails}</Link>
           </Button>
         </div>
       )}
@@ -124,15 +125,14 @@ export default function TransitsPage() {
       {state === 'not-yet' && (
         <div className="rounded-lg border border-border p-8 text-center">
           <p className="text-sm text-ink-muted">
-            Today&rsquo;s sky is still being prepared. Positions are computed every six
-            hours; this usually resolves within a few minutes of a fresh start.
+            {t.chart.transitsNotYet}
           </p>
           <Button
             variant="secondary"
             className="mt-4"
             onClick={() => setAttempt((n) => n + 1)}
           >
-            Try again
+            {t.chart.tryAgain}
           </Button>
         </div>
       )}

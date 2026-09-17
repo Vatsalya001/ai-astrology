@@ -8,6 +8,7 @@ import { AskBox } from './AskBox'
 import { CurrentPeriodCard } from './CurrentPeriodCard'
 import { TodayCard } from './TodayCard'
 import { greeting } from '@/app/home/page'
+import { en, interpolate } from '@/lib/i18n/dictionaries'
 import type { CurrentDashas, DashaPeriod } from '@/lib/astrology-api'
 import { LocaleProvider } from '@/lib/i18n/context'
 
@@ -205,26 +206,31 @@ describe('CurrentPeriodCard', () => {
  * production rather than theoretical.
  */
 describe('greeting', () => {
+  // The real English dictionary and the real interpolator, so these
+  // assert what a reader sees rather than what a fixture says.
+  const g = (time: Parameters<typeof greeting>[2], name?: string | null) =>
+    greeting(en, interpolate, time, name)
+
   it('uses the time of day and the name when both are known', () => {
-    expect(greeting('morning', 'Priya')).toBe('Good morning, Priya')
-    expect(greeting('afternoon', 'Priya')).toBe('Good afternoon, Priya')
-    expect(greeting('evening', 'Priya')).toBe('Good evening, Priya')
+    expect(g('morning', 'Priya')).toBe('Good morning, Priya')
+    expect(g('afternoon', 'Priya')).toBe('Good afternoon, Priya')
+    expect(g('evening', 'Priya')).toBe('Good evening, Priya')
   })
 
   it('drops the time of day rather than guessing one', () => {
     // Null is what the SERVER renders. "Good morning" shown to somebody
     // at midnight is worse than "Hello".
-    expect(greeting(null, 'Priya')).toBe('Hello, Priya')
+    expect(g(null, 'Priya')).toBe('Hello, Priya')
   })
 
   it('renders no trailing comma when the name is missing', () => {
-    expect(greeting('morning', null)).toBe('Good morning')
-    expect(greeting('morning', undefined)).toBe('Good morning')
-    expect(greeting('morning', '   ')).toBe('Good morning')
-    expect(greeting(null, null)).toBe('Hello')
+    expect(g('morning', null)).toBe('Good morning')
+    expect(g('morning', undefined)).toBe('Good morning')
+    expect(g('morning', '   ')).toBe('Good morning')
+    expect(g(null, null)).toBe('Hello')
   })
 
   it('trims a name with stray whitespace', () => {
-    expect(greeting('morning', '  Priya  ')).toBe('Good morning, Priya')
+    expect(g('morning', '  Priya  ')).toBe('Good morning, Priya')
   })
 })

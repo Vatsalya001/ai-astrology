@@ -22,6 +22,7 @@ import {
 } from '@/lib/astrology-api'
 import { resetAnalytics, track } from '@/lib/analytics'
 import { useLocale } from '@/lib/i18n/context'
+import type { Dictionary } from '@/lib/i18n/dictionaries'
 import { resolveProfile, useSelectedProfile } from '@/lib/profile-context'
 import { useTimeOfDay } from '@/lib/time-of-day'
 import { useRequireAuth } from '@/lib/use-require-auth'
@@ -48,7 +49,7 @@ type State = 'loading' | 'ready' | 'error'
 export default function HomePage() {
   const router = useRouter()
   const onUnauthenticated = useRequireAuth()
-  const { t } = useLocale()
+  const { t, fill } = useLocale()
   const { selectedId } = useSelectedProfile()
   const timeOfDay = useTimeOfDay()
 
@@ -151,7 +152,7 @@ export default function HomePage() {
                 "Hello".
               */}
               <h1 className="font-serif text-2xl tracking-tight">
-                {greeting(timeOfDay, profile?.name)}
+                {greeting(t, fill, timeOfDay, profile?.name)}
               </h1>
               <ProfileSwitcher profiles={profiles} />
             </div>
@@ -166,7 +167,7 @@ export default function HomePage() {
 
             <div className="flex flex-wrap gap-2 pt-2">
               <Button asChild>
-                <Link href="/kundli/planets">View my full Kundli</Link>
+                <Link href="/kundli/planets">{t.home.viewKundli}</Link>
               </Button>
               {/*
                 Disabled, not hidden. Same reasoning as the ask box: the
@@ -175,7 +176,7 @@ export default function HomePage() {
                 redesign.
               */}
               <Button variant="secondary" disabled>
-                Talk to an astrologer
+                {t.home.talkToAstrologer}
               </Button>
             </div>
           </>
@@ -193,15 +194,27 @@ export default function HomePage() {
  * it during onboarding. Four combinations, none of which may render a
  * stray comma.
  */
-export function greeting(time: ReturnType<typeof useTimeOfDay>, name?: string | null): string {
+export function greeting(
+  t: Dictionary,
+  fill: (template: string, values: Record<string, string | number>) => string,
+  time: ReturnType<typeof useTimeOfDay>,
+  name?: string | null,
+): string {
   const opening =
     time === 'morning'
-      ? 'Good morning'
+      ? t.home.greetMorning
       : time === 'afternoon'
-        ? 'Good afternoon'
+        ? t.home.greetAfternoon
         : time === 'evening'
-          ? 'Good evening'
-          : 'Hello'
+          ? t.home.greetEvening
+          : t.home.greetNeutral
 
-  return name?.trim() ? `${opening}, ${name.trim()}` : opening
+  /*
+    A template, not string concatenation.
+
+    `${opening}, ${name}` bakes in a comma-then-name order that is not
+    universal, and the greeting is the one string on the dashboard a
+    reader sees before anything else. The dictionary owns the shape.
+  */
+  return name?.trim() ? fill(t.home.greetWithName, { greeting: opening, name: name.trim() }) : opening
 }

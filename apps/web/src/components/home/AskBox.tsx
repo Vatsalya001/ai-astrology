@@ -1,5 +1,6 @@
 'use client'
 
+import { useLocale } from '@/lib/i18n/context'
 import { cn } from '@/lib/utils'
 
 /**
@@ -23,7 +24,7 @@ import { cn } from '@/lib/utils'
  * `aria-describedby` points at the explanation, so a screen reader that
  * lands here is told WHY rather than just "dimmed, edit text, disabled".
  */
-const TOPICS = ['Career', 'Love', 'Money', 'Marriage'] as const
+const TOPIC_KEYS = ['askCareer', 'askLove', 'askMoney', 'askMarriage'] as const
 
 export function AskBox({
   enabled,
@@ -32,6 +33,8 @@ export function AskBox({
   enabled: boolean
   className?: string
 }) {
+  const { t } = useLocale()
+
   return (
     <section
       aria-labelledby="ask-heading"
@@ -47,14 +50,14 @@ export function AskBox({
       className={cn('rounded-lg border border-border p-4', className)}
     >
       <h2 id="ask-heading" className="font-serif text-base text-ink">
-        Ask your AI astrologer
+        {t.home.askTitle}
       </h2>
 
       <input
         type="text"
         disabled={!enabled}
-        placeholder="What&rsquo;s on your mind?"
-        aria-label="Ask your AI astrologer"
+        placeholder={t.home.askPlaceholder}
+        aria-label={t.home.askTitle}
         aria-describedby={enabled ? undefined : 'ask-disabled-note'}
         className={cn(
           'mt-3 w-full rounded-lg border border-input bg-surface px-3 py-2 text-sm',
@@ -66,9 +69,9 @@ export function AskBox({
       />
 
       <div className="mt-3 flex flex-wrap gap-2">
-        {TOPICS.map((topic) => (
+        {TOPIC_KEYS.map((key) => (
           <button
-            key={topic}
+            key={key}
             type="button"
             disabled={!enabled}
             aria-describedby={enabled ? undefined : 'ask-disabled-note'}
@@ -79,15 +82,14 @@ export function AskBox({
               enabled ? 'hover:border-gold hover:text-ink' : 'cursor-not-allowed opacity-60',
             )}
           >
-            {topic}
+            {t.home[key]}
           </button>
         ))}
       </div>
 
       {!enabled && (
         <p id="ask-disabled-note" className="mt-3 text-xs text-ink">
-          Not available yet. Everything on this screen so far is computed from your chart,
-          with no AI involved — that part comes later.
+          {t.home.askDisabled}
         </p>
       )}
     </section>

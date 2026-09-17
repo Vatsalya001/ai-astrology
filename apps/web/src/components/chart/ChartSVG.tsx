@@ -60,6 +60,7 @@ export function ChartSVG({
   onHouseTap,
   className,
   title,
+  captionText,
 }: {
   chart: ChartData
   style: ChartStyle
@@ -68,6 +69,16 @@ export function ChartSVG({
   onHouseTap?: (house: HouseNumber) => void
   className?: string
   title?: string
+  /**
+   * The visually-hidden table's caption.
+   *
+   * A required prop rather than a `useLocale()` call, because this
+   * component is the one the Phase 3 PDF worker renders through
+   * chromedp — outside React's provider tree and outside the browser's
+   * locale entirely. Taking the string keeps it pure; reaching for a
+   * hook would make it unusable in the place it matters most.
+   */
+  captionText: string
 }) {
   const summaryId = useId()
   const ascendantSign = chart.ascendant?.signIndex ?? null
@@ -167,7 +178,7 @@ export function ChartSVG({
         {summarise(chart, style, title)}
       </p>
 
-      <ChartDataTable chart={chart} />
+      <ChartDataTable chart={chart} captionText={captionText} />
     </figure>
   )
 }
@@ -454,10 +465,10 @@ function PlanetGlyphs({
  * the same nine planets twice and reasonably concludes something is
  * broken.
  */
-function ChartDataTable({ chart }: { chart: ChartData }) {
+function ChartDataTable({ chart, captionText }: { chart: ChartData; captionText: string }) {
   return (
     <table className="sr-only">
-      <caption>Planetary positions — the same data as the chart above, as a table.</caption>
+      <caption>{captionText}</caption>
       <thead>
         <tr>
           <th scope="col">Planet</th>

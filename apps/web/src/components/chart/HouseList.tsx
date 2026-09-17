@@ -12,6 +12,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+import { useLocale } from '@/lib/i18n/context'
 import { cn } from '@/lib/utils'
 
 import { formatDegree } from './format'
@@ -77,6 +78,7 @@ export function HouseList({
   planets: PlanetPlacement[]
   className?: string
 }) {
+  const { t, fill } = useLocale()
   const [open, setOpen] = useState<HousePlacement | null>(null)
 
   /*
@@ -91,9 +93,7 @@ export function HouseList({
       <p
         className={cn('rounded-lg border border-border p-6 text-sm text-ink-muted', className)}
       >
-        Houses need a birth time. Without one the rising sign — and so every house — would
-        be a guess, and a guess shown as a fact is worse than nothing. Add a birth time to
-        your profile and this fills in.
+        {t.chart.housesNoBirthTime}
       </p>
     )
   }
@@ -138,10 +138,10 @@ export function HouseList({
                   for the same reason.
                 */
                 aria-label={[
-                  `${ordinal(house.house)} house`,
+                  fill(t.chart.houseNumbered, { ordinal: ordinal(house.house) }),
                   house.sign,
                   `ruled by ${house.lord}`,
-                  here.length === 0 ? 'empty' : here.map((p) => p.planet).join(', '),
+                  here.length === 0 ? t.chart.houseEmpty : here.map((p) => p.planet).join(', '),
                 ].join(', ')}
               >
                 <span className="w-10 shrink-0 tabular-nums text-ink-muted">
@@ -167,7 +167,7 @@ export function HouseList({
                   is indistinguishable from a rendering failure.
                 */}
                 <span className="shrink-0 text-xs text-ink-muted">
-                  {here.length === 0 ? 'empty' : `${here.length}`}
+                  {here.length === 0 ? t.chart.houseEmpty : `${here.length}`}
                 </span>
               </button>
 
@@ -199,6 +199,7 @@ function HouseSheet({
   occupants: PlanetPlacement[]
   onClose: () => void
 }) {
+  const { t, fill } = useLocale()
   if (!house) return null
 
   const term = HOUSE_TERMS[house.house] ?? null
@@ -207,7 +208,7 @@ function HouseSheet({
     <Dialog open onOpenChange={(next) => !next && onClose()}>
       <DialogContent className="max-w-md">
         <DialogHeader>
-          <DialogTitle>{ordinal(house.house)} house</DialogTitle>
+          <DialogTitle>{fill(t.chart.houseNumbered, { ordinal: ordinal(house.house) })}</DialogTitle>
           <DialogDescription>
             {house.sign}, ruled by {house.lord}
           </DialogDescription>
@@ -220,11 +221,12 @@ function HouseSheet({
         )}
 
         <div className="text-sm">
-          <h3 className="mb-2 text-xs uppercase tracking-wide text-ink-muted">Planets here</h3>
+          <h3 className="mb-2 text-xs uppercase tracking-wide text-ink-muted">
+            {t.chart.housePlanetsHere}
+          </h3>
           {occupants.length === 0 ? (
             <p className="text-ink-muted">
-              None. An empty house is read through its lord — {house.lord} here — not as
-              an absence.
+              {fill(t.chart.houseNoPlanets, { lord: house.lord })}
             </p>
           ) : (
             <ul className="space-y-1">
