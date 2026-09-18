@@ -112,6 +112,16 @@ export interface EventMap {
     No profile id and no job id on any of them. A job id is a handle to
     somebody's birth chart, and analytics is a third party.
   */
+  /*
+    How a chart left the product.
+
+    `method` only — never a profile id, a share id or a token. A share id
+    is a handle to somebody's birth chart and analytics is a third party;
+    what is worth knowing is which of the three surfaces people actually
+    use, which the method alone answers.
+  */
+  kundli_shared: { method: 'image' | 'image_download' | 'link' | 'pdf' }
+
   kundli_pdf_requested: Record<string, never>
   kundli_pdf_ready: Record<string, never>
   kundli_pdf_failed: Record<string, never>

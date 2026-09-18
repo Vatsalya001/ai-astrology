@@ -326,6 +326,32 @@ export const en = {
     downloadOpen: 'Open PDF',
     downloadFailed: 'We could not build your PDF. Please try again.',
     downloadExpires: 'This link works for 24 hours.',
+
+    // ─── Sharing ───────────────────────────────────────────────
+    shareTitle: 'Share this Kundli',
+    shareOpen: 'Share',
+    shareImage: 'Save as image',
+    shareLink: 'Create a link',
+    sharePdf: 'Download PDF',
+    shareLinkReady: 'Link created',
+    shareCopy: 'Copy link',
+    shareCopied: 'Copied',
+    shareLinkExpires: 'Works for 30 days. You can revoke it any time.',
+    shareLinkWarning:
+      'Anyone with this link can see the chart. It does not show your birth date, time or place.',
+    shareFailed: 'That did not work. Please try again.',
+    shareTooMany:
+      'You have too many active links. Revoke one you no longer need, then try again.',
+    shareRevoke: 'Revoke',
+    shareRevoked: 'Revoked',
+    shareViews: 'Opened {count} times',
+    shareNoLinks: 'No links yet.',
+
+    // The shared view, seen by somebody with no account.
+    sharedTitle: 'A Kundli shared with you',
+    sharedGone:
+      'This link is no longer available. The person who sent it may have turned it off, or it may have expired.',
+    sharedMadeWith: 'Made with Ayana',
     printFailed: 'This document could not be prepared.',
 
     colPlanet: 'Planet',
@@ -710,6 +736,32 @@ export const hi: Dictionary = {
     downloadOpen: 'PDF खोलें',
     downloadFailed: 'आपकी PDF नहीं बन सकी। कृपया फिर से कोशिश करें।',
     downloadExpires: 'यह लिंक 24 घंटे तक काम करेगा।',
+
+    // ─── Sharing ───────────────────────────────────────────────
+    shareTitle: 'यह कुंडली साझा करें',
+    shareOpen: 'साझा करें',
+    shareImage: 'छवि के रूप में सहेजें',
+    shareLink: 'लिंक बनाएँ',
+    sharePdf: 'PDF डाउनलोड करें',
+    shareLinkReady: 'लिंक बन गया',
+    shareCopy: 'लिंक कॉपी करें',
+    shareCopied: 'कॉपी हो गया',
+    shareLinkExpires: '30 दिन तक काम करेगा। आप इसे कभी भी बंद कर सकते हैं।',
+    shareLinkWarning:
+      'यह लिंक जिसके पास होगा, वह कुंडली देख सकेगा। इसमें आपकी जन्म तिथि, समय या स्थान नहीं दिखता।',
+    shareFailed: 'यह काम नहीं कर सका। कृपया फिर से कोशिश करें।',
+    shareTooMany:
+      'आपके बहुत सारे लिंक चालू हैं। जिसकी ज़रूरत न हो उसे बंद करें, फिर कोशिश करें।',
+    shareRevoke: 'बंद करें',
+    shareRevoked: 'बंद है',
+    shareViews: '{count} बार खोला गया',
+    shareNoLinks: 'अभी कोई लिंक नहीं।',
+
+    // The shared view, seen by somebody with no account.
+    sharedTitle: 'आपके साथ साझा की गई कुंडली',
+    sharedGone:
+      'यह लिंक अब उपलब्ध नहीं है। भेजने वाले ने इसे बंद कर दिया होगा, या इसकी अवधि समाप्त हो गई होगी।',
+    sharedMadeWith: 'Ayana से बनाई गई',
     printFailed: 'यह दस्तावेज़ तैयार नहीं हो सका।',
 
     colPlanet: 'ग्रह',

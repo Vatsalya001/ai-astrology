@@ -39,6 +39,30 @@ type Export struct {
 	// data" that silently drops the superseded versions is not a copy.
 	BirthProfiles []ExportBirthProfile `json:"birth_profiles"`
 	Charts        []ExportChart        `json:"charts"`
+
+	// Phase 3. Which links this person created, and what became of them.
+	//
+	// Included because "who can currently see my chart" is a question
+	// only this answers, and an export that omits it hands somebody a
+	// copy of their data with the sharing removed.
+	ShareLinks []ExportShareLink `json:"share_links"`
+}
+
+// ExportShareLink is one share link as its owner receives it back.
+//
+// The TOKEN is absent, and so is its hash. The plaintext was shown once
+// at creation and is not stored; the hash is not useful to a person and
+// is the one field that, combined with our table, would identify a live
+// credential. What the owner needs is which links exist, whether each is
+// still working, and how much it has been used.
+type ExportShareLink struct {
+	ID        uuid.UUID  `json:"id"`
+	ProfileID uuid.UUID  `json:"birth_profile_id"`
+	Scope     string     `json:"scope"`
+	ExpiresAt time.Time  `json:"expires_at"`
+	RevokedAt *time.Time `json:"revoked_at"`
+	ViewCount int64      `json:"view_count"`
+	CreatedAt time.Time  `json:"created_at"`
 }
 
 type ExportIdentity struct {
@@ -165,6 +189,35 @@ func (e *Exporter) Export(ctx context.Context, userID uuid.UUID) (Export, error)
 		return Export{}, fmt.Errorf("users: export birth profiles: %w", err)
 	}
 
+	/*
+	   Share links.
+
+	   Fails the whole export if it fails, like every other section here.
+	   A partial export that looks complete is worse than none: somebody
+	   checking "who can see my chart" would read an absent section as
+	   "nobody", which is the opposite of what an unavailable read means.
+	*/
+	shareRows, err := e.q.ListChartSharesForUser(ctx, pgUser)
+	if err != nil {
+		return Export{}, fmt.Errorf("users: export share links: %w", err)
+	}
+	shareLinks := make([]ExportShareLink, 0, len(shareRows))
+	for _, row := range shareRows {
+		link := ExportShareLink{
+			ID:        row.ID.Bytes,
+			ProfileID: row.BirthProfileID.Bytes,
+			Scope:     row.Scope,
+			ExpiresAt: row.ExpiresAt,
+			ViewCount: row.ViewCount,
+			CreatedAt: row.CreatedAt,
+		}
+		if row.RevokedAt.Valid {
+			revoked := row.RevokedAt.Time
+			link.RevokedAt = &revoked
+		}
+		shareLinks = append(shareLinks, link)
+	}
+
 	out := Export{
 		ExportedAt: time.Now().UTC(),
 		// Versioned so a later change to the shape is detectable by
@@ -180,6 +233,7 @@ func (e *Exporter) Export(ctx context.Context, userID uuid.UUID) (Export, error)
 		// different and much stronger claim than "you have none".
 		BirthProfiles: make([]ExportBirthProfile, 0, len(profiles)),
 		Charts:        make([]ExportChart, 0, len(profiles)),
+		ShareLinks:    shareLinks,
 	}
 
 	for _, profile := range profiles {

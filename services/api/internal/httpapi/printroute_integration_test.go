@@ -65,6 +65,10 @@ func TestEveryRouteIsAuthenticatedUnlessItIsOnThePublicAllowlist(t *testing.T) {
 
 		"GET /api/v1/print/chart": "the single-use print token IS the credential; " +
 			"headless Chrome on the PDF worker has no session to authenticate with",
+
+		"GET /api/v1/shared/{token}": "the share token IS the credential; the person " +
+			"opening a link somebody sent them has no account here and will not make " +
+			"one to look at a chart. Resolved server-side against a revocable row",
 	}
 
 	var checked int

@@ -33,6 +33,7 @@ import (
 	"github.com/Vatsalya001/ai-astrology/services/api/internal/platform/redis"
 	"github.com/Vatsalya001/ai-astrology/services/api/internal/platform/redis/ratelimit"
 	"github.com/Vatsalya001/ai-astrology/services/api/internal/platform/testsupport"
+	"github.com/Vatsalya001/ai-astrology/services/api/internal/shares"
 	"github.com/Vatsalya001/ai-astrology/services/api/internal/transits"
 	"github.com/Vatsalya001/ai-astrology/services/api/internal/users"
 )
@@ -56,6 +57,20 @@ type routerHarness struct {
 	bob     uuid.UUID
 	profile uuid.UUID
 	placeID int32
+
+	/*
+	   A share link Alice owns, so the route walk can address
+	   /shares/{shareId} with an id that exists.
+
+	   Without it the walk substitutes nothing for {shareId}, the handler
+	   fails to parse the literal "{shareId}" and answers 404 — and
+	   TestEveryProfileScopedRouteRefusesAStranger fails on its OWNER
+	   assertion, reporting the route as broken when it is the URL that
+	   was malformed. Which is the assertion doing its job: a stranger
+	   getting 404 from a route the owner cannot use either proves
+	   nothing at all.
+	*/
+	shareID uuid.UUID
 
 	// printTokens is the SAME store the mounted handler uses, so a test
 	// can mint a token the way the PDF worker does. Built from one value
@@ -108,6 +123,11 @@ func newRouterHarness(t *testing.T) (*routerHarness, func()) {
 
 	chartService := charts.NewService(queries, pool, astro, profileService, nil)
 	printTokens := charts.NewPrintTokens(charts.NewRedisPrintTokens(redisClient))
+	shareService := shares.NewService(queries, profileService, nil)
+	// Correcting birth details revokes the old version's links. Wired
+	// here as well as in cmd/api, because the test that proves it runs
+	// against this router.
+	profileService.WithShareRevoker(shareService)
 
 	deps := Deps{
 		Config:     cfg,
@@ -122,9 +142,11 @@ func newRouterHarness(t *testing.T) (*routerHarness, func()) {
 
 		BirthProfiles: birthprofiles.NewHandler(
 			profileService, placeShim{placeService}, AuthErrorWriter),
-		Places:       places.NewHandler(placeService, AuthErrorWriter),
-		Charts:       charts.NewHandler(chartService, AuthErrorWriter).WithPrintTokens(printTokens),
-		Transits:     transits.NewHandler(transits.NewReader(queries), chartService, AuthErrorWriter),
+		Places:   places.NewHandler(placeService, AuthErrorWriter),
+		Charts:   charts.NewHandler(chartService, AuthErrorWriter).WithPrintTokens(printTokens),
+		Transits: transits.NewHandler(transits.NewReader(queries), chartService, AuthErrorWriter),
+		Shares: shares.NewHandler(
+			shareService, sharedChartAdapter{chartService}, AuthErrorWriter, nil),
 		ProfileOwner: profileService,
 	}
 
@@ -140,6 +162,7 @@ func newRouterHarness(t *testing.T) (*routerHarness, func()) {
 	h.placeID = seedPlace(ctx, t, pool)
 	h.profile = seedProfile(ctx, t, profileService, h.alice, h.placeID, placeService)
 	seedTransits(ctx, t, pool)
+	h.shareID = seedShare(ctx, t, shareService, h.alice, h.profile)
 
 	return h, func() {
 		astroStub.Close()
@@ -219,6 +242,7 @@ func TestEveryProfileScopedRouteRefusesAStranger(t *testing.T) {
 		path := strings.NewReplacer(
 			"{id}", h.profile.String(),
 			"{birthProfileId}", h.profile.String(),
+			"{shareId}", h.shareID.String(),
 		).Replace(route.pattern)
 
 		t.Run(route.method+" "+route.pattern, func(t *testing.T) {
@@ -293,6 +317,7 @@ func TestNoPhase2RouteAnswersWithoutAToken(t *testing.T) {
 		path := strings.NewReplacer(
 			"{id}", h.profile.String(),
 			"{birthProfileId}", h.profile.String(),
+			"{shareId}", h.shareID.String(),
 		).Replace(route.pattern)
 
 		rec := h.do(t, route.method, path, "", route.body)
@@ -1213,4 +1238,34 @@ func (h *routerHarness) countDashas(t *testing.T) int {
 		t.Fatalf("count dashas: %v", err)
 	}
 	return n
+}
+
+// sharedChartAdapter matches the composition root's adapter in
+// cmd/api/main.go: shares.ChartReader returns `any`, and the charts
+// service returns a concrete SharedView.
+//
+// Duplicated here rather than exported from somewhere shared, because
+// cmd/api is a main package and cannot be imported — the same reason
+// placeShim above is duplicated.
+type sharedChartAdapter struct{ svc *charts.Service }
+
+func (a sharedChartAdapter) SharedChart(
+	ctx context.Context, userID, profileID uuid.UUID,
+) (any, error) {
+	return a.svc.SharedChart(ctx, userID, profileID)
+}
+
+// seedShare creates one share link, so a route addressing {shareId} has
+// something real to address.
+func seedShare(
+	ctx context.Context, t *testing.T,
+	svc *shares.Service, userID, profileID uuid.UUID,
+) uuid.UUID {
+	t.Helper()
+
+	share, err := svc.Create(ctx, userID, profileID, 0)
+	if err != nil {
+		t.Fatalf("seed share: %v", err)
+	}
+	return share.ID
 }

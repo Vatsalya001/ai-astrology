@@ -1,12 +1,13 @@
 'use client'
 
 import Link from 'next/link'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 import type { ChartStyle } from '@ayana/astrology-geometry'
 
 import { ChartSVG } from '@/components/chart/ChartSVG'
 import { DownloadPdf } from '@/components/chart/DownloadPdf'
+import { ShareSheet } from '@/components/chart/ShareSheet'
 import { StyleSwitcher } from '@/components/chart/StyleSwitcher'
 import { VargaSwitcher } from '@/components/chart/VargaSwitcher'
 import { parseChartData } from '@/components/chart/parse'
@@ -51,6 +52,16 @@ export default function ChartPage() {
   const { selectedId } = useSelectedProfile()
 
   const [profiles, setProfiles] = useState<BirthProfile[]>([])
+
+  /*
+    A handle on the rendered SVG, for the image export.
+
+    The PNG is produced by reading the LIVE element's computed styles —
+    every colour in ChartSVG comes from a Tailwind class, and a clone
+    detached from the document has none of them. So the export needs the
+    element that is actually on screen, not a re-render of it.
+  */
+  const chartRef = useRef<SVGSVGElement>(null)
   const [chart, setChart] = useState<ChartData | null>(null)
   const [varga, setVarga] = useState<VargaType>(DEFAULT_VARGA)
   const [style, setStyle] = useState<ChartStyle>('north')
@@ -206,6 +217,7 @@ export default function ChartPage() {
       {state === 'ready' && chart && (
         <>
           <ChartSVG
+            svgRef={chartRef}
             chart={chart}
             style={style}
             captionText={t.chart.srTableCaption}
@@ -233,7 +245,8 @@ export default function ChartPage() {
             profile happens to be default.
           */}
           {shownProfile && (
-            <div className="mt-8 flex justify-center">
+            <div className="mt-8 flex flex-col items-center gap-4">
+              <ShareSheet profileId={shownProfile.id} chartRef={chartRef} />
               <DownloadPdf profileId={shownProfile.id} />
             </div>
           )}

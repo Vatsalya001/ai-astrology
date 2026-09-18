@@ -16,6 +16,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/hibiken/asynq"
 
 	"github.com/Vatsalya001/ai-astrology/services/api/internal/auth"
@@ -34,6 +35,7 @@ import (
 	"github.com/Vatsalya001/ai-astrology/services/api/internal/platform/observability"
 	"github.com/Vatsalya001/ai-astrology/services/api/internal/platform/redis"
 	"github.com/Vatsalya001/ai-astrology/services/api/internal/platform/redis/ratelimit"
+	"github.com/Vatsalya001/ai-astrology/services/api/internal/shares"
 	"github.com/Vatsalya001/ai-astrology/services/api/internal/transits"
 	"github.com/Vatsalya001/ai-astrology/services/api/internal/users"
 )
@@ -213,6 +215,13 @@ func run() error {
 	*/
 	printTokens := charts.NewPrintTokens(charts.NewRedisPrintTokens(cache.Client))
 
+	shareService := shares.NewService(queries, profileService, log).WithAnalytics(events)
+	// Correcting birth details revokes every link to the old version.
+	// Wired here rather than inside birthprofiles so that package keeps
+	// no knowledge of shares — the interface is declared by it, the
+	// implementation is chosen here.
+	profileService.WithShareRevoker(shareService)
+
 	pdfQueue := asynq.NewClient(asynq.RedisClientOpt{
 		Addr:     cache.Client.Options().Addr,
 		Password: cache.Client.Options().Password,
@@ -241,6 +250,15 @@ func run() error {
 		Places: places.NewHandler(placeService, httpapi.AuthErrorWriter),
 		Charts: charts.NewHandler(chartService, httpapi.AuthErrorWriter).
 			WithPrintTokens(printTokens),
+		Shares: shares.NewHandler(
+			shareService,
+			sharedChartAdapter{chartService},
+			httpapi.AuthErrorWriter,
+			// The share view's rate limit is keyed on the client, and
+			// resolving a client IP is the trusted-proxy decision that
+			// lives in httpapi.
+			httpapi.IPSubject(trustProxy, cfg.IPHashSalt),
+		),
 		PDF: pdf.NewHandler(
 			asynqEnqueuer{pdfQueue},
 			pdf.NewStatusStore(cache.Client),
@@ -329,4 +347,19 @@ type asynqEnqueuer struct{ client *asynq.Client }
 func (e asynqEnqueuer) Enqueue(task *asynq.Task) error {
 	_, err := e.client.Enqueue(task)
 	return err
+}
+
+// sharedChartAdapter bridges the concrete charts service to the
+// interface shares declares.
+//
+// shares.ChartReader returns `any` so that package needs no knowledge of
+// the charts types; charts returns a concrete SharedView so its own
+// callers keep theirs. The adapter lives here, in the composition root,
+// which is the one place allowed to know about both.
+type sharedChartAdapter struct{ svc *charts.Service }
+
+func (a sharedChartAdapter) SharedChart(
+	ctx context.Context, userID, profileID uuid.UUID,
+) (any, error) {
+	return a.svc.SharedChart(ctx, userID, profileID)
 }
