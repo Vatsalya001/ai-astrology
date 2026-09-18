@@ -2,8 +2,8 @@
 
 ```
 Phase: 3 — Kundli UI
-Gate:  🔶 OPEN  (13 of 16 gate items closed)
-       Three open, all named below. Two need a human.
+Gate:  🔶 OPEN  (14 of 16 gate items closed)
+       Two open. One needs a human; one needs a decision.
 ```
 
 Phase 2 closed with 20 of 20. Its record is `docs/TESTING-PHASE-2.md`, which lists what
@@ -29,10 +29,11 @@ to prove they fire. Phase 3 is being held to the same standard.
 | 11 | Another user's PDF rejected | PR 12/13, break-tested |
 | 12 | Visual regression suite green | PR 16 — 15 baselines, 3 viewports, stable over 3 runs |
 | 15 | `task verify` green | run at each PR |
+| 16 | `PROJECT_STATUS.md` and this file updated | both current |
 
 ---
 
-## Open (3)
+## Open (2)
 
 ### 13 — manual keyboard and screen-reader pass 👤 **needs a human**
 
@@ -52,10 +53,6 @@ That leaves ~20 KB for the whole product, and the i18n dictionaries alone are 14
 
 Closing it means shipping one locale's dictionary instead of both (~15 KB, still short),
 or a decision about the framework. Neither is a Phase 3 call.
-
-### 16 — this file, and `docs/PROJECT_STATUS.md`
-
-`PROJECT_STATUS.md` is current. This file is now too, which closes the second half.
 
 ---
 
