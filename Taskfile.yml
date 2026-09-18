@@ -49,16 +49,23 @@ tasks:
     desc: Start Postgres, Redis, MinIO and Mailpit
     cmds:
       - docker compose up -d
+      # The bucket, once the storage is healthy. Separate because
+      # minio-init runs to completion, and `up --wait` counts an exited
+      # container as a failure — see the profile note in compose.
+      - docker compose --profile init up minio-init --exit-code-from minio-init
       - echo "Postgres :5433 · Redis :6381 · MinIO :9001 · Mailpit :8025"
 
   down:
     desc: Stop all containers
-    cmds: [docker compose down]
+    # --profile init: the one-shot bucket container must be removed
+    # with the network, or the next `up` fails against a network id
+    # that no longer exists.
+    cmds: [docker compose --profile init down --remove-orphans]
 
   nuke:
     desc: Stop containers AND delete all volumes (destroys local data)
     prompt: This deletes your local database and object storage. Continue?
-    cmds: [docker compose down -v]
+    cmds: [docker compose --profile init down -v --remove-orphans]
 
   # ─── Development ──────────────────────────────────────────────────
 

@@ -84,6 +84,19 @@ services:
   minio-init:
     image: quay.io/minio/mc:RELEASE.2025-04-16T18-13-26Z
     container_name: ayana-minio-init
+    # Behind a profile, so a plain `docker compose up` does not start it.
+    #
+    # Not tidiness — `up --wait` blocks until every started service is
+    # running or healthy, and a service that runs to completion and exits
+    # 0 is reported as a FAILURE by that flag. Adding this container
+    # without the profile broke `scripts/ayana up` outright: the
+    # infrastructure came up healthy and the script then died with
+    # "docker compose failed".
+    #
+    # The callers that need the bucket run this profile explicitly, which
+    # also makes the ordering visible at the call site rather than
+    # implied by a depends_on nobody reads.
+    profiles: ["init"]
     depends_on:
       minio:
         condition: service_healthy
