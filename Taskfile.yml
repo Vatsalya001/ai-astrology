@@ -274,6 +274,11 @@ tasks:
       # command somebody has to remember.
       - task: budget:web
 
+  storybook:
+    desc: Run Storybook for the component library
+    cmds:
+      - npm run storybook --workspace=web
+
   budget:web:
     desc: Fail if any route's first-load JS exceeds its gzipped budget
     # Reads .next/diagnostics/route-bundle-stats.json, so it needs a

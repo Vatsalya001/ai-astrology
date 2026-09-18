@@ -738,6 +738,29 @@ cannot continue, so the app correctly redirected to sign-in and the test read th
 error state". It now fails the birth-profile list only, which every Kundli route loads
 first.
 
+**PR 20 — task 3.17, Storybook.** The spec's reason is not documentation: *"Storybook is
+free and it is what keeps Phases 5 and 10 from re-inventing all of this."* Phase 5 builds
+a chat UI on these components; Phase 10 ports them to React Native.
+
+17 stories across `PlanetTable`, `SadeSatiIndicator` and `YogaCard`, chosen for the states
+that are **hard to reach in the running app** and therefore rot: an empty planet table, a
+yoga the corpus has no entry for, a strength value the UI does not know, and all three
+Sade Sati phases — which are visible for about thirty months every twenty-nine years.
+
+Every story renders inside the app's real `LocaleProvider` and on `bg-base`. Neither is
+decoration: components here call `useLocale()`, which *throws* outside a provider, and on
+Storybook's default white canvas `text-ink` (#F2F3F8) is invisible.
+
+**The RTL variant the spec asks for is a direction toggle, not a locale.** This product
+ships English and Hindi, both left-to-right; there is no RTL locale to screenshot.
+The toggle earns its place by surfacing hardcoded `left`/`ml-` that would break the day an
+Urdu locale is added — and the story says that rather than claiming a box is ticked.
+
+**A build does not execute stories.** `stories.test.tsx` renders all 17 in the unit suite,
+because a story whose args have drifted from its component's props compiles right up until
+somebody opens that panel. Break-tested both ways: a story the component cannot render,
+and a stories file that exports none.
+
 **Two defects PR 12 found in existing code**, both invisible until the print route
 existed:
 

@@ -264,6 +264,14 @@ jobs:
       - name: Bundle budget
         run: npm run budget --workspace=web
 
+      # Storybook compiles, which catches a story importing something
+      # that no longer exists. That every story RENDERS is checked by
+      # stories.test.tsx in the unit suite above — a build does not
+      # execute them, and a story whose args have drifted from its
+      # component's props compiles right up until it is opened.
+      - name: Storybook builds
+        run: npm run build-storybook --workspace=web
+
       - name: Audit dependencies
         run: npm audit --audit-level=high
 

@@ -61,9 +61,9 @@ or a decision about the framework. Neither is a Phase 3 call.
 
 ## Also outstanding (not gate items)
 
-- **Task 3.17 — Storybook.** Not started.
-- **Task 3.18 — loading/error/empty audit.** Not started as a sweep; the states exist on
-  the screens built this phase.
+- ~~Task 3.17 — Storybook.~~ Done: 17 stories, rendered in the unit suite, built in CI.
+- ~~Task 3.18 — loading/error/empty.~~ Done: `tests/e2e/kundli-states.spec.ts` drives all
+  three on all five Kundli routes.
 - **CI has never executed a job.** 👤 Every check in this repo is local. The runner
   refuses at dispatch: *"recent account payments have failed or your spending limit needs
   to be increased."* Steps in `docs/MANUAL-A11Y-PASS.md` §CI.

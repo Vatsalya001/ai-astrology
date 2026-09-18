@@ -78,3 +78,6 @@ Thumbs.db
 
 # Task's own checksum cache.
 .task/
+
+# Storybook build output. The stories are source; this is not.
+/apps/web/storybook-static/

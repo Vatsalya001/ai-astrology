@@ -17,7 +17,10 @@ import next from 'eslint-config-next/core-web-vitals'
  */
 export default tseslint.config(
   {
-    ignores: ['.next/**', 'node_modules/**', 'next-env.d.ts'],
+    // storybook-static is BUILD OUTPUT, not source. Linting it reports
+    // hundreds of errors in minified vendor bundles and buries anything
+    // real — the first run after adding Storybook produced exactly that.
+    ignores: ['.next/**', 'node_modules/**', 'next-env.d.ts', 'storybook-static/**'],
   },
 
   js.configs.recommended,
