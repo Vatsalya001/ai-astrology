@@ -716,6 +716,28 @@ three.
 The missing test now checks **every** sign, that each window contains the instant it was
 computed for, and that roughly three signs are running at once.
 
+**PR 19 — task 3.18, the four states, enforced.** The Definition of Done asks every
+screen for loading, error, empty and populated. An audit found them all present — so the
+deliverable is not the states, it is something that keeps them true.
+
+Not a source scan. The cheap version greps each `page.tsx` for a skeleton and an error
+branch, and it produced **two false negatives on its first run**: `/onboarding/computing`
+reported as having no error path when it has a `failed` state, `/shared/[token]` when it
+handles both `gone` and `unreadable`. The grep did not know those names. A guard that
+calls a protected screen unprotected is one people learn to ignore — and it would say
+nothing at all about a branch that exists and never renders.
+
+`tests/e2e/kundli-states.spec.ts` drives the real states in a real browser across all five
+Kundli routes: signed in with **no birth profile** (the state every user passes through
+once and nobody building the product sees again), a held-open request for the loading
+state, and a failing data endpoint for the error state.
+
+Scoping the failure taught something. The first version failed every `/api/v1/` path,
+which also fails `/api/v1/auth/refresh` — and a session that cannot be refreshed genuinely
+cannot continue, so the app correctly redirected to sign-in and the test read that as "no
+error state". It now fails the birth-profile list only, which every Kundli route loads
+first.
+
 **Two defects PR 12 found in existing code**, both invisible until the print route
 existed:
 
