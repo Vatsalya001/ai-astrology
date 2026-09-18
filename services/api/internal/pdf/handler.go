@@ -4,14 +4,18 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/hibiken/asynq"
 
 	"github.com/Vatsalya001/ai-astrology/services/api/internal/auth"
+	"github.com/Vatsalya001/ai-astrology/services/api/internal/platform/redis/ratelimit"
 	"github.com/Vatsalya001/ai-astrology/services/api/internal/platform/reqctx"
 )
 
@@ -19,6 +23,37 @@ import (
 // not depend on the whole jobs runtime, and so a test can count.
 type Enqueuer interface {
 	Enqueue(task *asynq.Task) error
+}
+
+// Limiter is the rate limiter, declared by the consumer so this package
+// names only the one method it uses.
+type Limiter interface {
+	Allow(ctx context.Context, rule ratelimit.Rule, subject string) (ratelimit.Result, error)
+}
+
+/*
+RenderLimit is the tightest limit in the service, and it should be.
+
+One request here starts a browser process on a worker for up to ninety
+seconds. That is by a wide margin the most expensive thing an
+authenticated user can ask this API to do — the recompute route, which
+already carries a limit for being "the only route that calls
+astro-service unconditionally", costs a fraction of it.
+
+Without a limit it is a button that converts one account into as many
+concurrent Chrome processes as the fleet will start, and a PDF queue
+full of one person's renders is a download that never arrives for
+anybody else. The specification names it directly: "Rate limit PDF
+generation (CPU-expensive and trivially abusable)."
+
+Ten an hour is far above real use — a person downloads their chart
+once, and perhaps once more per relative — and far below what it takes
+to hurt anything.
+*/
+var RenderLimit = ratelimit.Rule{
+	Name:   "pdf_render",
+	Max:    10,
+	Window: time.Hour,
 }
 
 // JobStatus is the store surface the handler needs — both halves,
@@ -43,6 +78,7 @@ type Handler struct {
 	queue    Enqueuer
 	status   JobStatus
 	writeErr HTTPErrorWriter
+	logger   *slog.Logger
 }
 
 // HTTPErrorWriter is httpapi.WriteError, injected so this package does
@@ -50,7 +86,17 @@ type Handler struct {
 type HTTPErrorWriter func(w http.ResponseWriter, r *http.Request, status int, code, message string, cause error)
 
 func NewHandler(queue Enqueuer, status JobStatus, writeErr HTTPErrorWriter) *Handler {
-	return &Handler{queue: queue, status: status, writeErr: writeErr}
+	return &Handler{queue: queue, status: status, writeErr: writeErr, logger: slog.Default()}
+}
+
+// WithLogger replaces the logger, so a test can assert on what was
+// recorded when the limiter was unreachable — the branch that silently
+// lets a request through.
+func (h *Handler) WithLogger(logger *slog.Logger) *Handler {
+	if logger != nil {
+		h.logger = logger
+	}
+	return h
 }
 
 // ─── POST /charts/{birthProfileId}/pdf ───────────────────────────────
@@ -59,10 +105,59 @@ func NewHandler(queue Enqueuer, status JobStatus, writeErr HTTPErrorWriter) *Han
 //
 // 202, not 200: the work has been accepted and has not been done. A 200
 // here would be a lie that a client is entitled to act on.
-func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
+//
+// Takes the limiter as an argument rather than holding it, the same
+// shape as charts.Recompute — so the route table shows at a glance which
+// endpoints are limited, instead of that fact being buried in whichever
+// dependencies a handler happened to be constructed with.
+func (h *Handler) Create(limiter Limiter) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		h.create(w, r, limiter)
+	}
+}
+
+func (h *Handler) create(w http.ResponseWriter, r *http.Request, limiter Limiter) {
 	principal, profileID, ok := h.scope(w, r)
 	if !ok {
 		return
+	}
+
+	/*
+	   Keyed on the user, not the IP.
+
+	   The cost is per account, and an IP limit would punish everyone
+	   behind one mobile carrier's NAT — which, in this product's market,
+	   is a large share of the users.
+
+	   Checked BEFORE the job id is minted and before the status is
+	   written, so a refused request leaves nothing behind. Limiting after
+	   the write would fill Redis with "queued" jobs for renders that were
+	   never enqueued, and a client holding one of those job ids would
+	   poll it until the TTL expired.
+	*/
+	if limiter != nil {
+		result, err := limiter.Allow(r.Context(), RenderLimit, principal.UserID.String())
+		if err != nil {
+			/*
+			   Fails OPEN, matching the recompute route and the global
+			   throttle.
+
+			   The trade is deliberate and worth stating, because failing
+			   closed would be defensible on a route this expensive. The
+			   reason it does not: the status store is the SAME Redis, so
+			   an outage already means no render can report its result.
+			   Refusing as well turns a degraded feature into a broken
+			   one, and buys protection only against an attacker who
+			   happens to strike during that outage.
+			*/
+			h.logger.WarnContext(r.Context(),
+				"pdf rate limiter unavailable; allowing", slog.Any("err", err))
+		} else if !result.Allowed {
+			w.Header().Set("Retry-After", strconv.Itoa(int(result.RetryAfter.Seconds())+1))
+			h.writeErr(w, r, http.StatusTooManyRequests, "RATE_LIMITED",
+				"You have requested several PDFs recently. Please try again later.", nil)
+			return
+		}
 	}
 
 	jobID := uuid.New()

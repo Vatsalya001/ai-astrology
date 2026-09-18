@@ -1,9 +1,11 @@
 package pdf
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -16,6 +18,7 @@ import (
 	"github.com/hibiken/asynq"
 
 	"github.com/Vatsalya001/ai-astrology/services/api/internal/auth"
+	"github.com/Vatsalya001/ai-astrology/services/api/internal/platform/redis/ratelimit"
 	"github.com/Vatsalya001/ai-astrology/services/api/internal/platform/reqctx"
 )
 
@@ -146,10 +149,54 @@ func (k *keyedStatus) Get(_ context.Context, userID, jobID uuid.UUID) (Status, e
 
 // ─── harness ─────────────────────────────────────────────────────────
 
+/*
+countingLimiter allows a fixed number of requests, then refuses.
+
+Real enough to be worth asserting on: it records the RULE and the
+SUBJECT it was asked about, which is how "limited per user" is checked
+as a fact rather than inferred from a 429 that an IP-keyed limiter
+would also produce.
+*/
+type countingLimiter struct {
+	mu       sync.Mutex
+	allowed  int
+	seen     []string
+	rules    []string
+	err      error
+	requests int
+}
+
+func (l *countingLimiter) Allow(
+	_ context.Context, rule ratelimit.Rule, subject string,
+) (ratelimit.Result, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	l.requests++
+	l.seen = append(l.seen, subject)
+	l.rules = append(l.rules, rule.Name)
+
+	if l.err != nil {
+		return ratelimit.Result{}, l.err
+	}
+	if l.requests > l.allowed {
+		return ratelimit.Result{Allowed: false, RetryAfter: 90 * time.Second}, nil
+	}
+	return ratelimit.Result{Allowed: true, Remaining: l.allowed - l.requests}, nil
+}
+
+func (l *countingLimiter) subjects() []string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return append([]string(nil), l.seen...)
+}
+
 type httpRig struct {
 	router    http.Handler
 	queue     *fakeQueue
 	status    *keyedStatus
+	limiter   *countingLimiter
+	logs      *bytes.Buffer
 	issuer    *auth.Issuer
 	user      uuid.UUID
 	profileID uuid.UUID
@@ -167,7 +214,13 @@ func newHTTPRig(t *testing.T) *httpRig {
 	queue := &fakeQueue{status: status}
 	profileID := uuid.New()
 
-	handler := NewHandler(queue, status, testErrorWriter)
+	// High enough that the tests which are not about limiting are never
+	// refused by it, and low enough that the ones which are can reach it.
+	limiter := &countingLimiter{allowed: 100}
+
+	logs := &bytes.Buffer{}
+	handler := NewHandler(queue, status, testErrorWriter).
+		WithLogger(slog.New(slog.NewJSONHandler(logs, &slog.HandlerOptions{Level: slog.LevelDebug})))
 
 	r := chi.NewRouter()
 	r.Route("/charts/{birthProfileId}", func(r chi.Router) {
@@ -181,7 +234,7 @@ func newHTTPRig(t *testing.T) *httpRig {
 				next.ServeHTTP(w, req.WithContext(reqctx.WithProfileID(req.Context(), profileID)))
 			})
 		})
-		r.Post("/pdf", handler.Create)
+		r.Post("/pdf", handler.Create(limiter))
 		r.Get("/pdf/{jobId}", handler.Status)
 	})
 
@@ -189,6 +242,8 @@ func newHTTPRig(t *testing.T) *httpRig {
 		router:    r,
 		queue:     queue,
 		status:    status,
+		limiter:   limiter,
+		logs:      logs,
 		issuer:    issuer,
 		user:      uuid.New(),
 		profileID: profileID,
@@ -331,6 +386,123 @@ func TestAnUnreachableQueueIsA503(t *testing.T) {
 	}
 	if h.queue.count() != 0 {
 		t.Fatal("a failed enqueue still recorded a task")
+	}
+}
+
+// ─── the rate limit ──────────────────────────────────────────────────
+
+/*
+A user who has had their allowance is refused, and refused cleanly.
+
+This route starts a browser for up to ninety seconds. Unlimited, it
+converts one account into as many concurrent Chrome processes as the
+fleet will start, and a queue full of one person's renders is a
+download that never arrives for anybody else. The specification lists
+it: "Rate limit PDF generation (CPU-expensive and trivially
+abusable)."
+*/
+func TestASecondBurstOfPDFRequestsIsRefused(t *testing.T) {
+	h := newHTTPRig(t)
+	h.limiter.allowed = 2
+
+	for i := range 2 {
+		if rec := h.do(t, http.MethodPost, h.createPath(), h.user); rec.Code != http.StatusAccepted {
+			t.Fatalf("request %d returned %d, want 202", i+1, rec.Code)
+		}
+	}
+
+	rec := h.do(t, http.MethodPost, h.createPath(), h.user)
+	if rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("the third request returned %d, want 429", rec.Code)
+	}
+	if retry := rec.Header().Get("Retry-After"); retry == "" {
+		t.Error("a 429 with no Retry-After tells a client nothing about when to come back, " +
+			"so a polling client retries immediately and stays refused")
+	}
+
+	// And nothing was started for it.
+	if h.queue.count() != 2 {
+		t.Fatalf("%d renders were queued, want 2 — a refused request still enqueued work",
+			h.queue.count())
+	}
+}
+
+/*
+A refused request leaves nothing behind.
+
+The limit is checked before the job id is minted and before the status
+is written. Checking it after would fill Redis with "queued" jobs for
+renders nobody will ever perform, and a client holding one of those
+ids would poll it until the TTL ran out.
+*/
+func TestARefusedRequestWritesNoJobStatus(t *testing.T) {
+	h := newHTTPRig(t)
+	h.limiter.allowed = 0
+
+	rec := h.do(t, http.MethodPost, h.createPath(), h.user)
+	if rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("returned %d, want 429", rec.Code)
+	}
+
+	h.status.mu.Lock()
+	written := len(h.status.values)
+	h.status.mu.Unlock()
+
+	if written != 0 {
+		t.Fatalf("a refused request wrote %d job statuses. Nothing will ever run them, "+
+			"and a client given one of those ids polls it until the TTL expires", written)
+	}
+}
+
+// The limit is per USER, not per IP.
+//
+// An IP limit would punish everyone behind one mobile carrier's NAT,
+// which in this product's market is a large share of the users. Asserted
+// by reading the subject the limiter was asked about — a 429 alone would
+// look identical either way.
+func TestThePDFLimitIsKeyedOnTheUser(t *testing.T) {
+	h := newHTTPRig(t)
+
+	if rec := h.do(t, http.MethodPost, h.createPath(), h.user); rec.Code != http.StatusAccepted {
+		t.Fatalf("returned %d", rec.Code)
+	}
+
+	subjects := h.limiter.subjects()
+	if len(subjects) != 1 {
+		t.Fatalf("the limiter was consulted %d times, want 1", len(subjects))
+	}
+	if subjects[0] != h.user.String() {
+		t.Fatalf("limited on %q, want the user id %q", subjects[0], h.user)
+	}
+	if h.limiter.rules[0] != RenderLimit.Name {
+		t.Fatalf("limited under rule %q, want %q — sharing a rule name with another "+
+			"route would make the two share a budget", h.limiter.rules[0], RenderLimit.Name)
+	}
+}
+
+/*
+An unreachable limiter fails OPEN, and says so.
+
+Matching the recompute route and the global throttle. The trade is
+deliberate: the status store is the same Redis, so an outage already
+means no render can report its result — refusing as well turns a
+degraded feature into a broken one.
+
+The log line is part of the behaviour, not decoration. A route that
+silently stops being limited is one nobody finds out about.
+*/
+func TestAnUnreachableLimiterAllowsAndLogs(t *testing.T) {
+	h := newHTTPRig(t)
+	h.limiter.err = errors.New("redis is down")
+
+	rec := h.do(t, http.MethodPost, h.createPath(), h.user)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("returned %d, want 202 — a Redis outage must not take downloads "+
+			"down with it", rec.Code)
+	}
+
+	if logged := h.logs.String(); !strings.Contains(logged, "rate limiter unavailable") {
+		t.Fatalf("the limiter failed open and logged nothing about it. Logs:\n%s", logged)
 	}
 }
 
