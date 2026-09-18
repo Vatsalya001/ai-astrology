@@ -268,6 +268,67 @@ class SadeSatiResult(Strict):
     moon_sign: str
     houses_from_moon: HouseNumber
 
+    started_at: datetime | None = None
+    """When Saturn first entered the 12th from the natal Moon.
+
+    None when the stretch is not running, and also when it IS running but
+    began before the search window — Saturn takes ~29.5 years to return,
+    so a window that does not reach back far enough finds no entry. The
+    caller must not read None as "it started today".
+    """
+
+    ends_at: datetime | None = None
+    """When Saturn leaves the 2nd and does not come back.
+
+    Not simply the last exit inside the window: a retrograde dip back
+    into the 2nd would end the period up to nine months early, so the
+    engine walks forward to the first exit Saturn stays outside of. See
+    `sade_sati_window`.
+
+    None carries the same caveat as `started_at` — outside the window is
+    not the same as absent.
+    """
+
+
+class SadeSatiWindowsRequest(Strict):
+    """All twelve windows at one instant.
+
+    Twelve rather than one, because a Sade Sati window is a pure function
+    of Saturn's motion and the natal Moon's SIGN — and there are only
+    twelve of those. api-service stores the twelve and serves every user
+    from them, which is what lets the answer survive an astro outage: the
+    alternative is a call to this service on the path of a question users
+    ask constantly.
+    """
+
+    at: datetime
+    ayanamsa: Literal["lahiri", "raman", "kp"] = "lahiri"
+
+    search_years: int = Field(default=40, ge=10, le=80)
+    """How far either side of `at` to look for the entry and the exit.
+
+    Forty years by default, which comfortably brackets one 7.5-year
+    stretch either side of today given Saturn's ~29.5-year orbit. Raising
+    it costs scan time; lowering it below about 20 risks a running
+    stretch whose entry falls outside the window, which is reported as
+    None rather than guessed at.
+    """
+
+
+class SadeSatiWindow(Strict):
+    """One natal Moon sign's window."""
+
+    moon_sign_index: SignIndex
+    moon_sign: str
+    started_at: datetime | None
+    ends_at: datetime | None
+
+
+class SadeSatiWindowsResponse(Strict):
+    at: datetime
+    ayanamsa: str
+    windows: list[SadeSatiWindow]
+
 
 class TransitResponse(Strict):
     at: datetime

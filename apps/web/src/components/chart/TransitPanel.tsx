@@ -140,7 +140,7 @@ export function TransitPanel({
         </ul>
       )}
 
-      <SadeSatiIndicator status={data.sade_sati} />
+      <SadeSatiIndicator status={data.sade_sati} at={data.at} />
     </div>
   )
 }

@@ -604,6 +604,80 @@ fails the build on the PR that adds it. Four failure modes are break-tested — 
 budget, a budget naming a route the build does not produce, missing build stats, and a
 manifest naming a chunk that does not exist.
 
+**PR 16 — closing the gate: the stack, the e2e suite and visual regression.**
+
+*The e2e suite runs, and passes.* All **108** specs green against the real stack. It had
+not been run this session, so six gate items were resting on assumption. The first attempt
+failed 29 of them — entirely because the services were started by hand rather than with
+`scripts/ayana up`, which is the exact mistake CI's own comment in `ci.yml` warns about:
+the harness reads OTPs from `.run/api.log`, and a hand-started API writes somewhere else.
+
+*A compose bug PR 12 shipped.* The `minio-init` container that creates the bucket runs to
+completion and exits 0 — and `docker compose up --wait`, which `scripts/ayana up` uses,
+counts an exited container as a failure. Every service came up healthy and the script then
+died. It now sits behind a compose profile and is started explicitly; `down` passes
+`--profile init --remove-orphans`, without which the one-shot container is left holding a
+reference to a network that has just been removed, and the *next* `up` fails with
+"network … not found". `task up` had appeared fine because it does not use `--wait`.
+
+*Visual regression suite, at 3 viewports.* 15 baselines across 360px, 768px and 1280px —
+the chart on its own, plus the chart, planets, dasha and yoga screens full-page with
+time-dependent regions masked. Stable across three consecutive runs.
+
+**The second theme is not covered, because it does not exist.** `.claude/rules/frontend.md`
+is explicit that the app is dark-only, and screenshotting a theme no user can reach would
+lock in the appearance of a code path that never executes. Recorded as met-in-part rather
+than counted as done.
+
+**The suite's first version did not work, and the break test is why we know.** At
+Playwright's default `threshold: 0.2` it passed with the chart's background class replaced
+by one Tailwind does not define — the precise defect `frontend.md` warns about. The reason
+is measurable: this palette lives in a narrow band of very dark navy, and `#0B1026`
+against the black an SVG falls back to is a YIQ distance of **0.067**, which the default
+counts as identical. At `0.03` the break produces a 95% pixel difference and fails.
+
+**PR 17 — Sade Sati gets its dates.** Gate item 8 asks for "correct phase **and dates**".
+Until now the product could say only that the stretch was running and which of three
+phases — the half that causes anxiety without the half that relieves it. "When does this
+end" is the question people actually ask.
+
+The engine already had `sade_sati_window`, tested, finding the first entry into the 12th
+and the exit Saturn does not return from. It was exposed nowhere.
+
+| Layer | Change |
+|---|---|
+| astro | `started_at`/`ends_at` on the transits response, plus `POST /v1/transits/sade-sati/windows` returning all twelve Moon signs at once |
+| contract | regenerated; the Go client picked up the endpoint |
+| api | `sade_sati_windows` table — twelve rows, refreshed with the transits |
+| web | the window and "about N years left", measured from the **server's** instant |
+
+**Stored rather than asked for.** Go reads the window from Postgres, never from astro, for
+the same reason the transits table exists: this is a question users ask constantly and the
+answer must survive astro being unreachable. Proven by taking astro down *after* a refresh
+and confirming the dates still come back.
+
+**Twelve or none.** A short response from astro writes nothing — a partial write leaves
+some Moon signs on fresh dates and others on stale ones, with nothing downstream able to
+tell. That guard had no test until a break test showed the existing one passed without it.
+
+**Three defects this found in existing tests:**
+
+- `TestEveryRealTableRefusesWritesFromReader` did `UPDATE … SET id = id` under a comment
+  claiming it did not depend on column names. `sade_sati_windows` is keyed by
+  `moon_sign_index`, so the UPDATE failed with *"column id does not exist"* rather than
+  *"insufficient privilege"* — a pass for the wrong reason, leaving the grant untested. It
+  was caught only because that test **also** checks which error it got.
+- The transit refresher's slot test asserted "exactly one call to astro", which was
+  scaffolding rather than its subject. It now asserts every call names the slot boundary,
+  which is stronger and on-topic.
+- The transits test harness answered every path with the same body, so the new windows
+  call silently failed to decode while every positions assertion still passed.
+
+The web test that asserted *no* dates appear — "because the engine reports none" — was
+correct when written and is now replaced. The rule it protected has not changed: the dates
+shown must be the ones the API sent, and a break test confirms deriving them in TypeScript
+fails.
+
 **Two defects PR 12 found in existing code**, both invisible until the print route
 existed:
 

@@ -163,7 +163,9 @@ export default function HomePage() {
 
             {dashas && <CurrentPeriodCard current={dashas} />}
 
-            {transits && <SadeSatiIndicator status={transits.sade_sati} />}
+            {transits && (
+              <SadeSatiIndicator status={transits.sade_sati} at={transits.at} />
+            )}
 
             <div className="flex flex-wrap gap-2 pt-2">
               <Button asChild>

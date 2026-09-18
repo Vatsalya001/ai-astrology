@@ -187,6 +187,15 @@ type Place struct {
 	Population  int32
 }
 
+type SadeSatiWindow struct {
+	MoonSignIndex int16
+	MoonSign      string
+	StartedAt     pgtype.Timestamptz
+	EndsAt        pgtype.Timestamptz
+	ComputedFor   time.Time
+	ComputedAt    time.Time
+}
+
 type SchemaMetum struct {
 	ID             int16
 	Application    string

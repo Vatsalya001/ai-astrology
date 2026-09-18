@@ -302,6 +302,13 @@ jobs:
 
       # The only test that exercises browser -> Go API -> Python. Every
       # other suite stubs at a boundary.
+      #
+      # This includes the visual regression suite, whose baselines are
+      # committed under tests/e2e/visual.spec.ts-snapshots/. They were
+      # generated on linux/chromium, which is what this runner is — a
+      # baseline generated on a developer's macOS would fail here on
+      # font rendering alone, which is why the filenames carry the
+      # platform and why nobody should regenerate them locally on a Mac.
       - run: npx playwright test
 
       - name: Service logs on failure

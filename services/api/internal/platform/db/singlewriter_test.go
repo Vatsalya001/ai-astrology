@@ -281,12 +281,28 @@ func TestEveryRealTableRefusesWritesFromReader(t *testing.T) {
 
 	for _, table := range tables {
 		t.Run(table, func(t *testing.T) {
-			// DELETE and UPDATE with an always-false predicate: the
-			// privilege check happens before any row is examined, so this
-			// asserts the grant without depending on table contents or
-			// column names.
+			/*
+			   DELETE and UPDATE with an always-false predicate: the
+			   privilege check happens before any row is examined, so this
+			   asserts the grant without depending on table CONTENTS.
+
+			   The column, though, has to be real. This said
+			   `SET id = id` under a comment claiming it did not depend on
+			   column names — which held only for as long as every table
+			   happened to have an `id`. `sade_sati_windows` is keyed by
+			   `moon_sign_index`, and the UPDATE then failed with
+			   "column id does not exist" (42703) instead of
+			   "insufficient privilege" (42501): a pass for the wrong
+			   reason, leaving the grant untested.
+
+			   It was caught only because this test ALSO checks which
+			   error it got. That second assertion is the one that looks
+			   like belt-and-braces right up until it fires.
+			*/
+			column := anyColumnOf(ctx, t, reader, table)
+
 			for name, sql := range map[string]string{
-				"UPDATE": fmt.Sprintf(`UPDATE %q SET id = id WHERE false`, table),
+				"UPDATE": fmt.Sprintf(`UPDATE %q SET %q = %q WHERE false`, table, column, column),
 				"DELETE": fmt.Sprintf(`DELETE FROM %q WHERE false`, table),
 			} {
 				_, err := reader.Exec(ctx, sql)
@@ -350,4 +366,29 @@ func applyMigrations(ctx context.Context, t *testing.T, conn *pgx.Conn) {
 			t.Fatalf("apply %s: %v", filepath.Base(file), err)
 		}
 	}
+}
+
+// anyColumnOf returns one real column name for a table.
+//
+// Read from the catalogue rather than assumed, so this suite keeps
+// working for a table whose primary key is not called `id` — which is
+// most tables with a natural key, and which is exactly how the previous
+// hardcoded `id` went unnoticed.
+//
+// The reader role can SELECT from information_schema, so this needs no
+// second connection.
+func anyColumnOf(ctx context.Context, t *testing.T, conn *pgx.Conn, table string) string {
+	t.Helper()
+
+	var column string
+	err := conn.QueryRow(ctx, `
+		SELECT column_name
+		FROM information_schema.columns
+		WHERE table_schema = 'public' AND table_name = $1
+		ORDER BY ordinal_position
+		LIMIT 1`, table).Scan(&column)
+	if err != nil {
+		t.Fatalf("no columns found for %q: %v", table, err)
+	}
+	return column
 }

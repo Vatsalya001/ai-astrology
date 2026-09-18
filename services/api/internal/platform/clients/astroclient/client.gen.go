@@ -158,6 +158,27 @@ func (e SadeSatiResultCurrentPhase) Valid() bool {
 	}
 }
 
+// Defines values for SadeSatiWindowsRequestAyanamsa.
+const (
+	SadeSatiWindowsRequestAyanamsaKp     SadeSatiWindowsRequestAyanamsa = "kp"
+	SadeSatiWindowsRequestAyanamsaLahiri SadeSatiWindowsRequestAyanamsa = "lahiri"
+	SadeSatiWindowsRequestAyanamsaRaman  SadeSatiWindowsRequestAyanamsa = "raman"
+)
+
+// Valid indicates whether the value is a known member of the SadeSatiWindowsRequestAyanamsa enum.
+func (e SadeSatiWindowsRequestAyanamsa) Valid() bool {
+	switch e {
+	case SadeSatiWindowsRequestAyanamsaKp:
+		return true
+	case SadeSatiWindowsRequestAyanamsaLahiri:
+		return true
+	case SadeSatiWindowsRequestAyanamsaRaman:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for TransitRequestAyanamsa.
 const (
 	TransitRequestAyanamsaKp     TransitRequestAyanamsa = "kp"
@@ -392,14 +413,50 @@ type PlanetPositionDignity string
 // SadeSatiResult defines model for SadeSatiResult.
 type SadeSatiResult struct {
 	CurrentPhase   *SadeSatiResultCurrentPhase `json:"current_phase"`
+	EndsAt         *time.Time                  `json:"ends_at,omitempty"`
 	HousesFromMoon int                         `json:"houses_from_moon"`
 	IsActive       bool                        `json:"is_active"`
 	MoonSign       string                      `json:"moon_sign"`
 	SaturnSign     string                      `json:"saturn_sign"`
+	StartedAt      *time.Time                  `json:"started_at,omitempty"`
 }
 
 // SadeSatiResultCurrentPhase defines model for SadeSatiResult.CurrentPhase.
 type SadeSatiResultCurrentPhase string
+
+// SadeSatiWindow One natal Moon sign's window.
+type SadeSatiWindow struct {
+	EndsAt   *time.Time `json:"ends_at"`
+	MoonSign string     `json:"moon_sign"`
+
+	// MoonSignIndex 0 = Aries
+	MoonSignIndex int        `json:"moon_sign_index"`
+	StartedAt     *time.Time `json:"started_at"`
+}
+
+// SadeSatiWindowsRequest All twelve windows at one instant.
+//
+// Twelve rather than one, because a Sade Sati window is a pure function
+// of Saturn's motion and the natal Moon's SIGN — and there are only
+// twelve of those. api-service stores the twelve and serves every user
+// from them, which is what lets the answer survive an astro outage: the
+// alternative is a call to this service on the path of a question users
+// ask constantly.
+type SadeSatiWindowsRequest struct {
+	At          time.Time                       `json:"at"`
+	Ayanamsa    *SadeSatiWindowsRequestAyanamsa `json:"ayanamsa,omitempty"`
+	SearchYears *int                            `json:"search_years,omitempty"`
+}
+
+// SadeSatiWindowsRequestAyanamsa defines model for SadeSatiWindowsRequest.Ayanamsa.
+type SadeSatiWindowsRequestAyanamsa string
+
+// SadeSatiWindowsResponse defines model for SadeSatiWindowsResponse.
+type SadeSatiWindowsResponse struct {
+	At       time.Time        `json:"at"`
+	Ayanamsa string           `json:"ayanamsa"`
+	Windows  []SadeSatiWindow `json:"windows"`
+}
 
 // TransitPosition defines model for TransitPosition.
 type TransitPosition struct {
@@ -478,6 +535,9 @@ type ComputeDashasV1DashasComputePostJSONRequestBody = DashaRequest
 
 // ComputeTransitV1TransitsComputePostJSONRequestBody defines body for ComputeTransitV1TransitsComputePost for application/json ContentType.
 type ComputeTransitV1TransitsComputePostJSONRequestBody = TransitRequest
+
+// ComputeSadeSatiWindowsV1TransitsSadeSatiWindowsPostJSONRequestBody defines body for ComputeSadeSatiWindowsV1TransitsSadeSatiWindowsPost for application/json ContentType.
+type ComputeSadeSatiWindowsV1TransitsSadeSatiWindowsPostJSONRequestBody = SadeSatiWindowsRequest
 
 // AsValidationErrorLoc0 returns the union data inside the ValidationError_Loc_Item as a ValidationErrorLoc0
 func (t ValidationError_Loc_Item) AsValidationErrorLoc0() (ValidationErrorLoc0, error) {
@@ -696,6 +756,50 @@ type ClientInterface interface {
 	//
 	// Corresponds with POST /v1/transits/compute (the `ComputeTransitV1TransitsComputePost` operationId).
 	ComputeTransitV1TransitsComputePost(ctx context.Context, body ComputeTransitV1TransitsComputePostJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ComputeSadeSatiWindowsV1TransitsSadeSatiWindowsPostWithBody Compute Sade Sati Windows
+	//
+	// Every natal Moon sign's Sade Sati window at one instant.
+	//
+	// Twelve answers in one call, because a window depends only on Saturn's
+	// motion and the natal Moon's SIGN — and there are twelve of those.
+	// api-service stores the twelve and serves every user from them, so the
+	// question "when does this end" keeps having an answer while this
+	// service is unreachable.
+	//
+	// The scan is the expensive part and it is shared: `sade_sati_window`
+	// re-finds Saturn's ingresses per sign today, which is wasteful and
+	// correct. Sharing the ingress scan across the twelve is the obvious
+	// optimisation and is deliberately not done here — this runs once every
+	// six hours on a worker, and a faster version of a function with three
+	// subtle cases in it is not worth the risk of getting one wrong.
+	//
+	// Takes any type of body and a specified content type.
+	//
+	// Corresponds with POST /v1/transits/sade-sati/windows (the `ComputeSadeSatiWindowsV1TransitsSadeSatiWindowsPost` operationId).
+	ComputeSadeSatiWindowsV1TransitsSadeSatiWindowsPostWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ComputeSadeSatiWindowsV1TransitsSadeSatiWindowsPost Compute Sade Sati Windows
+	//
+	// Every natal Moon sign's Sade Sati window at one instant.
+	//
+	// Twelve answers in one call, because a window depends only on Saturn's
+	// motion and the natal Moon's SIGN — and there are twelve of those.
+	// api-service stores the twelve and serves every user from them, so the
+	// question "when does this end" keeps having an answer while this
+	// service is unreachable.
+	//
+	// The scan is the expensive part and it is shared: `sade_sati_window`
+	// re-finds Saturn's ingresses per sign today, which is wasteful and
+	// correct. Sharing the ingress scan across the twelve is the obvious
+	// optimisation and is deliberately not done here — this runs once every
+	// six hours on a worker, and a faster version of a function with three
+	// subtle cases in it is not worth the risk of getting one wrong.
+	//
+	// Takes a body of the `application/json` content type.
+	//
+	// Corresponds with POST /v1/transits/sade-sati/windows (the `ComputeSadeSatiWindowsV1TransitsSadeSatiWindowsPost` operationId).
+	ComputeSadeSatiWindowsV1TransitsSadeSatiWindowsPost(ctx context.Context, body ComputeSadeSatiWindowsV1TransitsSadeSatiWindowsPostJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 }
 
 // HealthHealthGet Health
@@ -840,6 +944,70 @@ func (c *Client) ComputeTransitV1TransitsComputePostWithBody(ctx context.Context
 // Corresponds with POST /v1/transits/compute (the `ComputeTransitV1TransitsComputePost` operationId).
 func (c *Client) ComputeTransitV1TransitsComputePost(ctx context.Context, body ComputeTransitV1TransitsComputePostJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewComputeTransitV1TransitsComputePostRequest(c.Server, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// ComputeSadeSatiWindowsV1TransitsSadeSatiWindowsPostWithBody Compute Sade Sati Windows
+//
+// Every natal Moon sign's Sade Sati window at one instant.
+//
+// Twelve answers in one call, because a window depends only on Saturn's
+// motion and the natal Moon's SIGN — and there are twelve of those.
+// api-service stores the twelve and serves every user from them, so the
+// question "when does this end" keeps having an answer while this
+// service is unreachable.
+//
+// The scan is the expensive part and it is shared: `sade_sati_window`
+// re-finds Saturn's ingresses per sign today, which is wasteful and
+// correct. Sharing the ingress scan across the twelve is the obvious
+// optimisation and is deliberately not done here — this runs once every
+// six hours on a worker, and a faster version of a function with three
+// subtle cases in it is not worth the risk of getting one wrong.
+//
+// Takes any type of body and a specified content type.
+//
+// Corresponds with POST /v1/transits/sade-sati/windows (the `ComputeSadeSatiWindowsV1TransitsSadeSatiWindowsPost` operationId).
+func (c *Client) ComputeSadeSatiWindowsV1TransitsSadeSatiWindowsPostWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewComputeSadeSatiWindowsV1TransitsSadeSatiWindowsPostRequestWithBody(c.Server, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// ComputeSadeSatiWindowsV1TransitsSadeSatiWindowsPost Compute Sade Sati Windows
+//
+// Every natal Moon sign's Sade Sati window at one instant.
+//
+// Twelve answers in one call, because a window depends only on Saturn's
+// motion and the natal Moon's SIGN — and there are twelve of those.
+// api-service stores the twelve and serves every user from them, so the
+// question "when does this end" keeps having an answer while this
+// service is unreachable.
+//
+// The scan is the expensive part and it is shared: `sade_sati_window`
+// re-finds Saturn's ingresses per sign today, which is wasteful and
+// correct. Sharing the ingress scan across the twelve is the obvious
+// optimisation and is deliberately not done here — this runs once every
+// six hours on a worker, and a faster version of a function with three
+// subtle cases in it is not worth the risk of getting one wrong.
+//
+// Takes a body of the `application/json` content type.
+//
+// Corresponds with POST /v1/transits/sade-sati/windows (the `ComputeSadeSatiWindowsV1TransitsSadeSatiWindowsPost` operationId).
+func (c *Client) ComputeSadeSatiWindowsV1TransitsSadeSatiWindowsPost(ctx context.Context, body ComputeSadeSatiWindowsV1TransitsSadeSatiWindowsPostJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewComputeSadeSatiWindowsV1TransitsSadeSatiWindowsPostRequest(c.Server, body)
 	if err != nil {
 		return nil, err
 	}
@@ -997,6 +1165,46 @@ func NewComputeTransitV1TransitsComputePostRequestWithBody(server string, conten
 	return req, nil
 }
 
+// NewComputeSadeSatiWindowsV1TransitsSadeSatiWindowsPostRequest calls the generic ComputeSadeSatiWindowsV1TransitsSadeSatiWindowsPost builder with application/json body
+func NewComputeSadeSatiWindowsV1TransitsSadeSatiWindowsPostRequest(server string, body ComputeSadeSatiWindowsV1TransitsSadeSatiWindowsPostJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewComputeSadeSatiWindowsV1TransitsSadeSatiWindowsPostRequestWithBody(server, "application/json", bodyReader)
+}
+
+// NewComputeSadeSatiWindowsV1TransitsSadeSatiWindowsPostRequestWithBody constructs an http.Request for the ComputeSadeSatiWindowsV1TransitsSadeSatiWindowsPost method, with any body, and a specified content type
+func NewComputeSadeSatiWindowsV1TransitsSadeSatiWindowsPostRequestWithBody(server string, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/transits/sade-sati/windows")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
 func (c *Client) applyEditors(ctx context.Context, req *http.Request, additionalEditors []RequestEditorFn) error {
 	for _, r := range c.RequestEditors {
 		if err := r(ctx, req); err != nil {
@@ -1124,6 +1332,50 @@ type ClientWithResponsesInterface interface {
 	//
 	// Corresponds with POST /v1/transits/compute (the `ComputeTransitV1TransitsComputePost` operationId).
 	ComputeTransitV1TransitsComputePostWithResponse(ctx context.Context, body ComputeTransitV1TransitsComputePostJSONRequestBody, reqEditors ...RequestEditorFn) (*ComputeTransitV1TransitsComputePostResponse, error)
+
+	// ComputeSadeSatiWindowsV1TransitsSadeSatiWindowsPostWithBodyWithResponse Compute Sade Sati Windows
+	//
+	// Every natal Moon sign's Sade Sati window at one instant.
+	//
+	// Twelve answers in one call, because a window depends only on Saturn's
+	// motion and the natal Moon's SIGN — and there are twelve of those.
+	// api-service stores the twelve and serves every user from them, so the
+	// question "when does this end" keeps having an answer while this
+	// service is unreachable.
+	//
+	// The scan is the expensive part and it is shared: `sade_sati_window`
+	// re-finds Saturn's ingresses per sign today, which is wasteful and
+	// correct. Sharing the ingress scan across the twelve is the obvious
+	// optimisation and is deliberately not done here — this runs once every
+	// six hours on a worker, and a faster version of a function with three
+	// subtle cases in it is not worth the risk of getting one wrong.
+	//
+	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /v1/transits/sade-sati/windows (the `ComputeSadeSatiWindowsV1TransitsSadeSatiWindowsPost` operationId).
+	ComputeSadeSatiWindowsV1TransitsSadeSatiWindowsPostWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*ComputeSadeSatiWindowsV1TransitsSadeSatiWindowsPostResponse, error)
+
+	// ComputeSadeSatiWindowsV1TransitsSadeSatiWindowsPostWithResponse Compute Sade Sati Windows
+	//
+	// Every natal Moon sign's Sade Sati window at one instant.
+	//
+	// Twelve answers in one call, because a window depends only on Saturn's
+	// motion and the natal Moon's SIGN — and there are twelve of those.
+	// api-service stores the twelve and serves every user from them, so the
+	// question "when does this end" keeps having an answer while this
+	// service is unreachable.
+	//
+	// The scan is the expensive part and it is shared: `sade_sati_window`
+	// re-finds Saturn's ingresses per sign today, which is wasteful and
+	// correct. Sharing the ingress scan across the twelve is the obvious
+	// optimisation and is deliberately not done here — this runs once every
+	// six hours on a worker, and a faster version of a function with three
+	// subtle cases in it is not worth the risk of getting one wrong.
+	//
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /v1/transits/sade-sati/windows (the `ComputeSadeSatiWindowsV1TransitsSadeSatiWindowsPost` operationId).
+	ComputeSadeSatiWindowsV1TransitsSadeSatiWindowsPostWithResponse(ctx context.Context, body ComputeSadeSatiWindowsV1TransitsSadeSatiWindowsPostJSONRequestBody, reqEditors ...RequestEditorFn) (*ComputeSadeSatiWindowsV1TransitsSadeSatiWindowsPostResponse, error)
 }
 
 type HealthHealthGetResponse struct {
@@ -1311,6 +1563,54 @@ func (r ComputeTransitV1TransitsComputePostResponse) ContentType() string {
 	return ""
 }
 
+type ComputeSadeSatiWindowsV1TransitsSadeSatiWindowsPostResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *SadeSatiWindowsResponse
+	// JSON422 the response for an HTTP 422 `application/json` response
+	JSON422 *HTTPValidationError
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r ComputeSadeSatiWindowsV1TransitsSadeSatiWindowsPostResponse) GetJSON200() *SadeSatiWindowsResponse {
+	return r.JSON200
+}
+
+// GetJSON422 returns the response for an HTTP 422 `application/json` response
+func (r ComputeSadeSatiWindowsV1TransitsSadeSatiWindowsPostResponse) GetJSON422() *HTTPValidationError {
+	return r.JSON422
+}
+
+// GetBody returns the raw response body bytes
+func (r ComputeSadeSatiWindowsV1TransitsSadeSatiWindowsPostResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r ComputeSadeSatiWindowsV1TransitsSadeSatiWindowsPostResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ComputeSadeSatiWindowsV1TransitsSadeSatiWindowsPostResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r ComputeSadeSatiWindowsV1TransitsSadeSatiWindowsPostResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
 // HealthHealthGetWithResponse Health
 //
 // Liveness check.
@@ -1437,6 +1737,62 @@ func (c *ClientWithResponses) ComputeTransitV1TransitsComputePostWithResponse(ct
 	return ParseComputeTransitV1TransitsComputePostResponse(rsp)
 }
 
+// ComputeSadeSatiWindowsV1TransitsSadeSatiWindowsPostWithBodyWithResponse Compute Sade Sati Windows
+//
+// Every natal Moon sign's Sade Sati window at one instant.
+//
+// Twelve answers in one call, because a window depends only on Saturn's
+// motion and the natal Moon's SIGN — and there are twelve of those.
+// api-service stores the twelve and serves every user from them, so the
+// question "when does this end" keeps having an answer while this
+// service is unreachable.
+//
+// The scan is the expensive part and it is shared: `sade_sati_window`
+// re-finds Saturn's ingresses per sign today, which is wasteful and
+// correct. Sharing the ingress scan across the twelve is the obvious
+// optimisation and is deliberately not done here — this runs once every
+// six hours on a worker, and a faster version of a function with three
+// subtle cases in it is not worth the risk of getting one wrong.
+//
+// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /v1/transits/sade-sati/windows (the `ComputeSadeSatiWindowsV1TransitsSadeSatiWindowsPost` operationId).
+func (c *ClientWithResponses) ComputeSadeSatiWindowsV1TransitsSadeSatiWindowsPostWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*ComputeSadeSatiWindowsV1TransitsSadeSatiWindowsPostResponse, error) {
+	rsp, err := c.ComputeSadeSatiWindowsV1TransitsSadeSatiWindowsPostWithBody(ctx, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseComputeSadeSatiWindowsV1TransitsSadeSatiWindowsPostResponse(rsp)
+}
+
+// ComputeSadeSatiWindowsV1TransitsSadeSatiWindowsPostWithResponse Compute Sade Sati Windows
+//
+// Every natal Moon sign's Sade Sati window at one instant.
+//
+// Twelve answers in one call, because a window depends only on Saturn's
+// motion and the natal Moon's SIGN — and there are twelve of those.
+// api-service stores the twelve and serves every user from them, so the
+// question "when does this end" keeps having an answer while this
+// service is unreachable.
+//
+// The scan is the expensive part and it is shared: `sade_sati_window`
+// re-finds Saturn's ingresses per sign today, which is wasteful and
+// correct. Sharing the ingress scan across the twelve is the obvious
+// optimisation and is deliberately not done here — this runs once every
+// six hours on a worker, and a faster version of a function with three
+// subtle cases in it is not worth the risk of getting one wrong.
+//
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /v1/transits/sade-sati/windows (the `ComputeSadeSatiWindowsV1TransitsSadeSatiWindowsPost` operationId).
+func (c *ClientWithResponses) ComputeSadeSatiWindowsV1TransitsSadeSatiWindowsPostWithResponse(ctx context.Context, body ComputeSadeSatiWindowsV1TransitsSadeSatiWindowsPostJSONRequestBody, reqEditors ...RequestEditorFn) (*ComputeSadeSatiWindowsV1TransitsSadeSatiWindowsPostResponse, error) {
+	rsp, err := c.ComputeSadeSatiWindowsV1TransitsSadeSatiWindowsPost(ctx, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseComputeSadeSatiWindowsV1TransitsSadeSatiWindowsPostResponse(rsp)
+}
+
 // ParseHealthHealthGetResponse parses an HTTP response from a HealthHealthGetWithResponse call
 func ParseHealthHealthGetResponse(rsp *http.Response) (*HealthHealthGetResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
@@ -1545,6 +1901,39 @@ func ParseComputeTransitV1TransitsComputePostResponse(rsp *http.Response) (*Comp
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
 		var dest TransitResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest HTTPValidationError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON422 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseComputeSadeSatiWindowsV1TransitsSadeSatiWindowsPostResponse parses an HTTP response from a ComputeSadeSatiWindowsV1TransitsSadeSatiWindowsPostWithResponse call
+func ParseComputeSadeSatiWindowsV1TransitsSadeSatiWindowsPostResponse(rsp *http.Response) (*ComputeSadeSatiWindowsV1TransitsSadeSatiWindowsPostResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ComputeSadeSatiWindowsV1TransitsSadeSatiWindowsPostResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest SadeSatiWindowsResponse
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}

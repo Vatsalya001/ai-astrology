@@ -93,6 +93,36 @@ func (a *Astro) ComputeTransits(
 	return resp.JSON200, nil
 }
 
+// ComputeSadeSatiWindows asks for all twelve Moon signs' windows at once.
+//
+// Twelve in one call rather than twelve calls: a window depends only on
+// Saturn's motion and the natal Moon's sign, and the ephemeris scan
+// behind it is seconds. api-service stores the result so the question
+// "when does this end" keeps having an answer while astro is
+// unreachable — see the sade_sati_windows table.
+func (a *Astro) ComputeSadeSatiWindows(
+	ctx context.Context,
+	at time.Time,
+) (*astroclient.SadeSatiWindowsResponse, error) {
+	// Idempotent: the same instant always yields the same twelve windows,
+	// so a retry after a timeout is safe and is what the retry policy
+	// needs told.
+	ctx = MarkIdempotent(ctx)
+
+	body := astroclient.ComputeSadeSatiWindowsV1TransitsSadeSatiWindowsPostJSONRequestBody{
+		At: at,
+	}
+
+	resp, err := a.api.ComputeSadeSatiWindowsV1TransitsSadeSatiWindowsPostWithResponse(ctx, body)
+	if err != nil {
+		return nil, unavailable("compute sade sati windows", err)
+	}
+	if resp.JSON200 == nil {
+		return nil, statusFailure("compute sade sati windows", resp.StatusCode(), resp.Body)
+	}
+	return resp.JSON200, nil
+}
+
 // unavailable classifies a transport-level failure.
 //
 // A tripped breaker is folded into the same error as a timeout or a

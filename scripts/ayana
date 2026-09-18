@@ -195,6 +195,17 @@ cmd_up() {
   docker compose up -d --build --wait > "$RUN_DIR/compose.log" 2>&1 \
     || { tail -20 "$RUN_DIR/compose.log"; die "docker compose failed"; }
 
+  # The bucket. A separate invocation because minio-init runs to
+  # completion, and the --wait above counts an exited container as a
+  # failure — so it sits behind a compose profile and is started here,
+  # after storage is healthy.
+  #
+  # `mc mb --ignore-existing` makes this a no-op on every run after the
+  # first, so it costs a second and never needs a conditional.
+  docker compose --profile init up minio-init --exit-code-from minio-init \
+    >> "$RUN_DIR/compose.log" 2>&1 \
+    || die "could not create the object-storage bucket — see $RUN_DIR/compose.log"
+
   while read -r name status; do
     if [[ "$status" == *healthy* ]]; then ok "$name"; else bad "$name — $status"; fi
   done < <(docker compose ps --format '{{.Name}} {{.Status}}')
@@ -508,7 +519,14 @@ cmd_down() {
     rm -f "$WORKER_PID"
   fi
 
-  docker compose down > "$RUN_DIR/compose-down.log" 2>&1 \
+  # --profile init, or the one-shot bucket container is left behind.
+  #
+  # `down` removes the network; a stopped container that is not removed
+  # with it keeps a reference to the old network id, and the NEXT `up`
+  # fails with "network ... not found" while every other service comes
+  # up healthy. Diagnosed the hard way — twice.
+  docker compose --profile init down --remove-orphans \
+    > "$RUN_DIR/compose-down.log" 2>&1 \
     && ok "containers stopped" \
     || warn "docker compose down reported a problem — see $RUN_DIR/compose-down.log"
 

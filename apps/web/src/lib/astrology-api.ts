@@ -106,6 +106,18 @@ export interface SadeSatiStatus {
   phase: string | null
   saturn_sign: string
   houses_from_moon: number
+
+  /**
+   * When the stretch began and when it ends, computed by the engine.
+   *
+   * Null when it is not running — and also when it IS running but the
+   * server has no stored window yet (a fresh database before the first
+   * worker pass). The UI must render that as "we do not know", never as
+   * "it has no end": the difference matters to somebody deciding
+   * whether to plan around it.
+   */
+  started_at: string | null
+  ends_at: string | null
 }
 
 export interface NatalTransits {
