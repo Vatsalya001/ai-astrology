@@ -27,6 +27,9 @@ type Handler struct {
 	svc      *Service
 	writeErr HTTPErrorWriter
 	now      func() time.Time
+	// Nil until WithPrintTokens is called. The print route refuses to
+	// serve without it rather than defaulting to something permissive.
+	tokens *PrintTokens
 }
 
 // HTTPErrorWriter is httpapi.WriteError, injected so this package does
@@ -35,6 +38,16 @@ type HTTPErrorWriter func(w http.ResponseWriter, r *http.Request, status int, co
 
 func NewHandler(svc *Service, writeErr HTTPErrorWriter) *Handler {
 	return &Handler{svc: svc, writeErr: writeErr, now: time.Now}
+}
+
+// WithPrintTokens enables the print route.
+//
+// Separate from the constructor because the token store needs Redis,
+// and a deployment without Redis should still serve charts rather than
+// refusing to start.
+func (h *Handler) WithPrintTokens(tokens *PrintTokens) *Handler {
+	h.tokens = tokens
+	return h
 }
 
 // WithClock replaces the clock. Tests use it to ask "which dasha was

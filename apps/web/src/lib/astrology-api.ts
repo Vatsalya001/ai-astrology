@@ -209,4 +209,36 @@ export const astrologyApi = {
   /** Positions relative to this profile's natal Moon, plus Sade Sati. */
   transits: (profileId: string) =>
     authed<NatalTransits>(`/astrology/transits/${profileId}`),
+
+  /**
+   * Asks for a PDF. Returns a job id to poll; the document is not ready.
+   *
+   * 202, not 200 — the render happens on a worker, takes seconds and
+   * holds a browser while it runs. Doing it inside the request would tie
+   * up a request slot per download and time out under any load.
+   */
+  requestPdf: (profileId: string, locale: string) =>
+    authed<{ job_id: string }>(
+      `/charts/${profileId}/pdf?locale=${encodeURIComponent(locale)}`,
+      { method: 'POST' },
+    ),
+
+  /**
+   * Polls one render.
+   *
+   * The job id is scoped to the caller server-side — the status key is
+   * composed from the authenticated user — so somebody else's job id
+   * answers 404 rather than handing over a signed link.
+   */
+  pdfStatus: (profileId: string, jobId: string) =>
+    authed<PdfStatus>(`/charts/${profileId}/pdf/${jobId}`),
+}
+
+export interface PdfStatus {
+  status: 'queued' | 'running' | 'done' | 'failed'
+  /** Present only when done. Signed, and expires. */
+  url?: string
+  /** Present only when failed. Deliberately generic. */
+  message?: string
+  expires_at?: string
 }

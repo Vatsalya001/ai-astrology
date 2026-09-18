@@ -28,9 +28,30 @@ const (
 	TypeTransitRefresh = "transits:refresh"
 )
 
-// QueueDefault is the only queue in Phase 2. Phase 3's PDF renderer gets
-// its own, because a slow render must not sit in front of anything.
-const QueueDefault = "default"
+// The queues, and the weights the server polls them with.
+//
+// Two rather than one, because a PDF render is seconds of held browser
+// and the transit refresh is a scheduled job with a six-hour window. On
+// a shared queue a burst of downloads delays the refresh for everybody,
+// and the refresh is what the whole product falls back on when
+// astro-service is unreachable.
+const (
+	QueueDefault = "default"
+	QueuePDF     = "pdf"
+)
+
+// Queues is the single source of truth for what the server consumes.
+//
+// Both the asynq server config and the test that checks it read this
+// map. A queue named by a task but absent here is the quiet failure
+// mode: the task enqueues fine, reports fine, and is never picked up —
+// so the client polls "queued" forever and nothing is logged.
+func Queues() map[string]int {
+	return map[string]int{
+		QueueDefault: 3,
+		QueuePDF:     1,
+	}
+}
 
 const (
 	// TransitRefreshInterval is the specification's six hours.

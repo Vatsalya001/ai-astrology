@@ -56,6 +56,12 @@ type routerHarness struct {
 	bob     uuid.UUID
 	profile uuid.UUID
 	placeID int32
+
+	// printTokens is the SAME store the mounted handler uses, so a test
+	// can mint a token the way the PDF worker does. Built from one value
+	// and handed to both, so "the token the test made" and "the token the
+	// route accepts" cannot be two different things.
+	printTokens *charts.PrintTokens
 }
 
 func newRouterHarness(t *testing.T) (*routerHarness, func()) {
@@ -101,6 +107,7 @@ func newRouterHarness(t *testing.T) (*routerHarness, func()) {
 	}
 
 	chartService := charts.NewService(queries, pool, astro, profileService, nil)
+	printTokens := charts.NewPrintTokens(charts.NewRedisPrintTokens(redisClient))
 
 	deps := Deps{
 		Config:     cfg,
@@ -116,16 +123,17 @@ func newRouterHarness(t *testing.T) (*routerHarness, func()) {
 		BirthProfiles: birthprofiles.NewHandler(
 			profileService, placeShim{placeService}, AuthErrorWriter),
 		Places:       places.NewHandler(placeService, AuthErrorWriter),
-		Charts:       charts.NewHandler(chartService, AuthErrorWriter),
+		Charts:       charts.NewHandler(chartService, AuthErrorWriter).WithPrintTokens(printTokens),
 		Transits:     transits.NewHandler(transits.NewReader(queries), chartService, AuthErrorWriter),
 		ProfileOwner: profileService,
 	}
 
 	h := &routerHarness{
-		handler: NewRouter(deps),
-		routes:  newChiRouter(deps),
-		pool:    pool,
-		issuer:  issuer,
+		handler:     NewRouter(deps),
+		routes:      newChiRouter(deps),
+		pool:        pool,
+		issuer:      issuer,
+		printTokens: printTokens,
 	}
 	h.alice = seedRouterUser(ctx, t, pool, "alice")
 	h.bob = seedRouterUser(ctx, t, pool, "bob")

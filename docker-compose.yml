@@ -71,6 +71,29 @@ services:
       timeout: 3s
       retries: 10
 
+  # The bucket, created once at startup.
+  #
+  # storage.New deliberately does NOT create it on demand: a bucket
+  # conjured by the first write hides a misconfigured bucket name behind
+  # a service that looks healthy, and the first symptom is objects
+  # nobody can find. So something has to provision it, and locally that
+  # is this container — in production it is terraform.
+  #
+  # Runs to completion and exits; `mc mb --ignore-existing` makes a
+  # restart a no-op rather than an error.
+  minio-init:
+    image: quay.io/minio/mc:RELEASE.2025-04-16T18-13-26Z
+    container_name: ayana-minio-init
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 minioadmin minioadmin &&
+      mc mb --ignore-existing local/astro-dev &&
+      echo 'bucket astro-dev ready'
+      "
+
   mailpit:
     image: axllent/mailpit:v1.22
     container_name: ayana-mailpit

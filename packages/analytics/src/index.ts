@@ -103,6 +103,18 @@ export interface EventMap {
   glossary_term_opened: { term_key: string }
   // Measures latent demand for Phase 5 before it is built.
   ai_chat_box_tapped: { enabled: boolean }
+
+  /*
+    PDF download. Three events rather than one, because the interesting
+    number is the gap between them: how many people ask for a document
+    and never receive one.
+
+    No profile id and no job id on any of them. A job id is a handle to
+    somebody's birth chart, and analytics is a third party.
+  */
+  kundli_pdf_requested: Record<string, never>
+  kundli_pdf_ready: Record<string, never>
+  kundli_pdf_failed: Record<string, never>
 }
 
 export type EventName = keyof EventMap

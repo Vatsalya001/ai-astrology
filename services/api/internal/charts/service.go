@@ -172,7 +172,7 @@ func (s *Service) Get(ctx context.Context, userID uuid.UUID, key Key) (Chart, er
 		return Chart{}, err
 	}
 
-	profile, err := s.profiles.Get(ctx, userID, key.ProfileID)
+	profile, err := s.profileFor(ctx, userID, key.ProfileID)
 	if err != nil {
 		return Chart{}, err
 	}
@@ -456,7 +456,7 @@ func toPgUUID(id uuid.UUID) pgtype.UUID {
 func (s *Service) Recompute(ctx context.Context, userID uuid.UUID, key Key) (Chart, error) {
 	key = key.withDefaults()
 
-	profile, err := s.profiles.Get(ctx, userID, key.ProfileID)
+	profile, err := s.profileFor(ctx, userID, key.ProfileID)
 	if err != nil {
 		return Chart{}, err
 	}
@@ -466,4 +466,38 @@ func (s *Service) Recompute(ctx context.Context, userID uuid.UUID, key Key) (Cha
 		return Chart{}, err
 	}
 	return chart, nil
+}
+
+// profileFor reads a birth profile and restates "not found" in this
+// package's vocabulary.
+//
+// birthprofiles.Get returns its OWN ErrNotFound, which is a different
+// sentinel from charts.ErrNotFound. errors.Is does not relate them, so
+// the handler's 404 branch never matched it and the caller got a 500.
+//
+// That was invisible while every chart route sat behind
+// RequireProfileOwnership: the middleware 404s a stranger before the
+// service is reached, so the mapping gap could not be observed. The
+// print route has no such middleware — its token is the authorisation —
+// and the gap surfaced immediately, as a 500 for a token pairing a user
+// with a profile they do not own.
+//
+// Translated here rather than in the handler so every caller gets it,
+// including the two that are currently shielded by the middleware. A
+// second line of defence is only a defence if it is actually wired.
+func (s *Service) profileFor(
+	ctx context.Context,
+	userID, profileID uuid.UUID,
+) (birthprofiles.Profile, error) {
+	profile, err := s.profiles.Get(ctx, userID, profileID)
+	if errors.Is(err, birthprofiles.ErrNotFound) {
+		// Deliberately drops the original: a caller branching on this
+		// should see one not-found, not two that behave differently
+		// depending on which package raised it.
+		return birthprofiles.Profile{}, ErrNotFound
+	}
+	if err != nil {
+		return birthprofiles.Profile{}, err
+	}
+	return profile, nil
 }
