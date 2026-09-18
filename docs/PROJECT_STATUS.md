@@ -513,7 +513,25 @@ every chart — is a mistake the route cannot make rather than one it avoids.
 front of the transit refresh. Object keys are `kundli-{random}.pdf` — no name, no profile
 id, no job id, because keys turn up in bucket listings and access logs.
 
-**Two defects this PR found in existing code**, both invisible until the print route
+**PR 13 — the rate limit PR 12 should have had.** Auditing the spec's own security
+checklist against what PR 12 shipped turned up an item it does not satisfy: *"Rate limit
+PDF generation (CPU-expensive and trivially abusable)."* One request starts a browser for
+up to ninety seconds, which makes it the most expensive thing an authenticated user can
+ask this service to do — more so than the recompute route, which already carries a limit.
+
+Ten per user per hour, checked before the job id is minted so a refused request leaves no
+orphan status behind. Fails open on a Redis outage, matching the recompute route: the
+status store is the same Redis, so an outage already means no render can report its
+result, and refusing as well turns a degraded feature into a broken one.
+
+It also closed a latent panic. `Deps.Limiter` is a concrete `*ratelimit.Limiter` and
+`pdf.Create` takes an interface, so a nil pointer becomes a **non-nil interface holding a
+nil value** — the handler's own `limiter != nil` guard lets it through and `Allow` is
+called on a nil receiver. `NewRouter` now refuses to construct. The break test produced
+exactly that nil-pointer dereference, which is how the hazard was confirmed rather than
+assumed.
+
+**Two defects PR 12 found in existing code**, both invisible until the print route
 existed:
 
 - `birthprofiles.ErrNotFound` and `charts.ErrNotFound` are different sentinels, so the

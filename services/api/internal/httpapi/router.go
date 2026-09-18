@@ -119,8 +119,22 @@ func newChiRouter(d Deps) chi.Router {
 	// a nil-pointer panic on whichever request first reaches a limited
 	// route — in production, at an unpredictable moment, with a stack
 	// trace instead of a reason.
-	if (d.Auth != nil || d.Users != nil) && d.Limiter == nil {
-		panic("httpapi: Deps.Limiter is required when the auth or users routes are mounted")
+	/*
+	  PDF is in this check for a sharper reason than the other two.
+
+	  `Deps.Limiter` is a concrete *ratelimit.Limiter, and pdf.Create takes
+	  an INTERFACE. A nil pointer assigned to an interface produces a
+	  non-nil interface holding a nil value, so the handler's own
+	  `limiter != nil` guard would pass and `Allow` would be called on a
+	  nil receiver — a panic on the first download, in production, rather
+	  than a message here.
+
+	  That guard is still worth keeping in the handler: it is what lets a
+	  test mount the route unlimited. This is what makes sure the real
+	  router never does.
+	*/
+	if (d.Auth != nil || d.Users != nil || d.PDF != nil) && d.Limiter == nil {
+		panic("httpapi: Deps.Limiter is required when the auth, users or PDF routes are mounted")
 	}
 
 	r := chi.NewRouter()
@@ -441,7 +455,12 @@ func mountAstrology(r chi.Router, d Deps) {
 				  authenticated user. See pdf/status.go.
 				*/
 				if d.PDF != nil {
-					r.Post("/{birthProfileId}/pdf", d.PDF.Create)
+					// Limited, and visibly so. One request here starts a
+					// browser for up to ninety seconds, which makes it the
+					// most expensive thing an authenticated user can ask
+					// this service to do — more so than the recompute route
+					// on the line above.
+					r.Post("/{birthProfileId}/pdf", d.PDF.Create(d.Limiter))
 					r.Get("/{birthProfileId}/pdf/{jobId}", d.PDF.Status)
 				}
 			})
