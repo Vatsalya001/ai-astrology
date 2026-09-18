@@ -255,6 +255,15 @@ jobs:
       - run: npm run test --workspaces --if-present
 
       - run: npm run build --workspace=web
+
+      # Task 3.19: the bundle check fails the build if a budget is
+      # exceeded. Immediately after the build, because it reads the
+      # stats that build just produced — and it exits non-zero when
+      # those are missing rather than skipping, so a reordering that
+      # breaks it shows up as a red build rather than a silent pass.
+      - name: Bundle budget
+        run: npm run budget --workspace=web
+
       - name: Audit dependencies
         run: npm audit --audit-level=high
 

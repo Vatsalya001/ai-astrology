@@ -261,6 +261,20 @@ tasks:
     cmds:
       - cd {{.API_DIR}} && go build -o bin/api ./cmd/api && go build -o bin/worker ./cmd/worker
       - npm run build --workspace=web
+      # Immediately after the build that produces the numbers it reads.
+      # Task 3.19 asks for a check that FAILS the build when a route
+      # grows past its budget, so it runs here rather than as a separate
+      # command somebody has to remember.
+      - task: budget:web
+
+  budget:web:
+    desc: Fail if any route's first-load JS exceeds its gzipped budget
+    # Reads .next/diagnostics/route-bundle-stats.json, so it needs a
+    # build to have happened. It exits non-zero when that file is
+    # missing rather than skipping — a budget check that passes when it
+    # cannot measure is worse than none, because it reports success.
+    cmds:
+      - npm run budget --workspace=web
 
   integrity:
     desc: Re-hash every tracked file against the index — finds bit flips git cannot see
