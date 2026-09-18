@@ -22,6 +22,7 @@ export default function StatusLoading() {
 
       <main
         id="main"
+        tabIndex={-1}
         className="mx-auto max-w-4xl px-6 py-14"
         aria-busy="true"
         aria-live="polite"

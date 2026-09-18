@@ -36,6 +36,7 @@ export default function Error({
   return (
     <main
       id="main"
+      tabIndex={-1}
       className="flex min-h-dvh flex-col items-center justify-center px-6 text-center"
     >
       <Wordmark />

@@ -34,7 +34,7 @@ export default function VerifyPage() {
 
 function VerifyFallback() {
   return (
-    <main id="main" className="flex min-h-dvh flex-col items-center justify-center px-6">
+    <main id="main" tabIndex={-1} className="flex min-h-dvh flex-col items-center justify-center px-6">
       <Wordmark />
     </main>
   )

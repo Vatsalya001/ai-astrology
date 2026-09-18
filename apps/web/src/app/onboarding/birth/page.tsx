@@ -156,7 +156,7 @@ export default function BirthDetailsPage() {
   }
 
   return (
-    <main id="main" className="flex min-h-dvh flex-col items-center px-6 py-12">
+    <main id="main" tabIndex={-1} className="flex min-h-dvh flex-col items-center px-6 py-12">
       <Wordmark />
 
       <div className="mt-8 w-full max-w-sm">

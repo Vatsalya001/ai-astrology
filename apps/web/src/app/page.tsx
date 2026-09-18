@@ -20,7 +20,7 @@ export default function LandingPage() {
   return (
     <>
       <SiteHeader />
-      <main id="main">
+      <main id="main" tabIndex={-1}>
         <Hero />
         <HowItWorks />
         <Principles />

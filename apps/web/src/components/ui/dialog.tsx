@@ -10,7 +10,87 @@ import { cn } from '@/lib/utils'
  * shadcn/ui Dialog on this project's tokens. See button.tsx for why the
  * generated slate palette was replaced.
  */
-const Dialog = DialogPrimitive.Root
+/**
+ * The last element focused outside any dialog.
+ *
+ * ── Why a document listener and not a prop ──
+ *
+ * Every dialog in this app is CONTROLLED: a plain button calls
+ * `setOpen(true)` and `<Dialog open={open}>` re-renders. Radix's
+ * `onOpenChange` fires only for ITS OWN dismissal paths — Escape, the
+ * overlay, the close button — so it never sees the opening at all.
+ * Measured, after three wrong guesses: the handler logged a CLOSE with
+ * no matching OPEN.
+ *
+ * The three that failed, so nobody repeats them. `onCloseAutoFocus`
+ * loses a race with Radix's focus-scope teardown. A `useState`
+ * initialiser inside `DialogContent` captures `<body>` at page load,
+ * because that component renders on every pass and only its portal is
+ * gated on `open`. An effect in this wrapper runs after the child's, by
+ * which time focus has already moved.
+ *
+ * Tracking focus continuously sidesteps all of it.
+ */
+let lastFocusOutsideDialog: HTMLElement | null = null
+
+if (typeof document !== 'undefined') {
+  document.addEventListener(
+    'focusin',
+    (event) => {
+      const target = event.target as HTMLElement | null
+      // Focus moving WITHIN a dialog is not a new opener — recording it
+      // would make "restore" mean "stay where you are".
+      if (!target || target.closest('[role="dialog"]')) return
+      lastFocusOutsideDialog = target
+    },
+    true,
+  )
+}
+
+/**
+ * Dialog that gives focus back to whatever opened it.
+ *
+ * Radix restores focus to its `DialogTrigger`. There is no trigger here
+ * — see above — so closing dropped focus to `<body>`. For a keyboard
+ * user that means re-traversing the whole screen after every glance at a
+ * definition; for a screen-reader user the reading position is lost and
+ * they resume at the top of the document with nothing announced.
+ *
+ * All six dialogs in this app had it.
+ */
+const Dialog = ({
+  onOpenChange,
+  ...props
+}: React.ComponentPropsWithoutRef<typeof DialogPrimitive.Root>) => (
+  <DialogPrimitive.Root
+    onOpenChange={(next) => {
+      if (!next) {
+        /*
+          Read at CLOSE time, from the tracker.
+
+          An earlier version stashed it in a ref during renders where
+          `open` was false — one render too early, because focusing the
+          trigger does not re-render and the ref still held whatever came
+          before. The tracker only records elements OUTSIDE a dialog, so
+          while one is open it still holds the control that opened it.
+        */
+        const target = lastFocusOutsideDialog
+        if (target) {
+          /*
+            A frame later. Radix's focus-scope teardown runs after this
+            callback and would otherwise be the last writer — measured
+            landing on <body> when restored synchronously.
+          */
+          requestAnimationFrame(() => {
+            if (document.contains(target)) target.focus()
+          })
+        }
+      }
+      onOpenChange?.(next)
+    }}
+    {...props}
+  />
+)
 
 const DialogTrigger = DialogPrimitive.Trigger
 

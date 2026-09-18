@@ -49,7 +49,7 @@ export default function SettingsLayout({ children }: { children: React.ReactNode
         </div>
       </header>
 
-      <main id="main" className="mx-auto max-w-3xl px-6 py-12">
+      <main id="main" tabIndex={-1} className="mx-auto max-w-3xl px-6 py-12">
         <h1 className="font-serif text-4xl tracking-tight">{t.settings.title}</h1>
 
         {/* A real nav landmark, so a screen reader can jump straight to

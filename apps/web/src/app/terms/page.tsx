@@ -17,7 +17,7 @@ export const metadata: Metadata = { title: 'Terms — Ayana' }
  */
 export default function TermsPage() {
   return (
-    <main id="main" className="mx-auto max-w-2xl px-6 py-16">
+    <main id="main" tabIndex={-1} className="mx-auto max-w-2xl px-6 py-16">
       <Link href="/" aria-label="Ayana home">
         <Wordmark />
       </Link>

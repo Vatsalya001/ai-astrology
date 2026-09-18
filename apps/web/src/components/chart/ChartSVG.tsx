@@ -44,7 +44,13 @@ import { highlightedHouse, type ChartData, type Highlight, type PlanetPlacement 
  *   - the `<svg>` is a `role="group"` carrying the summary sentence, so
  *     its children stay in the tree
  *   - each planet is a focusable `role="button"` with the full sentence
- *     as its label, which is the spec's intent
+ *     as its label — WHEN a tap handler is supplied. With no `onPlanetTap`
+ *     there is nothing a press could do, so no control is rendered rather
+ *     than an inert one: a button that does nothing is worse for a
+ *     screen-reader user than no button, because it promises an action
+ *     and swallows it. `/kundli/chart` is such a route today.
+ *   - the accessible table below is therefore the path that is ALWAYS
+ *     available, handler or not
  *   - a visually-hidden `<table>` duplicates the data, captioned as such
  *     so the repetition reads as deliberate rather than as a bug
  *

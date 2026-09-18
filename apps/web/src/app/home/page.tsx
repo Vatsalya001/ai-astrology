@@ -129,7 +129,7 @@ export default function HomePage() {
         </div>
       </header>
 
-      <main id="main" className="mx-auto max-w-2xl space-y-4 px-4 py-8 sm:px-6">
+      <main id="main" tabIndex={-1} className="mx-auto max-w-2xl space-y-4 px-4 py-8 sm:px-6">
         {state === 'error' && <LoadError onRetry={() => setAttempt((n) => n + 1)} />}
 
         {state === 'loading' && (

@@ -761,6 +761,33 @@ because a story whose args have drifted from its component's props compiles righ
 somebody opens that panel. Break-tested both ways: a story the component cannot render,
 and a stories file that exports none.
 
+**PR 21 — gate item 13 automated, and two real accessibility bugs it found.**
+
+Most of the "manual" script is not a judgement. "Does the focus ring stay visible", "does
+Escape return focus to the opener", "is the current dasha marked `aria-current`" are facts
+a browser can be asked. `tests/e2e/kundli-keyboard.spec.ts` asks eleven of them.
+
+**Two bugs, both invisible to axe** — which reports zero violations on every Kundli route:
+
+1. **The skip link skipped nothing.** `<main id="main">` had no `tabIndex={-1}`, so it was
+   not focusable; `href="#main"` scrolled the page and left focus on the link. The next Tab
+   continued from the link. Fixed on all 20 pages that carry a `main`.
+2. **No dialog returned focus.** Radix restores focus to its `DialogTrigger`; every dialog
+   here is controlled by a plain button calling `setOpen(true)`, so there was no trigger
+   and closing dropped focus to `<body>`. All six had it. For a screen-reader user the
+   reading position is lost and they resume at the top of the document, unannounced.
+
+The second took four attempts, and the reason is worth recording: Radix's `onOpenChange`
+**never fires on open** for a controlled dialog — it only handles its own dismissal paths.
+Three fixes were built on the assumption that it did. Instrumenting the handler showed a
+`CLOSE` with no matching `OPEN`, which ended the guessing; focus is now tracked
+continuously by a `focusin` listener.
+
+**Performance target, measured rather than estimated.** Removing *both* the glossary prose
+(8.9 KB, needed only on tap) and the entire Hindi dictionary (7.1 KB) — the only removable
+content — reaches **183.0 KB** against a 180 KB target. The gap is not closeable by
+product-code work, so no refactor was attempted.
+
 **Two defects PR 12 found in existing code**, both invisible until the print route
 existed:
 

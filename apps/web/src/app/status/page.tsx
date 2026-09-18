@@ -76,7 +76,7 @@ export default async function StatusPage() {
         </div>
       </header>
 
-      <main id="main" className="mx-auto max-w-4xl px-6 py-14">
+      <main id="main" tabIndex={-1} className="mx-auto max-w-4xl px-6 py-14">
         <div className="mb-10">
           <SectionLabel>Operations</SectionLabel>
           <h1 className="font-serif text-4xl tracking-tight">System status</h1>

@@ -144,7 +144,7 @@ export default function PlanetsPage() {
   }
 
   return (
-    <main id="main" className="mx-auto max-w-4xl px-4 py-8 sm:px-6">
+    <main id="main" tabIndex={-1} className="mx-auto max-w-4xl px-4 py-8 sm:px-6">
       <header className="mb-6 flex flex-wrap items-baseline justify-between gap-3">
         <h1 className="font-serif text-2xl">{t.chart.planetsTitle}</h1>
         <ProfileSwitcher profiles={profiles} />

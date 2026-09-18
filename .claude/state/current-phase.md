@@ -35,14 +35,21 @@ to prove they fire. Phase 3 is being held to the same standard.
 
 ## Open (2)
 
-### 13 — manual keyboard and screen-reader pass 👤 **needs a human**
+### 13 — manual keyboard and screen-reader pass 👤 **mostly automated; a short human pass remains**
 
-The automated half is done: axe runs across five e2e specs and reports zero violations
-on every Kundli route. The gate asks for a manual pass as well, and it is right to — axe
-cannot tell whether a focus order makes *sense*, or whether the chart's spoken output is
-comprehensible rather than merely present.
+Eleven of the script's twenty-one steps are now asserted in
+`tests/e2e/kundli-keyboard.spec.ts` — focus ring visibility on every stop, the skip link
+reaching `main`, dialogs taking and returning focus, focus trapped while open, the chart
+exposed as a group with a summary, every planet's sign and house reachable in the
+accessible table, `aria-current` on the running dasha, Sade Sati naming its state in
+words, and errors announced rather than only displayed.
 
-Steps are in `docs/MANUAL-A11Y-PASS.md`.
+It found two real bugs axe could not (see PROJECT_STATUS PR 21).
+
+**What still needs a person** is the judgement the script exists for: with your eyes
+closed, is the chart *comprehensible*? Everything above proves the facts are present; none
+of it proves they are followable by ear. Budget about 15 minutes now rather than 40 —
+`docs/MANUAL-A11Y-PASS.md` §1b, steps 5 and 8.
 
 ### 14 — performance budgets met
 

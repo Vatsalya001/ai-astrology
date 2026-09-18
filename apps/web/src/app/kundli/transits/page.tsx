@@ -95,7 +95,7 @@ export default function TransitsPage() {
   }, [onUnauthenticated, attempt, selectedId])
 
   return (
-    <main id="main" className="mx-auto max-w-2xl px-4 py-8 sm:px-6">
+    <main id="main" tabIndex={-1} className="mx-auto max-w-2xl px-4 py-8 sm:px-6">
       {/*
         An h1, which this screen shipped without — its only heading was
         the h2 inside TransitPanel, so the document's first and highest

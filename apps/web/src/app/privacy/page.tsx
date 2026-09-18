@@ -15,7 +15,7 @@ export const metadata: Metadata = { title: 'Privacy — Ayana' }
  */
 export default function PrivacyPage() {
   return (
-    <main id="main" className="mx-auto max-w-2xl px-6 py-16">
+    <main id="main" tabIndex={-1} className="mx-auto max-w-2xl px-6 py-16">
       <Link href="/" aria-label="Ayana home">
         <Wordmark />
       </Link>
