@@ -84,3 +84,22 @@ func logThrottleError(r *http.Request, err error) {
 func ipSubject(r *http.Request, trustProxy bool, salt string) string {
 	return string(auth.HashIP(auth.ClientIP(r, trustProxy), salt))
 }
+
+// IPSubject returns a rate-limit subject function for routes that have
+// no authenticated user to key on.
+//
+// The value is a SALTED HASH of the client IP, never the address itself.
+// The security rules are explicit — "IPs are hashed with a salt before
+// storage; raw IPs are never persisted" — and a rate-limit key in Redis
+// is storage. The salt is the same one the global throttle uses, so a
+// caller occupies one identity across both rather than two.
+//
+// Exported so the composition root can hand it to a handler in another
+// package. `trustProxy` must match what the rest of the service was
+// built with: two components disagreeing about whether to believe
+// X-Forwarded-For would key the same request differently.
+func IPSubject(trustProxy bool, salt string) func(*http.Request) string {
+	return func(r *http.Request) string {
+		return ipSubject(r, trustProxy, salt)
+	}
+}

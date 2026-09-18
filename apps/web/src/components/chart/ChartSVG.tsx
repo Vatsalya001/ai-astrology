@@ -61,6 +61,7 @@ export function ChartSVG({
   className,
   title,
   captionText,
+  svgRef,
 }: {
   chart: ChartData
   style: ChartStyle
@@ -79,6 +80,22 @@ export function ChartSVG({
    * hook would make it unusable in the place it matters most.
    */
   captionText: string
+
+  /**
+   * A handle on the rendered `<svg>`, for the PNG export.
+   *
+   * A named prop rather than `forwardRef`, deliberately. This component
+   * renders an `<svg>` INSIDE a wrapper that also holds the visually-
+   * hidden data table, so `ref` on the component would most naturally
+   * mean the wrapper — and the export needs the SVG specifically. A
+   * named prop says which element it is; a forwarded `ref` would not.
+   *
+   * The export reads this element's COMPUTED styles, because every
+   * colour here comes from a Tailwind class and a clone detached from
+   * the document inherits none of them. So it has to be the element
+   * actually on screen.
+   */
+  svgRef?: React.Ref<SVGSVGElement>
 }) {
   const summaryId = useId()
   const ascendantSign = chart.ascendant?.signIndex ?? null
@@ -137,6 +154,7 @@ export function ChartSVG({
   return (
     <figure className={cn('relative', className)}>
       <svg
+        ref={svgRef}
         viewBox={`0 0 ${SIZE} ${SIZE}`}
         role="group"
         aria-labelledby={summaryId}

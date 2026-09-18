@@ -150,6 +150,19 @@ type Chart struct {
 	ComputedAt        time.Time
 }
 
+type ChartShare struct {
+	ID             pgtype.UUID
+	UserID         pgtype.UUID
+	BirthProfileID pgtype.UUID
+	TokenHash      string
+	Scope          string
+	ExpiresAt      time.Time
+	RevokedAt      pgtype.Timestamptz
+	ViewCount      int64
+	LastViewedAt   pgtype.Timestamptz
+	CreatedAt      time.Time
+}
+
 type Dasha struct {
 	ID        pgtype.UUID
 	ChartID   pgtype.UUID

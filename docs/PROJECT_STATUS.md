@@ -531,6 +531,50 @@ called on a nil receiver. `NewRouter` now refuses to construct. The break test p
 exactly that nil-pointer dereference, which is how the hazard was confirmed rather than
 assumed.
 
+**PR 14 — the share sheet.** Task 3.16.
+
+Three things, because people mean three different things by "share". An **image** goes
+straight into a WhatsApp thread. A **link** stays live and can be revoked, which is what
+you send an astrologer. A **PDF** is the artifact people print.
+
+The link is the part with teeth. From the spec's checklist: *"Share links resolve
+server-side against the viewer's permissions — they do not embed birth details."* So the
+URL carries one opaque token and nothing else: 128 bits from `crypto/rand`, stored only
+as a SHA-256 hash, resolved against a row the owner can kill. A link that carried the
+chart — signed, encoded, however cleverly — would be a permanent, unrevocable publication
+of somebody's birth data the moment it left their phone.
+
+| Piece | Where |
+|---|---|
+| `chart_shares`, hashed token, revocation, view count | `services/api/db/migrations/000004_shares.up.sql` |
+| Token mint and hash | `services/api/internal/shares/token.go` |
+| Create, list, revoke, resolve, sweep | `services/api/internal/shares/` |
+| The reduced view a viewer gets | `services/api/internal/charts/shared.go` |
+| The public route | `GET /api/v1/shared/{token}` |
+| Share sheet and PNG export | `apps/web/src/components/chart/ShareSheet.tsx` |
+| The page a recipient opens | `apps/web/src/app/shared/[token]/` |
+
+The shared payload carries the chart and the profile's label, and no birth date, time or
+place — enforced by a test that compares the shared response against the owner's own
+profile response field by field, rather than by guessing at names. (The first version
+scanned for the substring "longitude" and failed on `planets[].longitude`, which is a
+planet's position along the ecliptic and the entire content of a chart.)
+
+Correcting birth details revokes every link to the superseded version: a link pointing at
+the old one would keep serving a chart its owner has already decided was wrong, to people
+they cannot reach.
+
+**Two existing guards caught the new table before it shipped**, which is what they were
+built for: `TestHardDeleteLeavesNoResidue` refused to pass until `chart_shares` was seeded
+in the deletion test, and `TestEveryUserOwnedTableAppearsInTheExport` refused until share
+links reached the GDPR export. Neither was something this PR remembered on its own.
+
+Migrations now have a test rather than a rule. `.claude/rules/database.md` has always said
+"every migration has a real `down`"; nothing executed one. `migrations_test.go` rolls every
+migration back and forward again — the second pass is what tests the down rather than the
+parser, since a down that drops nothing exits zero and the re-apply then fails on an
+object that still exists.
+
 **Two defects PR 12 found in existing code**, both invisible until the print route
 existed:
 

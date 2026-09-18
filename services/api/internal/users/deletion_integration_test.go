@@ -60,6 +60,21 @@ func seedFullUser(ctx context.Context, t *testing.T, pool *pgxpool.Pool, email s
 			 VALUES ($1, '1994-08-17', '14:35', 'exact', 'Jaipur',
 			         26.9124, 75.7873, 'Asia/Kolkata', 330, '1994-08-17T09:05:00Z')`,
 			[]any{userID}},
+		// Phase 3. A share link is a live, revocable credential to this
+		// person's chart; one surviving their deletion would be a
+		// working link to a deleted user's birth data, which is the
+		// worst possible outcome of an erasure request.
+		//
+		// The profile is looked up rather than passed in, because the
+		// statement above does not return it and the FK must point at
+		// the row that was actually created.
+		{"share link",
+			`INSERT INTO chart_shares (user_id, birth_profile_id, token_hash, expires_at)
+			 SELECT $1, id,
+			        md5(gen_random_uuid()::text) || md5(gen_random_uuid()::text),
+			        now() + INTERVAL '30 days'
+			 FROM birth_profiles WHERE user_id = $1 LIMIT 1`,
+			[]any{userID}},
 	} {
 		if _, err := pool.Exec(ctx, stmt.sql, stmt.args...); err != nil {
 			t.Fatalf("seed %s: %v", stmt.what, err)
@@ -606,6 +621,7 @@ func TestEveryUserOwnedTableAppearsInTheExport(t *testing.T) {
 		"sessions":         "sessions",
 		"audit_logs":       "audit_log",
 		"birth_profiles":   "birth_profiles",
+		"chart_shares":     "share_links",
 		// Charts hang off birth_profiles and have no user_id column, so
 		// they are not discovered here; TestExportIncludesBirthProfiles
 		// AndCharts asserts them directly.

@@ -31,6 +31,7 @@ import (
 	"github.com/Vatsalya001/ai-astrology/services/api/internal/platform/jobs"
 	"github.com/Vatsalya001/ai-astrology/services/api/internal/platform/logging"
 	"github.com/Vatsalya001/ai-astrology/services/api/internal/platform/redis"
+	"github.com/Vatsalya001/ai-astrology/services/api/internal/shares"
 	"github.com/Vatsalya001/ai-astrology/services/api/internal/transits"
 	"github.com/Vatsalya001/ai-astrology/services/api/internal/users"
 )
@@ -154,9 +155,20 @@ func run() error {
 	ticker := time.NewTicker(time.Hour)
 	defer ticker.Stop()
 
+	/*
+	  Dead share links ride the same ticker.
+
+	  Both are idempotent database-only sweeps with a grace window
+	  measured in days, so they want exactly the same cadence — and a
+	  second ticker for the same shape of work would be two things to
+	  reason about instead of one.
+	*/
+	shareSweeper := shares.NewService(queries, nil, log)
+
 	// Once at startup too, so a deploy after downtime does not wait an
 	// hour before honouring deletions that came due meanwhile.
 	runHardDeletes(ctx, deleter, log)
+	runShareSweep(ctx, shareSweeper, log)
 
 	for {
 		select {
@@ -165,7 +177,30 @@ func run() error {
 			return nil
 		case <-ticker.C:
 			runHardDeletes(ctx, deleter, log)
+			runShareSweep(ctx, shareSweeper, log)
 		}
+	}
+}
+
+// runShareSweep removes share rows that have been dead past the grace
+// period.
+//
+// The grace exists so an owner opening the share screen can still see
+// that a link existed and has lapsed; a row that vanishes at the instant
+// it expires reads as "I never made that link". Past that, keeping them
+// is keeping a record of who shared what, for no one's benefit.
+//
+// A failure is logged and the loop continues. This is housekeeping: a
+// wedged sweep must not stop the worker, and nothing is unsafe about the
+// rows staying one more hour — they are already dead to every resolve.
+func runShareSweep(ctx context.Context, svc *shares.Service, log *slog.Logger) {
+	removed, err := svc.Sweep(ctx)
+	if err != nil {
+		log.ErrorContext(ctx, "share link sweep failed", slog.Any("err", err))
+		return
+	}
+	if removed > 0 {
+		log.InfoContext(ctx, "swept expired share links", slog.Int64("removed", removed))
 	}
 }
 

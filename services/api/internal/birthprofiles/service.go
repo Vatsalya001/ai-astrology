@@ -12,6 +12,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/google/uuid"
@@ -77,13 +78,41 @@ type Profile struct {
 	CreatedAt    time.Time  `json:"created_at"`
 }
 
+// ShareRevoker kills the share links pointing at a profile.
+//
+// Declared by this consumer so birthprofiles does not import shares —
+// the dependency runs the other way round in every other respect, and an
+// import here would make it a cycle the moment shares needs a profile.
+type ShareRevoker interface {
+	RevokeForProfile(ctx context.Context, userID, profileID uuid.UUID) error
+}
+
 type Service struct {
 	q      dbgen.Querier
 	events analytics.Emitter
+	logger *slog.Logger
+	// shares is nil until Phase 3 wires it. Nil means corrections do not
+	// revoke anything, which is correct for a deployment with no share
+	// links in it.
+	shares ShareRevoker
+}
+
+// WithShareRevoker makes a correction revoke the profile's share links.
+func (s *Service) WithShareRevoker(revoker ShareRevoker) *Service {
+	s.shares = revoker
+	return s
+}
+
+// WithLogger replaces the logger.
+func (s *Service) WithLogger(logger *slog.Logger) *Service {
+	if logger != nil {
+		s.logger = logger
+	}
+	return s
 }
 
 func NewService(q dbgen.Querier) *Service {
-	return &Service{q: q, events: analytics.Nop{}}
+	return &Service{q: q, events: analytics.Nop{}, logger: slog.Default()}
 }
 
 func (s *Service) WithAnalytics(events analytics.Emitter) *Service {
@@ -156,6 +185,34 @@ func (s *Service) Update(ctx context.Context, userID, profileID uuid.UUID, in Cr
 		UserID:       toPgUUID(userID),
 	}); err != nil {
 		return Profile{}, fmt.Errorf("birthprofiles: supersede v%d: %w", existing.Version, err)
+	}
+
+	/*
+	   Every share link to the OLD version dies here.
+
+	   A correction means the owner has decided the previous chart was
+	   wrong. A link pointing at it would keep serving that wrong chart —
+	   to people the owner may have no way to reach, since a link sent
+	   over WhatsApp cannot be recalled.
+
+	   Best-effort, and deliberately so: failing the correction because
+	   the revocation failed would leave the user unable to fix their
+	   birth time, which is worse. Logged loudly instead, because a link
+	   that outlives its correction is a real problem someone has to
+	   know about.
+
+	   Nil when share links are not wired, which is every deployment
+	   before Phase 3 and every test that does not care.
+	*/
+	if s.shares != nil {
+		if err := s.shares.RevokeForProfile(ctx, userID, profileID); err != nil {
+			s.logger.ErrorContext(ctx, "birthprofiles: could not revoke share links "+
+				"for a superseded profile",
+				slog.String("profile_id", profileID.String()),
+				slog.String("consequence",
+					"links to the previous version keep serving a chart the owner corrected"),
+				slog.Any("err", err))
+		}
 	}
 
 	s.events.Emit(ctx, analytics.BirthProfileEdited, &userID, map[string]any{

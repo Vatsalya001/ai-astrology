@@ -28,6 +28,10 @@ type Querier interface {
 	// breadth-first flatten gives that ordering for free.
 	BulkInsertDashas(ctx context.Context, arg []BulkInsertDashasParams) (int64, error)
 	CancelUserDeletion(ctx context.Context, id pgtype.UUID) (User, error)
+	// How many links this user currently has working, across all profiles.
+	// Used to cap the total: an unbounded number of live bearer credentials
+	// per account is a liability the owner cannot reason about.
+	CountLiveChartShares(ctx context.Context, userID pgtype.UUID) (int64, error)
 	CountPlaces(ctx context.Context) (int64, error)
 	// Astrology queries. See docs/specs/PHASE-02-ASTROLOGY-ENGINE.md §3.
 	//
@@ -37,6 +41,21 @@ type Querier interface {
 	// guarantee the caller cannot forget to apply.
 	// ─── birth profiles ──────────────────────────────────────────────────
 	CreateBirthProfile(ctx context.Context, arg CreateBirthProfileParams) (BirthProfile, error)
+	// Share-link queries. See docs/specs/PHASE-03-KUNDLI-UI.md task 3.16.
+	//
+	// Two access paths, and they are deliberately asymmetric:
+	//
+	//   The OWNER's queries are scoped by user_id in the SQL, like every
+	//   other read in this service. A predicate in the query is a guarantee
+	//   the handler cannot forget to apply.
+	//
+	//   The VIEWER's query is scoped by nothing but the token hash, because
+	//   a viewer has no account. The token IS the authorisation — which is
+	//   why liveness (not expired, not revoked) is in the WHERE clause
+	//   rather than checked in Go afterwards. A dead link must return no
+	//   row, not a row the caller is trusted to inspect.
+	// ─── creating and listing, for the owner ─────────────────────────────
+	CreateChartShare(ctx context.Context, arg CreateChartShareParams) (ChartShare, error)
 	// ─── Preferences ─────────────────────────────────────────────────────
 	CreateDefaultPreferences(ctx context.Context, userID pgtype.UUID) (UserPreference, error)
 	// ─── Sessions ────────────────────────────────────────────────────────
@@ -47,6 +66,14 @@ type Querier interface {
 	// Recomputing replaces the whole tree. Deleting first keeps it a tree
 	// rather than two overlapping generations of one.
 	DeleteDashasForChart(ctx context.Context, chartID pgtype.UUID) (int64, error)
+	// ─── housekeeping ────────────────────────────────────────────────────
+	// Swept by the worker.
+	//
+	// Rows are kept for a grace period after death rather than deleted at
+	// the instant they expire, so an owner opening the share screen can
+	// still see that a link existed and has lapsed. A row that vanishes at
+	// expiry reads as "I never made that link".
+	DeleteExpiredChartShares(ctx context.Context, expiresAt time.Time) (int64, error)
 	// Housekeeping for the worker. Expired rows prove nothing and grow
 	// forever.
 	DeleteExpiredSessions(ctx context.Context) error
@@ -133,6 +160,16 @@ type Querier interface {
 	// ambiguous between the CTE and the table, and sqlc rejects it, which is
 	// the right moment to find out rather than at runtime.
 	ListBirthProfileVersions(ctx context.Context, arg ListBirthProfileVersionsParams) ([]ListBirthProfileVersionsRow, error)
+	// Every link this user has created for one profile, newest first.
+	// Revoked and expired rows are included on purpose: "which links did I
+	// make, and which are dead" is the question this answers.
+	ListChartShares(ctx context.Context, arg ListChartSharesParams) ([]ChartShare, error)
+	// Every link this user has created, across all their profiles.
+	//
+	// For the data export: "who can currently see my chart" is a question
+	// only this answers, and an export omitting it hands somebody a copy of
+	// their data with the sharing removed.
+	ListChartSharesForUser(ctx context.Context, userID pgtype.UUID) ([]ChartShare, error)
 	// Finds charts built by an older engine, so a library upgrade can be
 	// followed by a targeted recompute instead of a guess.
 	ListChartsByEngineVersion(ctx context.Context, arg ListChartsByEngineVersionParams) ([]Chart, error)
@@ -148,7 +185,34 @@ type Querier interface {
 	ListUsersPastDeletionGrace(ctx context.Context, deletionRequestedAt pgtype.Timestamptz) ([]User, error)
 	// ─── Deletion ────────────────────────────────────────────────────────
 	RequestUserDeletion(ctx context.Context, id pgtype.UUID) (User, error)
+	// ─── resolving, for the viewer ───────────────────────────────────────
+	// The whole viewer authorisation, in one predicate.
+	//
+	// Liveness is in the WHERE clause rather than checked in Go afterwards,
+	// so an expired or revoked link returns NO ROW. A query that returned
+	// the row and left the decision to the caller would make the guarantee
+	// depend on every future call site remembering to check.
+	//
+	// NOW() is the database's clock, not the API's. Several replicas with
+	// slightly different clocks would otherwise disagree about whether a
+	// link is still live, and an expiry that depends on which instance you
+	// reach is not an expiry.
+	ResolveChartShare(ctx context.Context, tokenHash string) (ChartShare, error)
 	RevokeAllUserSessions(ctx context.Context, userID pgtype.UUID) error
+	// ─── revoking ────────────────────────────────────────────────────────
+	// Scoped by user, so revoking somebody else's link affects no row and
+	// the handler answers 404 — never 403, which would confirm it exists.
+	//
+	// Idempotent: revoking an already-revoked link keeps the ORIGINAL
+	// timestamp, because "when did I turn this off" must not be rewritten by
+	// a second click.
+	RevokeChartShare(ctx context.Context, arg RevokeChartShareParams) (ChartShare, error)
+	// Every live link for one profile, killed at once.
+	//
+	// Called when birth details are corrected. A correction creates a new
+	// profile version, and a link pointing at the old one would keep serving
+	// a chart its owner has already decided was wrong.
+	RevokeChartSharesForProfile(ctx context.Context, arg RevokeChartSharesForProfileParams) error
 	// Signs one device out by ending its whole lineage.
 	//
 	// Scoped by user_id, so a caller cannot revoke another account's device
@@ -185,6 +249,13 @@ type Querier interface {
 	// "superseded it" from "there was nothing to supersede" without a second
 	// query — the same reason RevokeSession became :execrows in Phase 1.
 	SupersedeBirthProfile(ctx context.Context, arg SupersedeBirthProfileParams) (BirthProfile, error)
+	// Records that a live link was opened.
+	//
+	// A count and a timestamp, never who. A log of viewers would be a record
+	// of one person's interest in another, which this product has no
+	// business keeping — and which nobody consented to when they opened a
+	// link someone sent them.
+	TouchChartShare(ctx context.Context, id pgtype.UUID) error
 	TouchLastLogin(ctx context.Context, id pgtype.UUID) error
 	UpdatePreferences(ctx context.Context, arg UpdatePreferencesParams) (UserPreference, error)
 	// COALESCE so a PATCH omitting a field leaves it alone rather than

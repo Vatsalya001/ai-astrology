@@ -232,6 +232,37 @@ export const astrologyApi = {
    */
   pdfStatus: (profileId: string, jobId: string) =>
     authed<PdfStatus>(`/charts/${profileId}/pdf/${jobId}`),
+
+  /**
+   * Creates a share link.
+   *
+   * The response carries the only copy of the token that will ever
+   * exist — listing shares afterwards deliberately does not return it.
+   * So a caller that drops this response has lost the link, and the
+   * remedy is to make a new one.
+   */
+  createShare: (profileId: string, expiresInDays?: number) =>
+    authed<ShareLink>(`/charts/${profileId}/shares`, {
+      method: 'POST',
+      body: JSON.stringify({ expires_in_days: expiresInDays ?? 0 }),
+    }),
+
+  listShares: (profileId: string) =>
+    authed<{ shares: ShareLink[] }>(`/charts/${profileId}/shares`),
+
+  revokeShare: (profileId: string, shareId: string) =>
+    authed<ShareLink>(`/charts/${profileId}/shares/${shareId}`, { method: 'DELETE' }),
+}
+
+export interface ShareLink {
+  id: string
+  birth_profile_id: string
+  scope: string
+  expires_at: string
+  revoked_at?: string | null
+  view_count: number
+  /** Present ONLY in the response to createShare. Never on a listing. */
+  token?: string
 }
 
 export interface PdfStatus {

@@ -14,6 +14,7 @@ import (
 	"github.com/Vatsalya001/ai-astrology/services/api/internal/platform/db"
 	"github.com/Vatsalya001/ai-astrology/services/api/internal/platform/redis"
 	"github.com/Vatsalya001/ai-astrology/services/api/internal/platform/redis/ratelimit"
+	"github.com/Vatsalya001/ai-astrology/services/api/internal/shares"
 	"github.com/Vatsalya001/ai-astrology/services/api/internal/transits"
 	"github.com/Vatsalya001/ai-astrology/services/api/internal/users"
 	"github.com/go-chi/chi/v5"
@@ -64,6 +65,10 @@ type Deps struct {
 	// the two PDF routes are simply not mounted — a route that exists
 	// and 500s is worse than one that 404s.
 	PDF *pdf.Handler
+
+	// Shares mounts the share-link routes, including the one public
+	// route in the astrology subtree.
+	Shares *shares.Handler
 	// ProfileOwner gates the chart and transit subtrees. Required
 	// whenever those are mounted; see mountAstrology.
 	ProfileOwner ProfileOwnership
@@ -133,8 +138,8 @@ func newChiRouter(d Deps) chi.Router {
 	  test mount the route unlimited. This is what makes sure the real
 	  router never does.
 	*/
-	if (d.Auth != nil || d.Users != nil || d.PDF != nil) && d.Limiter == nil {
-		panic("httpapi: Deps.Limiter is required when the auth, users or PDF routes are mounted")
+	if (d.Auth != nil || d.Users != nil || d.PDF != nil || d.Shares != nil) && d.Limiter == nil {
+		panic("httpapi: Deps.Limiter is required when the auth, users, PDF or share routes are mounted")
 	}
 
 	r := chi.NewRouter()
@@ -413,6 +418,23 @@ func mountAstrology(r chi.Router, d Deps) {
 		r.Get("/print/chart", d.Charts.Print)
 	}
 
+	/*
+	  The shared-chart route, public for the same reason and mounted the
+	  same way — a sibling of `/charts`, not a child of it.
+
+	  The person opening a shared link has no account here and is not
+	  going to make one to look at their nephew's chart. The opaque token
+	  in the path is the authorisation, and the server resolves it to a
+	  user and a profile: the URL carries no birth details and no ids,
+	  which is what the phase's security checklist requires of it.
+
+	  Rate-limited on the client rather than on a user, because there is
+	  no user. See shares.ResolveLimit.
+	*/
+	if d.Shares != nil {
+		r.Get("/shared/{token}", d.Shares.View(d.Limiter))
+	}
+
 	if d.Charts != nil {
 		r.Route("/charts", func(r chi.Router) {
 			r.Use(authenticate)
@@ -462,6 +484,21 @@ func mountAstrology(r chi.Router, d Deps) {
 					// on the line above.
 					r.Post("/{birthProfileId}/pdf", d.PDF.Create(d.Limiter))
 					r.Get("/{birthProfileId}/pdf/{jobId}", d.PDF.Status)
+				}
+
+				/*
+				  Share management, for the OWNER. The public half is
+				  mounted above, outside this subtree entirely.
+
+				  Creating is limited: each call mints a bearer credential
+				  to a birth chart, and the live-links cap does not bound
+				  that on its own — revoke-and-remint in a loop stays
+				  under the cap while producing unbounded tokens.
+				*/
+				if d.Shares != nil {
+					r.Post("/{birthProfileId}/shares", d.Shares.Create(d.Limiter))
+					r.Get("/{birthProfileId}/shares", d.Shares.List)
+					r.Delete("/{birthProfileId}/shares/{shareId}", d.Shares.Revoke)
 				}
 			})
 		})
