@@ -575,6 +575,35 @@ migration back and forward again — the second pass is what tests the down rath
 parser, since a down that drops nothing exits zero and the re-apply then fails on an
 object that still exists.
 
+**PR 15 — the performance budget, and a spec target that cannot be met.** Task 3.19.
+
+`task build` and CI now fail when a route's first-load JS exceeds its gzipped budget.
+The check gzips the chunks itself: `next build` reports first-load JS *uncompressed*, and
+the two differ by about 3.3x here, so checking the reported number against a gzip budget
+would pass everything forever.
+
+**The spec's 180 KB target is not reachable and this PR does not pretend otherwise.**
+Measured 2026-09-18:
+
+| | gzipped |
+|---|---|
+| `/kundli/chart` first-load JS | **199.0 KB** |
+| Framework floor — React, react-dom, Next client runtime, before any product code | **159.5 KB** |
+| Two chunks with no product markers at all | 112 KB |
+| i18n dictionaries (both locales, in the root layout) | 14.8 KB |
+
+That leaves roughly 20 KB for everything Ayana does. The target was set without measuring
+the framework, and no amount of trimming product code reaches it — so it is recorded here
+as **an unmet spec item**, not quietly redefined. Closing it means either shipping one
+locale's dictionary instead of both (~15 KB), or a decision about the framework, and
+neither is a Phase 3 call.
+
+What the enforced budgets *do* buy is regression detection: each is the measured size plus
+a small allowance, so an import that drags in a date library or a second copy of a corpus
+fails the build on the PR that adds it. Four failure modes are break-tested — a route over
+budget, a budget naming a route the build does not produce, missing build stats, and a
+manifest naming a chunk that does not exist.
+
 **Two defects PR 12 found in existing code**, both invisible until the print route
 existed:
 
