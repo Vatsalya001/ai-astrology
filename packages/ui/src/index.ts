@@ -41,6 +41,34 @@ export const colors = {
   // Lightness raised; hue (226°) and saturation unchanged.
   ink: { DEFAULT: '#F2F3F8', muted: '#9AA3C0', faint: '#858DA8' },
 
+  /*
+    Ink for paper, which is the one place this palette inverts.
+
+    Every screen in the product is midnight navy with near-white text.
+    The Phase 3 PDF is a sheet of A4 that someone may actually print, and
+    printing a navy page costs a cartridge to produce something harder to
+    read than the default.
+
+    So `inkPrint` is a dark charcoal rather than pure black: #1A1F33 is
+    the navy base lifted to a printable lightness, which keeps the brand
+    hue on the page instead of dropping to a generic document. 14.8:1 on
+    white, so the footer's 60%-opacity disclaimer still clears AA.
+
+    Named separately rather than nested under `ink` because it is not a
+    shade of the same thing — it is the opposite end, and `text-ink-print`
+    on a navy screen would be invisible.
+
+    The key is QUOTED and hyphenated on purpose. Tailwind derives the
+    class name from the key verbatim, so `inkPrint` would produce
+    `text-inkPrint` — and `text-ink-print`, which is what reads correctly
+    in a component, would then name no colour at all. Tailwind drops an
+    unknown colour class silently: tsc sees a valid string, next build
+    succeeds, and the text renders in the inherited colour. There is a
+    computed-style assertion in the e2e suite because nothing else
+    catches this.
+  */
+  'ink-print': '#1A1F33',
+
   ok: '#4ADE80',
   warn: '#FBBF24',
   danger: '#F87171',

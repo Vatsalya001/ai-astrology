@@ -1,6 +1,6 @@
 # Project Status
 
-**Updated:** 2026-09-16
+**Updated:** 2026-09-18
 **Current phase:** 2 — Astrology Engine
 **Gate:** ✅ **CLOSED — 20 of 20** (Phase 0 ✅, Phase 1 ✅, Phase 2 ✅)
 **Repo:** https://github.com/Vatsalya001/ai-astrology (private)
@@ -480,3 +480,49 @@ Phase 2 built data entry only. Phase 3 is the visualisation: North and South Ind
 chart SVGs, the dasha timeline, the PDF worker. The chart SVG needs per-element
 `aria-label`s and a visually-hidden table duplicating the data — an SVG is meaningless
 to a screen reader otherwise.
+
+### Phase 3 progress
+
+PRs 1–11 shipped the chart SVG, the varga and style switchers, the planets, dasha,
+transit, yoga and dashboard screens, the i18n retrofit, and the glossary.
+
+**PR 12 — the PDF worker.** Task 3.15.
+
+The document is produced by driving headless Chrome at the app's own print route
+(`/kundli/print`) rather than by a Go PDF library — a library would be a second
+implementation of the chart, maintained in parallel with the one on screen, drifting
+silently because nobody looks at a PDF as often as a screen.
+
+That browser has no session, so it carries a **single-use print token**: 128 bits from
+`crypto/rand`, five-minute TTL, redeemed with Redis `GETDEL`, scoped to one user and one
+profile. The route it calls has no profile id in its path or query at all, so "trust the
+token but read the id from the request" — which turns any valid token into a reader for
+every chart — is a mistake the route cannot make rather than one it avoids.
+
+| Piece | Where |
+|---|---|
+| Print token, mint and redeem | `services/api/internal/charts/printtoken.go` |
+| The unauthenticated print route | `GET /api/v1/print/chart?token=` |
+| Everything the document renders, in one response | `charts/printbundle.go` |
+| Queue, status, renderer, browser | `services/api/internal/pdf/` |
+| The printed page | `apps/web/src/app/kundli/print/` |
+| The download control | `apps/web/src/components/chart/DownloadPdf.tsx` |
+
+`POST /charts/{id}/pdf` → 202 `{job_id}`; `GET /charts/{id}/pdf/{jobId}` → status, then a
+24-hour signed URL. Renders run on their own asynq queue so a slow one cannot sit in
+front of the transit refresh. Object keys are `kundli-{random}.pdf` — no name, no profile
+id, no job id, because keys turn up in bucket listings and access logs.
+
+**Two defects this PR found in existing code**, both invisible until the print route
+existed:
+
+- `birthprofiles.ErrNotFound` and `charts.ErrNotFound` are different sentinels, so the
+  handler's 404 branch never matched and the caller got a **500**. Unobservable while
+  every chart route sat behind `RequireProfileOwnership`, which 404s a stranger before
+  the service is reached. Fixed at the source in `charts.Service.profileFor`, so the two
+  routes that are still shielded by the middleware get the mapping too.
+- `analytics-emitted.test.ts` extracted declared events with a regex requiring an inline
+  `{ … }` payload, so any event typed as `Record<string, never>` was invisible to it in
+  **both** directions — skipped by "every declared event is emitted" and simultaneously
+  reported as undeclared. A guard that fails on correct code and passes over its own
+  case. Broadened, and the break test confirms it now catches what it missed.

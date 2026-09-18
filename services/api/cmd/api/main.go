@@ -16,11 +16,14 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/hibiken/asynq"
+
 	"github.com/Vatsalya001/ai-astrology/services/api/internal/auth"
 	"github.com/Vatsalya001/ai-astrology/services/api/internal/birthprofiles"
 	"github.com/Vatsalya001/ai-astrology/services/api/internal/charts"
 	"github.com/Vatsalya001/ai-astrology/services/api/internal/config"
 	"github.com/Vatsalya001/ai-astrology/services/api/internal/httpapi"
+	"github.com/Vatsalya001/ai-astrology/services/api/internal/pdf"
 	"github.com/Vatsalya001/ai-astrology/services/api/internal/places"
 	"github.com/Vatsalya001/ai-astrology/services/api/internal/platform/analytics"
 	"github.com/Vatsalya001/ai-astrology/services/api/internal/platform/audit"
@@ -199,6 +202,24 @@ func run() error {
 		WithAnalytics(events)
 	transitReader := transits.NewReader(queries)
 
+	/*
+	  The PDF side of the API: it mints nothing and renders nothing.
+
+	  This process enqueues a render and answers polls. The worker owns
+	  the browser, the object storage and the token minting; the only
+	  piece the API needs from that pipeline is the print-token store,
+	  because the print ROUTE — which the worker's browser calls back
+	  into — redeems from it.
+	*/
+	printTokens := charts.NewPrintTokens(charts.NewRedisPrintTokens(cache.Client))
+
+	pdfQueue := asynq.NewClient(asynq.RedisClientOpt{
+		Addr:     cache.Client.Options().Addr,
+		Password: cache.Client.Options().Password,
+		DB:       cache.Client.Options().DB,
+	})
+	defer func() { _ = pdfQueue.Close() }()
+
 	handler := httpapi.NewRouter(httpapi.Deps{
 		Config:     cfg,
 		DB:         database,
@@ -218,7 +239,13 @@ func run() error {
 		BirthProfiles: birthprofiles.NewHandler(
 			profileService, placeAdapter{placeService}, httpapi.AuthErrorWriter),
 		Places: places.NewHandler(placeService, httpapi.AuthErrorWriter),
-		Charts: charts.NewHandler(chartService, httpapi.AuthErrorWriter),
+		Charts: charts.NewHandler(chartService, httpapi.AuthErrorWriter).
+			WithPrintTokens(printTokens),
+		PDF: pdf.NewHandler(
+			asynqEnqueuer{pdfQueue},
+			pdf.NewStatusStore(cache.Client),
+			httpapi.AuthErrorWriter,
+		),
 		// The chart service supplies the natal Moon sign the gochara is
 		// rotated onto. Passed as an interface the transits package
 		// declares, so neither domain imports the other.
@@ -288,4 +315,18 @@ func (a placeAdapter) Get(ctx context.Context, id int32) (birthprofiles.Place, e
 		Longitude: place.Longitude,
 		Timezone:  place.Timezone,
 	}, nil
+}
+
+// asynqEnqueuer adapts *asynq.Client to the one-method interface the
+// pdf handler declares.
+//
+// asynq.Client.Enqueue returns (*TaskInfo, error) and the handler wants
+// only the error — it already knows the job id, having minted it. The
+// adapter lives here, in the composition root, so neither package has
+// to know about the other's shape.
+type asynqEnqueuer struct{ client *asynq.Client }
+
+func (e asynqEnqueuer) Enqueue(task *asynq.Task) error {
+	_, err := e.client.Enqueue(task)
+	return err
 }

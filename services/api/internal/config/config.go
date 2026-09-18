@@ -107,6 +107,16 @@ type Config struct {
 	// raising.
 	WorkerConcurrency int `env:"WORKER_CONCURRENCY" envDefault:"2" validate:"required,min=1,max=64"`
 
+	// ChromePath is the browser the PDF renderer drives.
+	//
+	// Explicit rather than discovered on PATH. Discovery means a worker
+	// image built without a browser starts cleanly and fails on the
+	// first user's download; a named path fails at startup, where
+	// somebody is looking. Empty disables PDF rendering entirely, which
+	// is the right behaviour for the API process — it enqueues renders
+	// and never performs one.
+	ChromePath string `env:"CHROME_PATH" envDefault:""`
+
 	// ─── Feature flags ──────────────────────────────────────────
 	FeatureAIChat        bool `env:"FEATURE_AI_CHAT_ENABLED"          envDefault:"false"`
 	FeatureVoice         bool `env:"FEATURE_VOICE_ENABLED"            envDefault:"false"`

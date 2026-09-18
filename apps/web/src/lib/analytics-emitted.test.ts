@@ -65,9 +65,24 @@ function declaredEvents(): string[] {
   const end = source.indexOf('\n}', start)
   const body = source.slice(start, end)
 
-  // `  event_name: { ... }` at two spaces of indent. Comments start with
-  // `//` and are skipped by the leading-newline anchor.
-  return [...body.matchAll(/\n {2}([a-z][a-z0-9_]*):\s*\{/g)].map((m) => m[1]!)
+  /*
+    `  event_name: <anything>` at two spaces of indent. Comments start
+    with `//` or ` *` and are skipped by the leading-newline anchor plus
+    the required lower-case first character.
+
+    The payload is deliberately NOT required to be an inline `{ … }`.
+    It was, and that quietly excluded every event whose payload is a
+    named type or a utility type — `Record<string, never>` for an event
+    with no fields, say. Such an event was invisible to this file in
+    BOTH directions: absent from `declaredEvents()`, so "has a call
+    site for every declared event" skipped it, and simultaneously
+    reported by "emits nothing that is not declared" as undeclared,
+    because the emitting code plainly calls it.
+
+    That is the worst shape for a guard — it fails on correct code and
+    passes over the case it was written to catch.
+  */
+  return [...body.matchAll(/\n {2}([a-z][a-z0-9_]*):\s*\S/g)].map((m) => m[1]!)
 }
 
 /**

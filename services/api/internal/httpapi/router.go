@@ -8,6 +8,7 @@ import (
 	"github.com/Vatsalya001/ai-astrology/services/api/internal/birthprofiles"
 	"github.com/Vatsalya001/ai-astrology/services/api/internal/charts"
 	"github.com/Vatsalya001/ai-astrology/services/api/internal/config"
+	"github.com/Vatsalya001/ai-astrology/services/api/internal/pdf"
 	"github.com/Vatsalya001/ai-astrology/services/api/internal/places"
 	"github.com/Vatsalya001/ai-astrology/services/api/internal/platform/clients"
 	"github.com/Vatsalya001/ai-astrology/services/api/internal/platform/db"
@@ -58,6 +59,11 @@ type Deps struct {
 	Places        *places.Handler
 	Charts        *charts.Handler
 	Transits      *transits.Handler
+
+	// PDF is nil until the queue and object storage are wired. Nil means
+	// the two PDF routes are simply not mounted — a route that exists
+	// and 500s is worse than one that 404s.
+	PDF *pdf.Handler
 	// ProfileOwner gates the chart and transit subtrees. Required
 	// whenever those are mounted; see mountAstrology.
 	ProfileOwner ProfileOwnership
@@ -370,6 +376,29 @@ func mountAstrology(r chi.Router, d Deps) {
 	// Every route addresses a birth profile, so the whole subtree sits
 	// behind the ownership check — there is no collection endpoint here
 	// to leave outside it.
+	/*
+	  The print route, mounted OUTSIDE `/charts` — not inside it.
+
+	  Its caller is headless Chrome on the PDF worker, which has no
+	  session, so it cannot sit under `authenticate`. The single-use
+	  token it carries IS the authorisation: redeeming it yields the
+	  user and the profile the worker scoped it to.
+
+	  It is a sibling rather than a child because `/charts` applies
+	  `authenticate` with `r.Use` to its whole subtree. A `/charts/print`
+	  registered inside that block would be authenticated no matter what
+	  the comment above it claimed, and chi cannot mount `/charts/print`
+	  on the parent while `/charts` is itself mounted.
+
+	  There is no profile id in the path or the query — only `?token=`.
+	  So "trust the token but read the id from the request", which turns
+	  any valid token into a reader for every chart, is not a mistake
+	  this route is able to make.
+	*/
+	if d.Charts != nil {
+		r.Get("/print/chart", d.Charts.Print)
+	}
+
 	if d.Charts != nil {
 		r.Route("/charts", func(r chi.Router) {
 			r.Use(authenticate)
@@ -397,6 +426,24 @@ func mountAstrology(r chi.Router, d Deps) {
 				// unconditionally, so it carries its own per-user limit on
 				// top of the global per-IP backstop.
 				r.Post("/{birthProfileId}/recompute", d.Charts.Recompute(d.Limiter))
+
+				/*
+				  PDF generation, inside the ownership group.
+
+				  Both routes address a birth profile, so both belong here
+				  — and both read the profile from the context the
+				  middleware filled rather than from the URL.
+
+				  The polling route needs one thing this group cannot give
+				  it: the job id in its path is not a profile, so the
+				  middleware says nothing about who owns it. That check is
+				  in the status key, which is composed from the
+				  authenticated user. See pdf/status.go.
+				*/
+				if d.PDF != nil {
+					r.Post("/{birthProfileId}/pdf", d.PDF.Create)
+					r.Get("/{birthProfileId}/pdf/{jobId}", d.PDF.Status)
+				}
 			})
 		})
 	}

@@ -6,6 +6,7 @@ import { useEffect, useState } from 'react'
 import type { ChartStyle } from '@ayana/astrology-geometry'
 
 import { ChartSVG } from '@/components/chart/ChartSVG'
+import { DownloadPdf } from '@/components/chart/DownloadPdf'
 import { StyleSwitcher } from '@/components/chart/StyleSwitcher'
 import { VargaSwitcher } from '@/components/chart/VargaSwitcher'
 import { parseChartData } from '@/components/chart/parse'
@@ -156,6 +157,11 @@ export default function ChartPage() {
     setAttempt((n) => n + 1)
   }
 
+  // Derived rather than stored: one source for "which profile is this",
+  // shared with the fetch above, so the download cannot address a
+  // different chart from the one rendered.
+  const shownProfile = resolveProfile(profiles, selectedId)
+
   return (
     <main id="main" className="mx-auto max-w-2xl px-4 py-8 sm:px-6">
       <header className="mb-6 flex flex-wrap items-baseline justify-between gap-3">
@@ -214,6 +220,23 @@ export default function ChartPage() {
               {t.chart.seePositions}
             </Link>
           </p>
+
+          {/*
+            The download, mounted here rather than left for a later PR.
+
+            An endpoint nobody calls is the same defect as a component
+            nobody can open — which this screen already exists to fix.
+            The profile is DERIVED here, by the same `resolveProfile`
+            the fetch used — not stored in a second piece of state that
+            could disagree with the chart on screen. The button must ask
+            for the chart the reader is looking at, not for whichever
+            profile happens to be default.
+          */}
+          {shownProfile && (
+            <div className="mt-8 flex justify-center">
+              <DownloadPdf profileId={shownProfile.id} />
+            </div>
+          )}
         </>
       )}
     </main>

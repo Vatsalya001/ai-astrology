@@ -104,6 +104,19 @@ func run() error {
 		return err
 	}
 
+	// ─── The PDF renderer ───────────────────────────────────────
+	//
+	// Registered only when the pieces it needs are configured. A worker
+	// with no object storage can still refresh transits and sweep
+	// deletions; refusing to boot would take those down too.
+	//
+	// The consequence of not registering is logged loudly, because the
+	// symptom otherwise is downloads that queue and never complete —
+	// which looks like slowness rather than absence.
+	if err := registerPDFRenderer(ctx, cfg, cache.Client, runtime, log); err != nil {
+		return err
+	}
+
 	if err := runtime.Start(); err != nil {
 		return err
 	}

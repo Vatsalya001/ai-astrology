@@ -295,6 +295,39 @@ export const en = {
       'Planetary positions: sign, degree, house, nakshatra and dignity for each planet.',
     srTableCaption: 'Planetary positions — the same data as the chart above, as a table.',
 
+    // ─── The printed document ──────────────────────────────────
+    //
+    // Rendered by headless Chrome on the PDF worker, which reads the
+    // locale from the URL rather than from localStorage. These strings
+    // appear on paper, so they are a little more formal than the screen
+    // copy and they never refer to tapping anything.
+    printTitle: 'Kundli',
+    printFor: 'Prepared for {name}',
+    printBornOn: 'Born {date} at {time}, {place}',
+    printBornOnNoTime: 'Born {date}, {place} — birth time not recorded',
+    printRasi: 'Rasi chart (D1)',
+    printNavamsa: 'Navamsa chart (D9)',
+    printDasamsa: 'Dasamsa chart (D10)',
+    printPositions: 'Planetary positions',
+    printDashaTitle: 'Mahadasha sequence',
+    printDashaCurrent: 'Running now',
+    printNoDashas:
+      'Dasha periods need a birth time. This chart was computed without one, so the timeline is not shown.',
+    printGeneratedAt: 'Generated {date}',
+    printEngine: 'Computed by {engine}, {ayanamsa} ayanamsa',
+    printDisclaimer:
+      'Traditional Vedic astrology, computed from ephemeris data. Offered for reflection, not as advice on health, legal or financial matters.',
+    printInvalid: 'This print link is no longer valid.',
+
+    // The download control, on the chart screen.
+    downloadPdf: 'Download PDF',
+    downloadPreparing: 'Preparing your PDF…',
+    downloadReady: 'Your PDF is ready',
+    downloadOpen: 'Open PDF',
+    downloadFailed: 'We could not build your PDF. Please try again.',
+    downloadExpires: 'This link works for 24 hours.',
+    printFailed: 'This document could not be prepared.',
+
     colPlanet: 'Planet',
     colSign: 'Sign',
     colDegree: 'Degree',
@@ -650,6 +683,34 @@ export const hi: Dictionary = {
     planetsEmpty: 'इस कुंडली के लिए कोई ग्रह स्थिति नहीं।',
     planetsCaption: 'ग्रह स्थितियाँ: हर ग्रह की राशि, अंश, भाव, नक्षत्र और बल।',
     srTableCaption: 'ग्रह स्थितियाँ — ऊपर की कुंडली का ही डेटा, तालिका के रूप में।',
+
+    // ─── The printed document ──────────────────────────────────
+    printTitle: 'कुंडली',
+    printFor: '{name} के लिए',
+    printBornOn: 'जन्म {date}, {time} बजे, {place}',
+    printBornOnNoTime: 'जन्म {date}, {place} — जन्म समय दर्ज नहीं है',
+    printRasi: 'राशि कुंडली (D1)',
+    printNavamsa: 'नवांश कुंडली (D9)',
+    printDasamsa: 'दशांश कुंडली (D10)',
+    printPositions: 'ग्रह स्थितियाँ',
+    printDashaTitle: 'महादशा क्रम',
+    printDashaCurrent: 'अभी चल रही है',
+    printNoDashas:
+      'दशा काल के लिए जन्म समय आवश्यक है। यह कुंडली बिना समय के बनी है, इसलिए दशा क्रम नहीं दिखाया गया।',
+    printGeneratedAt: '{date} को बनाया गया',
+    printEngine: '{engine} द्वारा गणना, {ayanamsa} अयनांश',
+    printDisclaimer:
+      'पारंपरिक वैदिक ज्योतिष, ऍफ़ेमेरिस डेटा से गणना की गई। चिंतन के लिए प्रस्तुत, स्वास्थ्य, कानूनी या वित्तीय सलाह के रूप में नहीं।',
+    printInvalid: 'यह प्रिंट लिंक अब मान्य नहीं है।',
+
+    // The download control, on the chart screen.
+    downloadPdf: 'PDF डाउनलोड करें',
+    downloadPreparing: 'आपकी PDF तैयार हो रही है…',
+    downloadReady: 'आपकी PDF तैयार है',
+    downloadOpen: 'PDF खोलें',
+    downloadFailed: 'आपकी PDF नहीं बन सकी। कृपया फिर से कोशिश करें।',
+    downloadExpires: 'यह लिंक 24 घंटे तक काम करेगा।',
+    printFailed: 'यह दस्तावेज़ तैयार नहीं हो सका।',
 
     colPlanet: 'ग्रह',
     colSign: 'राशि',

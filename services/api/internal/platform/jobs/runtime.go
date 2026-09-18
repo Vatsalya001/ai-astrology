@@ -42,7 +42,7 @@ func NewRuntime(redisURL string, concurrency int, logger *slog.Logger) (*Runtime
 
 	server := asynq.NewServer(connection, asynq.Config{
 		Concurrency: concurrency,
-		Queues:      map[string]int{QueueDefault: 1},
+		Queues:      Queues(),
 		Logger:      adapter,
 		LogLevel:    asynq.InfoLevel,
 
