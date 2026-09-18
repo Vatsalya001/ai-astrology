@@ -678,6 +678,44 @@ correct when written and is now replaced. The rule it protected has not changed:
 shown must be the ones the API sent, and a break test confirms deriving them in TypeScript
 fails.
 
+**PR 18 — the Sade Sati dates were wrong, and the test only checked one sign.**
+
+PR 17 shipped the dates with a test that verified the span was ~7.5 years **for Pisces**.
+Asking the running engine for all twelve revealed:
+
+```
+Gemini       2007-01-10 -> 2007-07-15   0.51 years
+Cancer       2006-10-31 -> 2009-09-09   2.86 years
+Capricorn    2023-01-17 -> 2025-03-29   2.20 years
+```
+
+Two distinct bugs, both producing plausible-looking dates:
+
+1. **The wrong stretch.** `sade_sati_window` returns the first stretch inside the search
+   span. Over forty years most Moon signs have one in the past — so nine of twelve were
+   reporting dates from 2006–2017 while claiming to describe today.
+2. **A sign change mistaken for an entry.** Walking back for the start accepted any
+   in-stretch ingress whose last *outside* ingress was long ago — true of every crossing
+   deep inside the stretch. A Capricorn Moon got Saturn's move into Aquarius, five years
+   late.
+
+Replaced by `sade_sati_window_at`, which starts from the instant asked about, refuses
+immediately when Saturn is not in the stretch, and walks out both ways from there. The
+backward walk now finds the most recent *real* boundary — an outside ingress that is not a
+retrograde dip — and takes the first in-stretch ingress after it.
+
+**Also 68 seconds → 5.1 seconds.** The endpoint scanned the ephemeris once per sign; the
+scan is the entire cost and does not depend on the Moon sign. Twelve signs now share one
+scan. That 68 seconds was not academic — the worker's first real call timed out and the
+windows were never stored, which is how the wrong dates were noticed at all.
+
+Verified against the running engine: **3 of 12** signs in Sade Sati (Saturn is in Pisces,
+so Aries/Pisces/Aquarius), spans 7.17–8.08 years, and the worker stores exactly those
+three.
+
+The missing test now checks **every** sign, that each window contains the instant it was
+computed for, and that roughly three signs are running at once.
+
 **Two defects PR 12 found in existing code**, both invisible until the print route
 existed:
 

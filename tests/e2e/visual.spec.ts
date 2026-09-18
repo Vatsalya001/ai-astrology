@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test'
 
-import { uniqueEmail, watchOTP } from './otp-log'
+import { uniquePhone, watchOTP } from './otp-log'
 
 /**
  * The visual regression suite.
@@ -63,11 +63,28 @@ test.describe.configure({ mode: 'serial' })
  * a label derived from it. Same account, same chart, every time.
  */
 async function signUpWithAProfile(page: Page): Promise<void> {
-  const email = uniqueEmail('v')
-  const otp = watchOTP(email)
+  /*
+    Phone, not email — because the email alphabet is full.
+
+    `mask-letters.spec.ts` enforces that no two specs share the letter
+    their masked identifier is recognised by: specs run in parallel and
+    read OTPs from the same API log, so two that collide read each
+    other's codes. The failure presents as "wrong code", which looks
+    like broken authentication rather than a collision.
+
+    It caught this file twice — first on 'v' (flows.spec.ts), then on
+    'g' (settings.spec.ts) — and a third attempt found every letter
+    a..z already taken. That guard's own docstring anticipates this:
+    "until the email alphabet ran out and a spec had to switch
+    channels". So this one switches, with a phone tail no other spec
+    uses.
+  */
+  const phone = uniquePhone('742')
+  const otp = watchOTP(phone)
 
   await page.goto('/auth')
-  await page.getByLabel(/email/i).fill(email)
+  await page.getByRole('button', { name: /use phone instead/i }).click()
+  await page.getByLabel(/phone number/i).fill(phone)
   await page.getByRole('button', { name: /^continue$/i }).click()
   await page.locator('input[autocomplete="one-time-code"]').fill(await otp.next())
 

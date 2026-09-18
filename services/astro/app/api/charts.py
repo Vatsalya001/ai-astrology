@@ -34,7 +34,12 @@ from app.core.chart import (
 from app.core.constants import SIGNS, Planet
 from app.core.dasha import DashaPeriod, build_vimshottari
 from app.core.ephemeris import SkyfieldEphemeris
-from app.core.transit import compute_transits, sade_sati_at, sade_sati_window
+from app.core.transit import (
+    compute_transits,
+    find_saturn_ingresses,
+    sade_sati_at,
+    sade_sati_window_at,
+)
 from app.core.yoga import detect_all
 from app.schemas.chart import (
     CHART_SCHEMA_VERSION,
@@ -326,13 +331,11 @@ def compute_transit(request: TransitRequest) -> TransitResponse:
     )
     sade_sati = sade_sati_at(_ephemeris(), _ayanamsa(), t, request.natal_moon_sign, system)
 
-    # The window, for "when does this end" — the question people actually
-    # ask about Sade Sati. Forty years either side of `at` brackets one
-    # 7.5-year stretch comfortably, given Saturn's ~29.5-year orbit.
-    timescale = _timescale()
-    span = timescale.tt_jd(t.tt - 20 * 365.25), timescale.tt_jd(t.tt + 20 * 365.25)
-    found = sade_sati_window(
-        _ephemeris(), _ayanamsa(), timescale, span[0], span[1], request.natal_moon_sign, system
+    # The window CONTAINING `at` — "when does this end" is about the
+    # stretch the person is in, not about whichever one a wide scan
+    # happens to meet first.
+    found = sade_sati_window_at(
+        _ephemeris(), _ayanamsa(), _timescale(), t, request.natal_moon_sign, system
     )
     started_at = _to_datetime(found[0]) if found else None
     ends_at = _to_datetime(found[1]) if found else None
@@ -389,13 +392,28 @@ def compute_sade_sati_windows(
     system = AyanamsaSystem(request.ayanamsa)
     timescale = _timescale()
 
+    # ONE ephemeris scan, shared by all twelve signs.
+    #
+    # The scan is the entire cost and it does not depend on the Moon
+    # sign — only the cheap set arithmetic downstream does. Scanning per
+    # sign made this endpoint take 68 seconds, which is past every
+    # sensible client timeout: the worker's first call failed on exactly
+    # that and the windows were never stored.
     half = request.search_years / 2.0
-    start = timescale.tt_jd(t.tt - half * 365.25)
-    end = timescale.tt_jd(t.tt + half * 365.25)
+    ingresses = find_saturn_ingresses(
+        _ephemeris(),
+        _ayanamsa(),
+        timescale,
+        timescale.tt_jd(t.tt - half * 365.25),
+        timescale.tt_jd(t.tt + half * 365.25),
+        system,
+    )
 
     windows: list[SadeSatiWindow] = []
     for sign in range(12):
-        found = sade_sati_window(_ephemeris(), _ayanamsa(), timescale, start, end, sign, system)
+        found = sade_sati_window_at(
+            _ephemeris(), _ayanamsa(), timescale, t, sign, system, ingresses=ingresses
+        )
         windows.append(
             SadeSatiWindow(
                 moon_sign_index=sign,

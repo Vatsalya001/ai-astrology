@@ -176,6 +176,172 @@ def sade_sati_at(
     )
 
 
+def sade_sati_window_at(
+    ephemeris: EphemerisProvider,
+    ayanamsa: AyanamsaCalculator,
+    timescale: Timescale,
+    at: Time,
+    natal_moon_sign: int,
+    system: AyanamsaSystem = AyanamsaSystem.LAHIRI,
+    ingresses: tuple[tuple[Time, int], ...] | None = None,
+) -> tuple[Time, Time] | None:
+    """The stretch CONTAINING `at`, or None if Saturn is not in it now.
+
+    ── Why this exists alongside `sade_sati_window` ──
+
+    `sade_sati_window` answers "the first stretch inside this window",
+    which is the right question when you are scanning history and the
+    wrong one when a person asks "when does MINE end". Over a forty-year
+    span most Moon signs have a stretch somewhere in the past, and that
+    is what the older function returns — dates twenty years stale,
+    looking entirely plausible.
+
+    It also cannot tell an ENTRY from a sign change WITHIN the stretch.
+    If Saturn is already in the 12th at the start of the span, the first
+    ingress found is 12th → 1st, and the reported window is the tail of a
+    stretch rather than the whole of one. Both failures produce a short
+    window: six months, or three years, where Sade Sati is about seven
+    and a half.
+
+    This one starts from `at`, refuses immediately when Saturn is not in
+    the stretch, and walks out in both directions from there. There is no
+    span for it to pick the wrong stretch out of.
+
+    ── `ingresses` ──
+
+    The ephemeris scan is the whole cost — about five seconds — and it
+    does not depend on the Moon sign. Passing a precomputed list lets
+    twelve signs share one scan, which is the difference between a
+    sixty-eight-second request and a five-second one.
+    """
+    sade_sati_signs = {
+        (natal_moon_sign + offset) % HOUSE_COUNT
+        for offset in (-1, 0, 1)  # 12th, 1st, 2nd from the Moon
+    }
+
+    # Not in it now, so there is no window to report. Checked first
+    # because it is one ephemeris call and it settles most signs.
+    if _saturn_sign_at(ephemeris, ayanamsa, at, system) not in sade_sati_signs:
+        return None
+
+    if ingresses is None:
+        # Wide enough to bracket one stretch either side of `at`: Saturn
+        # spends ~2.5 years per sign, so a 7.5-year stretch plus slack
+        # fits comfortably in twelve years each way.
+        span = 12 * 365.25
+        ingresses = find_saturn_ingresses(
+            ephemeris,
+            ayanamsa,
+            timescale,
+            timescale.tt_jd(at.tt - span),
+            timescale.tt_jd(at.tt + span),
+            system,
+        )
+
+    before = [(t, sign) for t, sign in ingresses if t.tt <= at.tt]
+    after = [(t, sign) for t, sign in ingresses if t.tt > at.tt]
+
+    entry = _walk_back_to_entry(before, sade_sati_signs)
+    exit_ = _walk_forward_to_exit(after, sade_sati_signs)
+
+    if entry is None or exit_ is None:
+        # One end lies outside the scan. Reporting the other alone would
+        # be a window with one edge, and guessing the missing one would
+        # be inventing a date somebody plans around.
+        return None
+
+    return entry, exit_
+
+
+def _walk_back_to_entry(
+    before: list[tuple[Time, int]],
+    sade_sati_signs: set[int],
+) -> Time | None:
+    """The ingress that began the stretch Saturn is in now.
+
+    ── The mistake this is written against ──
+
+    The obvious version asks, of each in-stretch ingress going backwards,
+    "was the last outside ingress long ago?" — and that is true of every
+    ingress DEEP INSIDE the stretch, not only of the entry. It reported
+    Saturn's move into Aquarius as the start of a Capricorn Moon's Sade
+    Sati: a real boundary, but the 12th-to-1st one, five years late. The
+    window came out at 2.2 years instead of 8.2.
+
+    ── What it does instead ──
+
+    It finds the most recent REAL boundary before `at` — an outside
+    ingress that is not a retrograde dip — and takes the first in-stretch
+    ingress after it. That is the entry by construction, because Saturn
+    was demonstrably outside immediately before it.
+
+    A retrograde dip is an outside ingress followed by a return to the
+    stretch within SETTLED_DAYS. Saturn's retrograde arc is about 140
+    days; SETTLED_DAYS is well beyond it and well inside the ~22 years
+    before the stretch could genuinely be re-entered.
+    """
+    boundary_index: int | None = None
+
+    for index in range(len(before) - 1, -1, -1):
+        _, sign = before[index]
+        if sign in sade_sati_signs:
+            continue
+
+        moment, _ = before[index]
+        returns = [
+            t
+            for t, s in before[index + 1 :]
+            if s in sade_sati_signs and t.tt - moment.tt <= SETTLED_DAYS
+        ]
+        if returns:
+            # Saturn came straight back: a dip, not a boundary.
+            continue
+
+        boundary_index = index
+        break
+
+    if boundary_index is None:
+        # No sustained outside period in the scan, so the entry is older
+        # than the window reaches. Reporting the oldest ingress we happen
+        # to have would be a date that looks precise and is not.
+        return None
+
+    for moment, sign in before[boundary_index + 1 :]:
+        if sign in sade_sati_signs:
+            return moment
+
+    # Saturn is inside now but never ingressed after the boundary, which
+    # can only happen if the boundary is the last ingress before `at` and
+    # Saturn re-entered without a recorded crossing. Not representable.
+    return None
+
+
+def _walk_forward_to_exit(
+    after: list[tuple[Time, int]],
+    sade_sati_signs: set[int],
+) -> Time | None:
+    """The exit Saturn does not come back from.
+
+    The same walk `sade_sati_window` does, and the same reasoning: not
+    the last exit in the scan, because once Saturn has left, every
+    subsequent sign change is also an ingress into a non-stretch sign.
+    Not the first, because a retrograde dip back into the 2nd would end
+    the period up to nine months early.
+    """
+    for index, (moment, sign) in enumerate(after):
+        if sign in sade_sati_signs:
+            continue
+        returns = [
+            t
+            for t, s in after[index + 1 :]
+            if s in sade_sati_signs and t.tt - moment.tt <= SETTLED_DAYS
+        ]
+        if not returns:
+            return moment
+
+    return None
+
+
 def _saturn_sign_at(
     ephemeris: EphemerisProvider,
     ayanamsa: AyanamsaCalculator,
