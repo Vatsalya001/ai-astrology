@@ -26,6 +26,8 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgtype"
+
 	"github.com/Vatsalya001/ai-astrology/services/api/internal/platform/clients"
 	"github.com/Vatsalya001/ai-astrology/services/api/internal/platform/db/dbgen"
 )
@@ -126,12 +128,79 @@ func (r *Refresher) Refresh(ctx context.Context, at time.Time) (int, error) {
 		written++
 	}
 
+	/*
+	   The Sade Sati windows, in the same pass.
+
+	   Best-effort, and deliberately after the positions are safely
+	   stored. A failure here costs the END DATES; a failure that took
+	   the positions down with it would cost the whole transits screen,
+	   and "Saturn is in your 12th" without "until March 2027" is far
+	   better than nothing at all.
+
+	   Logged at error level because a stale window is not obviously
+	   wrong on screen — it is a date that is quietly a few hours out of
+	   step with the positions beside it, and nothing else would notice.
+	*/
+	if err := r.refreshSadeSatiWindows(ctx, slot); err != nil {
+		r.logger.ErrorContext(ctx, "sade sati windows not refreshed",
+			slog.Time("slot", slot),
+			slog.String("consequence", "end dates stay as they were; positions are current"),
+			slog.Any("err", err))
+	}
+
 	r.logger.InfoContext(ctx, "transits refreshed",
 		slog.Time("slot", slot),
 		slog.Int("planets", written),
 		slog.String("ayanamsa", response.Ayanamsa))
 
 	return written, nil
+}
+
+// refreshSadeSatiWindows stores one row per natal Moon sign.
+//
+// Twelve rows, upserted on the sign, so a retry or a second replica
+// rewrites rather than duplicates — the same reasoning as UpsertTransit.
+func (r *Refresher) refreshSadeSatiWindows(ctx context.Context, slot time.Time) error {
+	response, err := r.astro.ComputeSadeSatiWindows(ctx, slot)
+	if err != nil {
+		return fmt.Errorf("transits: sade sati windows %s: %w", slot.Format(time.RFC3339), err)
+	}
+
+	if len(response.Windows) != SignCount {
+		// A short response would silently leave some signs on stale rows
+		// while others moved, and nothing downstream could tell.
+		return fmt.Errorf("transits: astro returned %d sade sati windows, want %d",
+			len(response.Windows), SignCount)
+	}
+
+	for _, window := range response.Windows {
+		params := dbgen.UpsertSadeSatiWindowParams{
+			MoonSignIndex: int16(window.MoonSignIndex),
+			MoonSign:      window.MoonSign,
+			ComputedFor:   slot,
+		}
+
+		/*
+		   Both dates or neither.
+
+		   The column CHECK enforces the pair, so a half-populated row is
+		   refused by Postgres rather than stored. Mapping them together
+		   here means that refusal never fires for a reason this code
+		   could have prevented — and if it ever does, it is astro
+		   disagreeing with itself, which is worth failing loudly for.
+		*/
+		if window.StartedAt != nil && window.EndsAt != nil {
+			params.StartedAt = pgtype.Timestamptz{Time: *window.StartedAt, Valid: true}
+			params.EndsAt = pgtype.Timestamptz{Time: *window.EndsAt, Valid: true}
+		}
+
+		if _, err := r.q.UpsertSadeSatiWindow(ctx, params); err != nil {
+			return fmt.Errorf("transits: store sade sati window for sign %d: %w",
+				window.MoonSignIndex, err)
+		}
+	}
+
+	return nil
 }
 
 // Prune deletes rows older than the retention window.

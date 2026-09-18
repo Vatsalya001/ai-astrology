@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -13,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -63,7 +65,51 @@ type stubAstro struct {
 	down     bool
 	// saturnSign can be moved between tests to drive the Sade Sati cases.
 	saturnSign int
+	// shortWindows makes the windows endpoint return fewer than twelve,
+	// which is the failure the refresher's length check exists for.
+	shortWindows bool
 }
+
+func (s *stubAstro) setShortWindows(short bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.shortWindows = short
+}
+
+// windowsResponse is twelve windows, one per Moon sign.
+//
+// Only the sign whose Saturn placement the test is driving gets real
+// dates; the rest are null, which is the honest shape — at any instant
+// most Moon signs are nowhere near their Sade Sati.
+func (s *stubAstro) windowsResponse() []byte {
+	count := 12
+	if s.shortWindows {
+		count = 5
+	}
+
+	windows := make([]string, 0, count)
+	for sign := 0; sign < count; sign++ {
+		dates := `"started_at":null,"ends_at":null`
+		if sign == stubWindowSign {
+			dates = `"started_at":"2023-01-17T00:00:00Z","ends_at":"2030-06-03T00:00:00Z"`
+		}
+		windows = append(windows, fmt.Sprintf(
+			`{"moon_sign_index":%d,"moon_sign":%q,%s}`,
+			sign, transits.SignNames[sign], dates))
+	}
+
+	return []byte(fmt.Sprintf(
+		`{"at":"2026-09-16T12:00:00Z","ayanamsa":"lahiri","windows":[%s]}`,
+		strings.Join(windows, ",")))
+}
+
+// The one sign the stub gives a real window to.
+//
+// Capricorn, because the stub's Saturn sits in Capricorn — so this is
+// also the sign that is actually IN Sade Sati (Saturn over the Moon,
+// the peak phase). A window on a sign that is not in the stretch would
+// be a fixture that cannot exercise the path where the two meet.
+const stubWindowSign = capricorn
 
 type harness struct {
 	pool      *pgxpool.Pool
@@ -104,6 +150,21 @@ func newHarness(t *testing.T) (*harness, func()) {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
+
+		/*
+		   Path-aware, because the refresher now calls two endpoints.
+
+		   A stub that answered every path with the transit body looked
+		   like it worked: the windows call decoded into an empty
+		   response, the refresher logged "not refreshed" and carried on,
+		   and the twelve rows were never written while every assertion
+		   about POSITIONS still passed. A one-response stub is a stub
+		   that tests one of two things and reports on both.
+		*/
+		if strings.Contains(r.URL.Path, "sade-sati/windows") {
+			_, _ = w.Write(stub.windowsResponse())
+			return
+		}
 		_, _ = w.Write(stub.response())
 	}))
 
@@ -199,16 +260,35 @@ func TestRefreshComputesAtTheSlotBoundaryNotAtWakeUpTime(t *testing.T) {
 		t.Fatalf("Refresh: %v", err)
 	}
 
+	/*
+	   EVERY call must name the slot, not just the first.
+
+	   This counted calls and required exactly one, which was scaffolding
+	   rather than the subject — and it broke the moment the refresher
+	   grew a second call for the Sade Sati windows. Asserting the
+	   property over all calls is both on-subject and stronger: the
+	   window rows record `computed_for`, so they have to be reproducible
+	   from their own key for the same reason the positions do.
+	*/
 	calls := h.astro.calls()
-	if len(calls) != 1 {
-		t.Fatalf("expected one call to astro, got %d", len(calls))
+	if len(calls) == 0 {
+		t.Fatal("astro was never called")
 	}
 
-	asked, _ := time.Parse(time.RFC3339, calls[0]["at"].(string))
-	if !asked.Equal(slotStart) {
-		t.Fatalf("astro was asked for %s but the slot is %s — "+
-			"a stored row is then not reproducible from its own key",
-			asked.Format(time.RFC3339), slotStart.Format(time.RFC3339))
+	for i, call := range calls {
+		raw, ok := call["at"].(string)
+		if !ok {
+			t.Fatalf("call %d carried no `at`: %v", i, call)
+		}
+		asked, err := time.Parse(time.RFC3339, raw)
+		if err != nil {
+			t.Fatalf("call %d asked for an unparseable instant %q: %v", i, raw, err)
+		}
+		if !asked.Equal(slotStart) {
+			t.Fatalf("call %d asked astro for %s but the slot is %s — "+
+				"a stored row is then not reproducible from its own key",
+				i, asked.Format(time.RFC3339), slotStart.Format(time.RFC3339))
+		}
 	}
 
 	var stored time.Time
@@ -658,5 +738,194 @@ func startPostgres(ctx context.Context, t *testing.T) (*pgxpool.Pool, func()) {
 	return pool, func() {
 		pool.Close()
 		_ = container.Terminate(context.Background())
+	}
+}
+
+// ─── Sade Sati windows ───────────────────────────────────────────────
+
+/*
+The twelve windows are stored, and served from storage.
+
+"When does this end" is the question people actually ask about Sade
+Sati, and the answer has to survive astro being unreachable — which
+is why it is a table rather than a call on the request path.
+*/
+func TestRefreshStoresAWindowForEveryMoonSign(t *testing.T) {
+	ctx := context.Background()
+	h, cleanup := newHarness(t)
+	defer cleanup()
+
+	if _, err := h.refresher.Refresh(ctx, runAt); err != nil {
+		t.Fatalf("Refresh: %v", err)
+	}
+
+	var stored int
+	if err := h.pool.QueryRow(ctx,
+		`SELECT COUNT(*) FROM sade_sati_windows`).Scan(&stored); err != nil {
+		t.Fatalf("count windows: %v", err)
+	}
+	if stored != 12 {
+		t.Fatalf("stored %d windows, want one per Moon sign. A short write leaves "+
+			"some signs on stale dates while others move, and nothing downstream "+
+			"can tell", stored)
+	}
+
+	// Each row records the instant it was computed FOR, so it can be
+	// reproduced by asking astro for that instant again.
+	var computedFor time.Time
+	if err := h.pool.QueryRow(ctx,
+		`SELECT computed_for FROM sade_sati_windows WHERE moon_sign_index = 0`,
+	).Scan(&computedFor); err != nil {
+		t.Fatalf("read computed_for: %v", err)
+	}
+	if !computedFor.UTC().Equal(slotStart) {
+		t.Fatalf("window computed_for is %s, want the slot %s",
+			computedFor.UTC(), slotStart)
+	}
+}
+
+/*
+A sign with no window stores NULLs, not invented dates.
+
+Saturn returns every ~29.5 years, so at any instant most Moon signs
+are nowhere near their stretch. Those must come back as absent — a
+fabricated date is worse than no date, because somebody plans around
+it.
+*/
+func TestASignWithNoWindowStoresNulls(t *testing.T) {
+	ctx := context.Background()
+	h, cleanup := newHarness(t)
+	defer cleanup()
+
+	if _, err := h.refresher.Refresh(ctx, runAt); err != nil {
+		t.Fatalf("Refresh: %v", err)
+	}
+
+	var withDates int
+	if err := h.pool.QueryRow(ctx,
+		`SELECT COUNT(*) FROM sade_sati_windows WHERE started_at IS NOT NULL`,
+	).Scan(&withDates); err != nil {
+		t.Fatalf("count dated windows: %v", err)
+	}
+
+	// The stub gives exactly one sign a real window; the rest are null.
+	if withDates != 1 {
+		t.Fatalf("%d signs have dates, want 1 — the stub supplies a window for one "+
+			"sign only, so anything else means nulls are being filled in", withDates)
+	}
+
+	// And the CHECK constraint holds the pair together.
+	var halfOpen int
+	if err := h.pool.QueryRow(ctx,
+		`SELECT COUNT(*) FROM sade_sati_windows
+		 WHERE (started_at IS NULL) <> (ends_at IS NULL)`,
+	).Scan(&halfOpen); err != nil {
+		t.Fatalf("count half-open windows: %v", err)
+	}
+	if halfOpen != 0 {
+		t.Fatalf("%d windows have one date and not the other", halfOpen)
+	}
+}
+
+/*
+The reader serves the stored dates with the phase.
+
+Read from Postgres, never from astro — which is what makes the answer
+survive an outage. Asserted by taking astro down AFTER the refresh and
+confirming the dates still come back.
+*/
+func TestSadeSatiDatesSurviveAstroBeingDown(t *testing.T) {
+	ctx := context.Background()
+	h, cleanup := newHarness(t)
+	defer cleanup()
+
+	// The stub's Saturn is in Capricorn, which is both the sign in Sade
+	// Sati and the sign it supplies a window for.
+	if _, err := h.refresher.Refresh(ctx, runAt); err != nil {
+		t.Fatalf("Refresh: %v", err)
+	}
+
+	// Astro is now unreachable. Everything below reads storage.
+	h.astro.setDown(true)
+
+	result, err := h.reader.SadeSatiAt(ctx, runAt, stubWindowSign)
+	if err != nil {
+		t.Fatalf("SadeSatiAt: %v", err)
+	}
+
+	if !result.IsActive {
+		t.Fatalf("Sade Sati is not active for the sign under test: %+v", result)
+	}
+	if result.StartedAt == nil || result.EndsAt == nil {
+		t.Fatalf("a running Sade Sati reports no dates while astro is down: %+v. "+
+			"The window is stored precisely so this keeps working", result)
+	}
+	if !result.EndsAt.After(*result.StartedAt) {
+		t.Fatalf("the window runs backwards: %s .. %s", result.StartedAt, result.EndsAt)
+	}
+}
+
+// A sign that is not in Sade Sati reports no dates, even though a row
+// exists for it. An end date on an inactive stretch is a countdown to
+// nothing.
+func TestAnInactiveSignReportsNoDates(t *testing.T) {
+	ctx := context.Background()
+	h, cleanup := newHarness(t)
+	defer cleanup()
+
+	if _, err := h.refresher.Refresh(ctx, runAt); err != nil {
+		t.Fatalf("Refresh: %v", err)
+	}
+
+	// Saturn in Capricorn is nowhere near an Aries Moon.
+	result, err := h.reader.SadeSatiAt(ctx, runAt, aries)
+	if err != nil {
+		t.Fatalf("SadeSatiAt: %v", err)
+	}
+	if result.IsActive {
+		t.Skip("the fixture puts this sign in Sade Sati; nothing to assert")
+	}
+	if result.StartedAt != nil || result.EndsAt != nil {
+		t.Fatalf("an inactive Sade Sati carries dates: %+v", result)
+	}
+}
+
+/*
+A short windows response writes nothing at all.
+
+Twelve rows or none. A partial write leaves some Moon signs on fresh
+dates and others on stale ones, with nothing downstream able to tell
+which is which — and the stale ones would keep counting down to an
+end date computed against a different instant.
+
+The positions must still be stored: the two are refreshed in one pass
+precisely so a window failure costs the END DATES and not the whole
+transits screen.
+*/
+func TestAShortWindowsResponseWritesNoWindowsAndKeepsThePositions(t *testing.T) {
+	ctx := context.Background()
+	h, cleanup := newHarness(t)
+	defer cleanup()
+
+	h.astro.setShortWindows(true)
+
+	written, err := h.refresher.Refresh(ctx, runAt)
+	if err != nil {
+		t.Fatalf("Refresh failed outright: %v — a windows problem must not take "+
+			"the positions down with it", err)
+	}
+	if written == 0 {
+		t.Fatal("no positions were stored")
+	}
+
+	var rows int
+	if err := h.pool.QueryRow(ctx,
+		`SELECT COUNT(*) FROM sade_sati_windows`).Scan(&rows); err != nil {
+		t.Fatalf("count windows: %v", err)
+	}
+	if rows != 0 {
+		t.Fatalf("a five-window response wrote %d rows. Twelve or none: a partial "+
+			"write leaves some Moon signs fresh and others stale, and nothing "+
+			"downstream can tell them apart", rows)
 	}
 }

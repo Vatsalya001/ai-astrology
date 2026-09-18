@@ -403,6 +403,13 @@ export const en = {
     sadeSatiActive: 'Saturn is in {sign}, the {ordinal} sign from your Moon.',
     sadeSatiPhaseLabel: 'Sade Sati phase',
     sadeSatiCurrentPhase: ' — current phase',
+    // The window. "When does this end" is the question people actually
+    // ask about Sade Sati, and until the engine supplied these the
+    // product could only say that it was running.
+    sadeSatiRuns: '{start} to {end}',
+    sadeSatiEndsIn: 'About {years} years left',
+    sadeSatiEndsSoon: 'Less than a year left',
+    sadeSatiDatesUnknown: 'The exact dates are still being worked out.',
     sadeSatiRising: 'Rising',
     sadeSatiPeak: 'Peak',
     sadeSatiSetting: 'Setting',
@@ -811,6 +818,11 @@ export const hi: Dictionary = {
     sadeSatiActive: 'शनि {sign} में है, आपके चंद्रमा से {ordinal} राशि।',
     sadeSatiPhaseLabel: 'साढ़े साती चरण',
     sadeSatiCurrentPhase: ' — वर्तमान चरण',
+    // The window.
+    sadeSatiRuns: '{start} से {end} तक',
+    sadeSatiEndsIn: 'लगभग {years} वर्ष शेष',
+    sadeSatiEndsSoon: 'एक वर्ष से कम शेष',
+    sadeSatiDatesUnknown: 'सटीक तिथियाँ अभी निकाली जा रही हैं।',
     sadeSatiRising: 'आरोहण',
     sadeSatiPeak: 'शिखर',
     sadeSatiSetting: 'अवरोहण',

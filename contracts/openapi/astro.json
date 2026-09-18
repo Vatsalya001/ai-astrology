@@ -683,6 +683,18 @@
             ],
             "title": "Current Phase"
           },
+          "ends_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ends At"
+          },
           "houses_from_moon": {
             "maximum": 12.0,
             "minimum": 1.0,
@@ -700,6 +712,18 @@
           "saturn_sign": {
             "title": "Saturn Sign",
             "type": "string"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
           }
         },
         "required": [
@@ -710,6 +734,116 @@
           "houses_from_moon"
         ],
         "title": "SadeSatiResult",
+        "type": "object"
+      },
+      "SadeSatiWindow": {
+        "additionalProperties": false,
+        "description": "One natal Moon sign's window.",
+        "properties": {
+          "ends_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ends At"
+          },
+          "moon_sign": {
+            "title": "Moon Sign",
+            "type": "string"
+          },
+          "moon_sign_index": {
+            "description": "0 = Aries",
+            "maximum": 11.0,
+            "minimum": 0.0,
+            "title": "Moon Sign Index",
+            "type": "integer"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          }
+        },
+        "required": [
+          "moon_sign_index",
+          "moon_sign",
+          "started_at",
+          "ends_at"
+        ],
+        "title": "SadeSatiWindow",
+        "type": "object"
+      },
+      "SadeSatiWindowsRequest": {
+        "additionalProperties": false,
+        "description": "All twelve windows at one instant.\n\nTwelve rather than one, because a Sade Sati window is a pure function\nof Saturn's motion and the natal Moon's SIGN \u2014 and there are only\ntwelve of those. api-service stores the twelve and serves every user\nfrom them, which is what lets the answer survive an astro outage: the\nalternative is a call to this service on the path of a question users\nask constantly.",
+        "properties": {
+          "at": {
+            "format": "date-time",
+            "title": "At",
+            "type": "string"
+          },
+          "ayanamsa": {
+            "default": "lahiri",
+            "enum": [
+              "lahiri",
+              "raman",
+              "kp"
+            ],
+            "title": "Ayanamsa",
+            "type": "string"
+          },
+          "search_years": {
+            "default": 40,
+            "maximum": 80.0,
+            "minimum": 10.0,
+            "title": "Search Years",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "at"
+        ],
+        "title": "SadeSatiWindowsRequest",
+        "type": "object"
+      },
+      "SadeSatiWindowsResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "at": {
+            "format": "date-time",
+            "title": "At",
+            "type": "string"
+          },
+          "ayanamsa": {
+            "title": "Ayanamsa",
+            "type": "string"
+          },
+          "windows": {
+            "items": {
+              "$ref": "#/components/schemas/SadeSatiWindow"
+            },
+            "title": "Windows",
+            "type": "array"
+          }
+        },
+        "required": [
+          "at",
+          "ayanamsa",
+          "windows"
+        ],
+        "title": "SadeSatiWindowsResponse",
         "type": "object"
       },
       "TransitPosition": {
@@ -1100,6 +1234,48 @@
           }
         },
         "summary": "Compute Transit",
+        "tags": [
+          "charts"
+        ]
+      }
+    },
+    "/v1/transits/sade-sati/windows": {
+      "post": {
+        "description": "Every natal Moon sign's Sade Sati window at one instant.\n\nTwelve answers in one call, because a window depends only on Saturn's\nmotion and the natal Moon's SIGN \u2014 and there are twelve of those.\napi-service stores the twelve and serves every user from them, so the\nquestion \"when does this end\" keeps having an answer while this\nservice is unreachable.\n\nThe scan is the expensive part and it is shared: `sade_sati_window`\nre-finds Saturn's ingresses per sign today, which is wasteful and\ncorrect. Sharing the ingress scan across the twelve is the obvious\noptimisation and is deliberately not done here \u2014 this runs once every\nsix hours on a worker, and a faster version of a function with three\nsubtle cases in it is not worth the risk of getting one wrong.",
+        "operationId": "compute_sade_sati_windows_v1_transits_sade_sati_windows_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SadeSatiWindowsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SadeSatiWindowsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Compute Sade Sati Windows",
         "tags": [
           "charts"
         ]

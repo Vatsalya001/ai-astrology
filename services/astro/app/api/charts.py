@@ -31,10 +31,10 @@ from app.core.chart import (
     compute_navamsa,
     compute_rasi,
 )
-from app.core.constants import Planet
+from app.core.constants import SIGNS, Planet
 from app.core.dasha import DashaPeriod, build_vimshottari
 from app.core.ephemeris import SkyfieldEphemeris
-from app.core.transit import compute_transits, sade_sati_at
+from app.core.transit import compute_transits, sade_sati_at, sade_sati_window
 from app.core.yoga import detect_all
 from app.schemas.chart import (
     CHART_SCHEMA_VERSION,
@@ -50,6 +50,9 @@ from app.schemas.chart import (
     HousePosition,
     PlanetPosition,
     SadeSatiResult,
+    SadeSatiWindow,
+    SadeSatiWindowsRequest,
+    SadeSatiWindowsResponse,
     TransitPosition,
     TransitRequest,
     TransitResponse,
@@ -108,6 +111,22 @@ def _to_skyfield_time(moment: datetime) -> Time:
             detail="utc_instant must be timezone-aware; this service never assumes a zone",
         )
     return _timescale().from_datetime(moment.astimezone(UTC))
+
+
+def _to_datetime(t: Time) -> datetime:
+    """Skyfield Time back to an aware UTC datetime.
+
+    Always UTC and always aware, which is the inverse of the refusal in
+    `_to_skyfield_time` above: a naive value crossing this boundary in
+    either direction is five and a half hours of error for an Indian
+    user, and it looks entirely normal until somebody checks a date.
+
+    Microseconds are dropped. A Sade Sati boundary is found by bisection
+    to about a second, and reporting it to the microsecond would claim a
+    precision the search does not have.
+    """
+    moment: datetime = t.utc_datetime()
+    return moment.replace(microsecond=0)
 
 
 def _planet_out(placed: PlacedPlanet) -> PlanetPosition:
@@ -307,6 +326,17 @@ def compute_transit(request: TransitRequest) -> TransitResponse:
     )
     sade_sati = sade_sati_at(_ephemeris(), _ayanamsa(), t, request.natal_moon_sign, system)
 
+    # The window, for "when does this end" — the question people actually
+    # ask about Sade Sati. Forty years either side of `at` brackets one
+    # 7.5-year stretch comfortably, given Saturn's ~29.5-year orbit.
+    timescale = _timescale()
+    span = timescale.tt_jd(t.tt - 20 * 365.25), timescale.tt_jd(t.tt + 20 * 365.25)
+    found = sade_sati_window(
+        _ephemeris(), _ayanamsa(), timescale, span[0], span[1], request.natal_moon_sign, system
+    )
+    started_at = _to_datetime(found[0]) if found else None
+    ends_at = _to_datetime(found[1]) if found else None
+
     return TransitResponse(
         at=request.at,
         ayanamsa=request.ayanamsa,
@@ -330,7 +360,55 @@ def compute_transit(request: TransitRequest) -> TransitResponse:
             saturn_sign=sade_sati.saturn_sign,
             moon_sign=sade_sati.moon_sign,
             houses_from_moon=sade_sati.houses_from_moon,
+            started_at=started_at,
+            ends_at=ends_at,
         ),
+    )
+
+
+@router.post("/transits/sade-sati/windows", response_model=SadeSatiWindowsResponse)
+def compute_sade_sati_windows(
+    request: SadeSatiWindowsRequest,
+) -> SadeSatiWindowsResponse:
+    """Every natal Moon sign's Sade Sati window at one instant.
+
+    Twelve answers in one call, because a window depends only on Saturn's
+    motion and the natal Moon's SIGN — and there are twelve of those.
+    api-service stores the twelve and serves every user from them, so the
+    question "when does this end" keeps having an answer while this
+    service is unreachable.
+
+    The scan is the expensive part and it is shared: `sade_sati_window`
+    re-finds Saturn's ingresses per sign today, which is wasteful and
+    correct. Sharing the ingress scan across the twelve is the obvious
+    optimisation and is deliberately not done here — this runs once every
+    six hours on a worker, and a faster version of a function with three
+    subtle cases in it is not worth the risk of getting one wrong.
+    """
+    t = _to_skyfield_time(request.at)
+    system = AyanamsaSystem(request.ayanamsa)
+    timescale = _timescale()
+
+    half = request.search_years / 2.0
+    start = timescale.tt_jd(t.tt - half * 365.25)
+    end = timescale.tt_jd(t.tt + half * 365.25)
+
+    windows: list[SadeSatiWindow] = []
+    for sign in range(12):
+        found = sade_sati_window(_ephemeris(), _ayanamsa(), timescale, start, end, sign, system)
+        windows.append(
+            SadeSatiWindow(
+                moon_sign_index=sign,
+                moon_sign=SIGNS[sign],
+                started_at=_to_datetime(found[0]) if found else None,
+                ends_at=_to_datetime(found[1]) if found else None,
+            )
+        )
+
+    return SadeSatiWindowsResponse(
+        at=request.at,
+        ayanamsa=request.ayanamsa,
+        windows=windows,
     )
 
 

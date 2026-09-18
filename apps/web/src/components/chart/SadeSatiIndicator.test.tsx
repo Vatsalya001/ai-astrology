@@ -13,14 +13,26 @@ function status(overrides: Partial<SadeSatiStatus> = {}): SadeSatiStatus {
     phase: 'rising',
     saturn_sign: 'Capricorn',
     houses_from_moon: 12,
+    started_at: '2023-01-17T00:00:00Z',
+    ends_at: '2030-06-03T00:00:00Z',
     ...overrides,
   }
 }
 
-function renderIndicator(s: SadeSatiStatus) {
+/**
+ * A fixed "now", between the fixture's start and end.
+ *
+ * The server's instant rather than the machine's: this component
+ * measures how long is left from what the API sent, so a test that let
+ * the real clock in would report a different number every year and fail
+ * on its own in 2030.
+ */
+const SERVER_NOW = '2026-09-18T00:00:00Z'
+
+function renderIndicator(s: SadeSatiStatus, at: string = SERVER_NOW) {
   return render(
     <LocaleProvider>
-      <SadeSatiIndicator status={s} />
+      <SadeSatiIndicator status={s} at={at} />
     </LocaleProvider>,
   )
 }
@@ -128,20 +140,92 @@ describe('SadeSatiIndicator', () => {
     }
   })
 
-  /**
-   * The engine reports no span, so none is shown.
-   *
-   * Deriving "ends April 2033" from the phase in TypeScript would be the
-   * frontend computing astrology — the same rule that keeps the model
-   * out of it. This asserts the absence so that adding a computed date
-   * is a failing test rather than a plausible-looking improvement.
-   */
-  it('shows no start or end date, because the engine reports none', () => {
-    const { container } = renderIndicator(status({ phase: 'rising' }))
-    const text = container.textContent ?? ''
+  /*
+    The window, which is the question people came to ask.
 
-    expect(text).not.toMatch(/\b(19|20)\d{2}\b/)
-    expect(text).not.toMatch(/\b(started|ends|until)\b/i)
+    This test replaces one that asserted the OPPOSITE — that no dates
+    appear, "because the engine reports none". That was true and correct
+    when written: the engine had no window function exposed, so any date
+    on screen would have been derived in TypeScript, which is the
+    frontend computing astrology.
+
+    The engine supplies them now. The rule has not changed; what it
+    permits has, and the test below is the same rule from the other side
+    — the dates shown must be the ones the API SENT.
+  */
+  it('shows the window the engine supplied', () => {
+    renderIndicator(
+      status({
+        started_at: '2023-01-17T00:00:00Z',
+        ends_at: '2030-06-03T00:00:00Z',
+      }),
+    )
+
+    expect(screen.getByText(/January 2023.*June 2030/)).toBeInTheDocument()
+  })
+
+  /**
+   * The dates are rendered, not derived.
+   *
+   * Given a window the phase alone could never imply, the screen must
+   * show THAT window. A component quietly computing "2.5 years per sign
+   * from the current phase" would produce something plausible and wrong,
+   * and would pass any test that only checked a date was present.
+   */
+  it('renders the API\'s dates rather than deriving its own', () => {
+    renderIndicator(
+      status({
+        phase: 'rising',
+        // Deliberately not 7.5 years, and not adjacent to today.
+        started_at: '1994-03-02T00:00:00Z',
+        ends_at: '1996-11-19T00:00:00Z',
+      }),
+    )
+
+    const text = screen.getByText(/1994/).textContent ?? ''
+    expect(text).toContain('March 1994')
+    expect(text).toContain('November 1996')
+  })
+
+  /**
+   * No window is "we do not know", never silence.
+   *
+   * The server sends nulls when the stretch is not running and also when
+   * it IS running but no window has been computed yet. Rendering nothing
+   * in that second case reads as "this has no end", which is both untrue
+   * and the more frightening of the two readings.
+   */
+  it('says the dates are unknown rather than showing nothing', () => {
+    renderIndicator(status({ started_at: null, ends_at: null }))
+
+    expect(screen.getByText(/still being worked out/i)).toBeInTheDocument()
+  })
+
+  /**
+   * How long is left is measured from the SERVER's instant.
+   *
+   * A browser clock can be wrong by years — a phone with the date reset
+   * is common — and "about 4 years left" derived from one is a
+   * confident wrong answer to the exact number a reader came for.
+   * `DashaTimeline` takes the server's instant for the same reason.
+   */
+  it('counts the remaining time from the instant the API sent', () => {
+    renderIndicator(
+      status({ started_at: '2023-01-17T00:00:00Z', ends_at: '2030-06-03T00:00:00Z' }),
+      // Four years before the end, whatever this machine's clock says.
+      '2026-06-03T00:00:00Z',
+    )
+
+    expect(screen.getByText(/About 4 years left/i)).toBeInTheDocument()
+  })
+
+  it('says less than a year when the end is close', () => {
+    renderIndicator(
+      status({ started_at: '2023-01-17T00:00:00Z', ends_at: '2030-06-03T00:00:00Z' }),
+      '2030-01-03T00:00:00Z',
+    )
+
+    expect(screen.getByText(/less than a year/i)).toBeInTheDocument()
   })
 })
 

@@ -3,8 +3,11 @@ package transits
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
+
+	"github.com/jackc/pgx/v5"
 
 	"github.com/Vatsalya001/ai-astrology/services/api/internal/platform/db/dbgen"
 )
@@ -55,6 +58,23 @@ type SadeSati struct {
 	Phase          *string `json:"phase"`
 	SaturnSign     string  `json:"saturn_sign"`
 	HousesFromMoon int     `json:"houses_from_moon"`
+
+	/*
+	   When it started and when it ends.
+
+	   "When does this end" is the question people actually ask about
+	   Sade Sati, and until these existed the product could say only that
+	   it was running — the half that causes anxiety without the half
+	   that relieves it.
+
+	   Nil when the stretch is not running, and ALSO nil when it is
+	   running but the stored window has not been computed yet (a fresh
+	   database before the first worker pass) or fell outside astro's
+	   search span. A client must render their absence as "we do not
+	   know", never as "it has no end".
+	*/
+	StartedAt *time.Time `json:"started_at"`
+	EndsAt    *time.Time `json:"ends_at"`
 }
 
 // Reader serves stored transits.
@@ -134,7 +154,43 @@ func (r *Reader) SadeSatiAt(ctx context.Context, at time.Time, natalMoonSign int
 		if position.Planet != "Saturn" {
 			continue
 		}
-		return sadeSatiFrom(position), nil
+
+		result := sadeSatiFrom(position)
+
+		/*
+		   The dates come from the stored window, not from astro.
+
+		   That is the whole point of the table: this is a question users
+		   ask constantly, and the answer has to survive astro being
+		   unreachable. A per-request ephemeris scan would also be
+		   seconds, on a read path.
+
+		   A missing row is NOT an error. A fresh database has none until
+		   the first worker pass, and refusing the whole response then
+		   would take the transits screen down over an absent end date —
+		   which is exactly the trade the refresher makes in the other
+		   direction.
+		*/
+		if result.IsActive {
+			window, err := r.q.GetSadeSatiWindow(ctx, int16(natalMoonSign))
+			switch {
+			case err == nil:
+				if window.StartedAt.Valid {
+					started := window.StartedAt.Time
+					result.StartedAt = &started
+				}
+				if window.EndsAt.Valid {
+					ends := window.EndsAt.Time
+					result.EndsAt = &ends
+				}
+			case errors.Is(err, pgx.ErrNoRows):
+				// Left nil. The UI says it does not know yet.
+			default:
+				return SadeSati{}, fmt.Errorf("transits: read sade sati window: %w", err)
+			}
+		}
+
+		return result, nil
 	}
 
 	// Saturn missing from a non-empty table means a partial refresh, not

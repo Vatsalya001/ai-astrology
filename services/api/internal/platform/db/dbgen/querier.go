@@ -105,6 +105,7 @@ type Querier interface {
 	GetChart(ctx context.Context, arg GetChartParams) (Chart, error)
 	GetPlace(ctx context.Context, id int32) (Place, error)
 	GetPreferences(ctx context.Context, userID pgtype.UUID) (UserPreference, error)
+	GetSadeSatiWindow(ctx context.Context, moonSignIndex int16) (SadeSatiWindow, error)
 	// Queries against schema_meta.
 	//
 	// Small on purpose: Phase 0 has no domain tables. This exists so the
@@ -179,6 +180,8 @@ type Querier interface {
 	// auth_identities field and always returns [], which is worse than
 	// omitting it: it tells the user there are none.
 	ListIdentitiesForUser(ctx context.Context, userID pgtype.UUID) ([]AuthIdentity, error)
+	// For the health probe and for anyone reading the table by hand.
+	ListSadeSatiWindows(ctx context.Context) ([]SadeSatiWindow, error)
 	// Global and free of personal data, so no user scoping — and that is
 	// what makes them safe to cache across all users.
 	ListTransitsAt(ctx context.Context, arg ListTransitsAtParams) ([]Transit, error)
@@ -270,6 +273,15 @@ type Querier interface {
 	// Keyed on the GeoNames id, so re-running the importer updates rows
 	// instead of duplicating them.
 	UpsertPlace(ctx context.Context, arg UpsertPlaceParams) error
+	// Sade Sati windows. See docs/specs/PHASE-03-KUNDLI-UI.md §15.
+	//
+	// Twelve rows, one per natal Moon sign, refreshed by the worker. Read on
+	// the request path by primary key, so the answer survives astro-service
+	// being unreachable.
+	// Idempotent on the sign, so a retried refresh — or two replicas that
+	// both got through — rewrites the row rather than failing or doubling
+	// it. The same reasoning as UpsertTransit.
+	UpsertSadeSatiWindow(ctx context.Context, arg UpsertSadeSatiWindowParams) (SadeSatiWindow, error)
 	// ─── transits ────────────────────────────────────────────────────────
 	UpsertTransit(ctx context.Context, arg UpsertTransitParams) (Transit, error)
 	// ─── Audit ───────────────────────────────────────────────────────────

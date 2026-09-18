@@ -30,6 +30,8 @@ function data(overrides: Partial<NatalTransits> = {}): NatalTransits {
       phase: 'rising',
       saturn_sign: 'Pisces',
       houses_from_moon: 12,
+      started_at: '2023-01-17T00:00:00Z',
+      ends_at: '2030-06-03T00:00:00Z',
     },
     ...overrides,
   }

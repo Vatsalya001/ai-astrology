@@ -1,81 +1,79 @@
 # Current phase
 
 ```
-Phase: 2 — Astrology Engine
-Gate:  ✅ CLOSED  (20 of 20 gate items, 8 of 8 Definition-of-Done items)
-       Nothing open.
+Phase: 3 — Kundli UI
+Gate:  🔶 OPEN  (13 of 16 gate items closed)
+       Three open, all named below. Two need a human.
 ```
 
-Evidence for every item: `docs/TESTING-PHASE-2.md`. It records what was *run*, not
-what was read, and it names the twenty-three guards that were deliberately broken to
-prove they fire.
+Phase 2 closed with 20 of 20. Its record is `docs/TESTING-PHASE-2.md`, which lists what
+was *run* rather than what was read, and names the twenty-three guards broken on purpose
+to prove they fire. Phase 3 is being held to the same standard.
 
-**The Phase 0 and Phase 1 lesson held a third time, and this was the worst of the
-three.** Reading the code said the chart API worked. Running it found that the
-containerised `astro-service` had **no ephemeris kernel at all** — the Dockerfile
-copied `app` and not `data` — so every chart request 500'd while the container
-reported healthy, for an entire phase. Nothing caught it because no test had ever
-computed a real chart through the whole stack. The end-to-end suite that task 2.21
-asks for is what found it, on its first run.
+---
 
-Also found only by running it: `ayana up` serving a months-old image, a D9 that was a
-relabelled D1, 819 database round trips per chart, and a data export that never
-mentioned birth profiles or charts.
+## Closed (13)
 
-## What Phase 3 inherits
+| # | Item | Evidence |
+|---|---|---|
+| 1 | Complete correct chart for all 30 fixtures | 30 fixtures, 153 assertions, `ChartSVG.fixtures.test.tsx` |
+| 2 | Both styles correct; switcher persists | unit + e2e; 108 e2e specs green against the real stack |
+| 3 | D1, D9, D10 viewable | `VargaSwitcher`, varga tests |
+| 4 | Geometry in a pure React-free package | `packages/astrology-geometry`, no React reference |
+| 5 | Planet table + house view, responsive, detail sheets | unit + e2e at 360px |
+| 6 | Dasha timeline, current period, drill-down | `DashaTimeline.test.tsx`, e2e |
+| 7 | Yogas in en and hi | e2e asserts the corpus directly, not just the dictionary |
+| 8 | Transits and Sade Sati with phase **and dates** | PR 17 — engine window exposed, stored, served |
+| 9 | Glossary covers every term used | `astro-term-usage.test.ts` |
+| 10 | PDF via the asynq worker, signed URL | PR 12 |
+| 11 | Another user's PDF rejected | PR 12/13, break-tested |
+| 12 | Visual regression suite green | PR 16 — 15 baselines, 3 viewports, stable over 3 runs |
+| 15 | `task verify` green | run at each PR |
 
-**The chart pipeline is whole.** Birth details → versioned profile → UTC instant from
-real historical tzdata → astro-service → D1 and D9 stored in one transaction with an
-819-node dasha tree → served from storage, including while astro is stopped.
+---
 
-**Three rules the next phase must not break.**
+## Open (3)
 
-1. **A chart is a pure function of its inputs.** That is why a stored one is served
-   without an HTTP call and is not "stale". If Phase 3 adds anything time-dependent to
-   a chart, that assumption dies and the caching design dies with it.
+### 13 — manual keyboard and screen-reader pass 👤 **needs a human**
 
-2. **The transit table has no `user_id`, and must not gain one.** A planet's sign at an
-   instant is the same for everybody; only the house differs, and that is an integer
-   subtraction done at read time. It is what makes Sade Sati answerable during an
-   outage.
+The automated half is done: axe runs across five e2e specs and reports zero violations
+on every Kundli route. The gate asks for a manual pass as well, and it is right to — axe
+cannot tell whether a focus order makes *sense*, or whether the chart's spoken output is
+comprehensible rather than merely present.
 
-3. **Golden files are frozen, not regenerated.** `scripts/generate_golden.py` refuses to
-   run unless `test_external_reference.py` passes. If a golden file changes and that
-   suite still passes, the change is in chart assembly and a human has to say why.
+Steps are in `docs/MANUAL-A11Y-PASS.md`.
 
-## Numbers measured at the gate
+### 14 — performance budgets met
 
-| Budget | Measured |
-|---|---|
-| Chart computation < 200 ms | p95 70.6 ms |
-| Go round trip < 350 ms cold | 109–140 ms |
-| Cached read < 10 ms | p95 8.5 ms, max 10.0 ms |
-| Place search < 50 ms p95 | 2.7 ms |
+Enforced regression budgets ship and fail the build (PR 15). The spec's **180 KB**
+target does not pass: `/kundli/chart` is 199.0 KB gzipped, and the framework floor —
+React, react-dom and the Next client runtime, before any Ayana code — is **159.5 KB**.
+That leaves ~20 KB for the whole product, and the i18n dictionaries alone are 14.8 KB.
 
-The cached read is the one to watch: it is at its budget at the maximum, and Phase 3
-puts a chart on every page load.
+Closing it means shipping one locale's dictionary instead of both (~15 KB, still short),
+or a decision about the framework. Neither is a Phase 3 call.
+
+### 16 — this file, and `docs/PROJECT_STATUS.md`
+
+`PROJECT_STATUS.md` is current. This file is now too, which closes the second half.
+
+---
+
+## Also outstanding (not gate items)
+
+- **Task 3.17 — Storybook.** Not started.
+- **Task 3.18 — loading/error/empty audit.** Not started as a sweep; the states exist on
+  the screens built this phase.
+- **CI has never executed a job.** 👤 Every check in this repo is local. The runner
+  refuses at dispatch: *"recent account payments have failed or your spending limit needs
+  to be increased."* Steps in `docs/MANUAL-A11Y-PASS.md` §CI.
+- **No end-to-end test drives PDF or share links through a browser.** Each seam is covered
+  from both sides; the join is not.
+- **Share-management screen.** Links can be created from the sheet and revoked through the
+  API, but nothing lists them.
 
 ## Carried debt
 
-- Web CSP still has `script-src 'unsafe-inline'` (from Phase 1; blocks a **Phase 5**
-  gate item).
-- No ADR for hand-rolled auth (from Phase 1).
-- `memtest86+` unrun — nine data-corruption events on this machine, all recovered,
-  none explained. Owner action.
-- Production place seeding needs GeoNames' `admin1CodesASCII.txt`, or subdivisions
-  display as codes. The seeder warns; the E2E fixture ships a mapping.
-
-## Next: Phase 3 — Kundli UI
-
-Spec: `docs/specs/PHASE-03-KUNDLI-UI.md`
-
-Phase 2 deliberately built **data entry only**. Phase 3 is the visualisation: the North
-and South Indian chart SVGs, the dasha timeline, the PDF worker.
-
-Two things that will decide whether it is any good:
-
-1. **The chart SVG needs per-element `aria-label`s and a visually-hidden table
-   duplicating the data.** An SVG is meaningless to a screen reader otherwise, and this
-   is in the frontend rules already.
-2. **The PDF is an `asynq` worker with `chromedp`, never in the request path.** The
-   queue exists now and the transit refresh is the worked example.
+- Web CSP still has `script-src 'unsafe-inline'` (from Phase 1; blocks a **Phase 5** item).
+- No ADR for hand-rolled auth.
+- `memtest86+` unrun, against nine recorded data-corruption events. 👤
