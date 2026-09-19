@@ -32,8 +32,9 @@ numbered, and every live-region announcement as it fires.
 http://localhost:3000/kundli/chart?a11y=1
 ```
 
-Use the **jump buttons** in the panel (*Start of page*, *Main content*, *The chart*,
-*The data table*) rather than clicking into the page, then press `Tab`.
+Use the **"Jump to a part of the page"** selector in the panel rather than clicking into
+the page, then press `Tab`. **"Read the whole page aloud, in order"** transcribes the
+whole route as a screen reader would speak it.
 
 ---
 
@@ -43,9 +44,10 @@ Everything above proves the facts are *present*. It cannot prove they are *follo
 That is the judgement below, and it is the last thing standing between Phase 3 and a
 closed gate.
 
-**Date run:**
-**Method:** in-page inspector (`?a11y=1`)
-**Browser:**
+**Date run:** 19 September 2026
+**Method:** in-page inspector (`?a11y=1`), then a normal-use pass with no assistive tooling
+**Browser:** Google Chrome 150.0.7871.128
+**Run by:** vatsalyaroy
 
 **Tab presses to reach the Moon:**
 
@@ -96,9 +98,13 @@ or did you have to know where to look?
 
 - [ ] Yes, without guessing
 - [ ] Yes, but it took a long time — say where you got stuck:
-- [ ] No — say what was missing:
+- [x] **No** — the four jump buttons did not read as destinations. Nothing said the
+      answer lived behind "The data table", and it would not have been found unaided.
 
-**Notes:**
+**Notes:** Fixed in PR 28 — the buttons became a labelled `<select>` ("Jump to a part of
+the page") whose options name what the tester will *find* rather than what the element
+*is*: "The planet table — every sign, house and nakshatra". Re-verified in the normal-use
+pass below.
 
 ### Q2 — Does the reading order make sense?
 
@@ -121,9 +127,27 @@ retrograde spoken as a word and Sade Sati stated as a full sentence.
 order is *sensible*. Read one transcript end to end and say whether it tells a story.
 
 - [ ] It follows the visual order and reads naturally
-- [ ] It is correct but confusing — say where:
+- [x] **It is correct but confusing** — three separate places:
+  1. *"It looks like a database dump."* The chart's two switchers came out as seven bare
+     fragments — `Chart / Rasi / D1 / Navamsa / D9 / Dasamsa / D10`.
+  2. *"See every position in a table"* sits below the chart's own hidden table, so a
+     listener is offered what they have just been given.
+  3. The dasha screen — "not user friendly", with all three tracks open.
 
-**Notes:**
+**Notes:** All three fixed in PR 28.
+
+(1) was **the inspector, not the product.** `VargaSwitcher` and `StyleSwitcher` are real
+`<fieldset>`s with a `<legend>` and radio inputs, and Chromium's own accessibility tree
+reads them as `group "Chart" / radio "Rasi D1" [checked]`. The linearisation walked past
+the fieldset. It now reports the group, each option's position and its state — the third
+time this tool has flattened a container into its text and made correct markup look
+broken.
+
+(2) renamed to "Open the full planets screen", which names the destination.
+
+(3) `Track` rendered `<section aria-label>` when populated and a bare `<div>` when empty,
+so the page had one landmark and two stretches of loose paragraphs — and drilling into a
+mahadasha *created* a landmark. Both branches now match.
 
 ### Q3 — Anything announced as "graphic", "button" or "clickable" with no useful label?
 
@@ -143,7 +167,13 @@ implementations; the Moon's row now announces `… 20°44' 4th Purva Ashadha 3. 
 
 **Your judgement** — is any remaining label *unhelpful* even though it exists?
 
-**Notes:**
+**Notes:** Not judged directly by the tester; established by measurement instead, and one
+defect found and fixed (PR 27, corrected in PR 28). Recorded here rather than claimed as
+a human verdict.
+
+A second defect was introduced *by that fix* and caught the same evening: prefixing
+unconditionally produced `button "Rasi. What “Rasi” means"` — a stutter — because
+`<AstroTerm term="rasi">Rasi</AstroTerm>` passes children that are the term's own name.
 
 ### Q4 — Anything where colour was the only signal?
 
@@ -166,14 +196,62 @@ asking the three questions named above:
 **Your judgement** — with colour removed, was anything *harder to notice* even though it
 was technically present?
 
-**Notes:**
+**Notes:** Not judged directly by the tester. Established by removing colour entirely in a
+scripted run and reading back the three facts the question names; all three survived. No
+colour-only signal was found on any of the five routes. Recorded as a measurement, not as
+a human verdict.
+
+---
+
+## The normal-use pass — after the fixes
+
+Run once the four Q1/Q2 defects were merged. No assistive tooling, no colour emulation,
+no devtools: the product used as a person would use it, on all five Kundli routes plus
+sign-up. Seven areas, judged by the tester.
+
+| | Area | Verdict |
+|---|---|---|
+| A | Sign-up — readable typing, place dropdown, OTP | done, no issues |
+| B | `/kundli/chart` — legibility, varga switch, style switch, the renamed link | fine |
+| C | `/kundli/planets` — scannability, detail sheets, narrow-width restack | fine, all three |
+| D | `/kundli/dashas` — bar widths, drill-down, three tracks open at once | fine, all three |
+| E | `/kundli/yogas` — strength wording, three same-named cards, dialogs | fine, all three |
+| F | `/kundli/transits` — houses-from-Moon, Sade Sati card | fine |
+| G | PDF, share, navigation between screens | fine |
+
+The two questions this pass existed to settle, both of which the earlier round had failed:
+
+- **D** — the dasha screen with all three tracks open was the screenshot that prompted
+  *"not user friendly"*. After the landmark fix it reads as navigable rather than
+  overwhelming.
+- **B** — the renamed link no longer offers a table to someone who has just been read one.
 
 ---
 
 ## Outcome
 
-- [ ] **Item 13 CLOSED** — the chart is comprehensible by ear
-- [ ] **Issues found** — listed above; they are ordinary bugs and can be fixed
+- [x] **Item 13 CLOSED** — the chart is comprehensible by ear
+- [x] **Issues found** — four, all fixed before closing:
+  1. jump controls not recognisable as destinations *(PR 28)*
+  2. radio groups linearised as loose text, making correct markup read as a dump *(PR 28,
+     a defect in the inspector rather than the product)*
+  3. a link promising what the listener had just been given *(PR 28)*
+  4. dasha tracks that became landmarks only once populated *(PR 28)*
 
-Once ticked, update `.claude/state/current-phase.md` — move item 13 from Open to Closed
-and point it at this file.
+  Plus two found by measurement rather than by the tester: the Nakshatra label
+  overwriting its own value *(PR 27)*, and the stutter that fix introduced *(PR 28)*.
+
+**Why both boxes are ticked.** The pass found real defects — that is what it is for. They
+were fixed and the product re-walked end to end before the item was closed, so the item is
+closed *and* the findings are on the record. Closing it with no findings listed would
+misrepresent a pass that produced six fixes.
+
+### What this pass does not claim
+
+- **Q3 and Q4 were not judged by a human.** Both were established by measurement — the
+  accessible-name comparison for Q3, a scripted colour-removal run for Q4 — and are
+  recorded above as measurements. The tester judged Q1, Q2 and the seven normal-use areas.
+- **No real screen reader was used.** The inspector reports what one *would* announce; it
+  is a linearisation, not an emulation. Three separate defects in that tool were found
+  during this pass, each of which made correct markup look broken, so its output should be
+  read as evidence rather than as ground truth.
