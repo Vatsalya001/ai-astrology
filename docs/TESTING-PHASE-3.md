@@ -51,8 +51,18 @@ closed gate.
 
 ### Q1 — Can you answer "which sign is my Moon in, and which house?" from the panel alone
 
-Open `http://localhost:3000/kundli/chart?a11y=1`, click **The data table**, then press
-`Tab` and read the panel — not the page. The true answer is **Sagittarius, 2nd house**.
+1. Open `http://localhost:3000/kundli/chart?a11y=1`
+2. In the panel (bottom right), click **The data table**
+3. Press `Tab` repeatedly and read the panel's **FOCUSED NOW** box — not the page
+
+Then check your answer against `/kundli/planets`.
+
+> **Do not use a number written here.** An earlier version of this question asserted
+> "Sagittarius, 2nd house", which was true of a synthetic fixture and false of the
+> profile actually loaded — so following it literally marked a *correct* panel as
+> failed. The answer depends on whose chart is open, and the whole point of the
+> question is whether the panel yields it without looking at the screen. Get it from
+> the panel first, then verify against the visible table.
 
 - [ ] Yes, without guessing
 - [ ] Yes, but it took a long time — say where you got stuck:
