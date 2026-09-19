@@ -2,8 +2,8 @@
 
 ```
 Phase: 3 — Kundli UI
-Gate:  🔶 OPEN  (14 of 16 gate items closed)
-       Two open. One needs a human; one needs a decision.
+Gate:  🔶 OPEN  (15 of 16 gate items closed)
+       One open, and it needs a decision rather than work.
 ```
 
 Phase 2 closed with 20 of 20. Its record is `docs/TESTING-PHASE-2.md`, which lists what
@@ -12,7 +12,7 @@ to prove they fire. Phase 3 is being held to the same standard.
 
 ---
 
-## Closed (13)
+## Closed (15)
 
 | # | Item | Evidence |
 |---|---|---|
@@ -28,38 +28,35 @@ to prove they fire. Phase 3 is being held to the same standard.
 | 10 | PDF via the asynq worker, signed URL | PR 12 |
 | 11 | Another user's PDF rejected | PR 12/13, break-tested |
 | 12 | Visual regression suite green | PR 16 — 15 baselines, 3 viewports, stable over 3 runs |
+| 13 | Manual keyboard and screen-reader pass | `docs/TESTING-PHASE-3.md` — closed 2026-09-19, six defects found and fixed first |
 | 15 | `task verify` green | run at each PR |
 | 16 | `PROJECT_STATUS.md` and this file updated | both current |
 
 ---
 
-## Open (2)
+## Open (1)
 
-### 13 — manual keyboard and screen-reader pass 👤 **mostly automated; a short human pass remains**
-
-Eleven of the script's twenty-one steps are now asserted in
-`tests/e2e/kundli-keyboard.spec.ts` — focus ring visibility on every stop, the skip link
-reaching `main`, dialogs taking and returning focus, focus trapped while open, the chart
-exposed as a group with a summary, every planet's sign and house reachable in the
-accessible table, `aria-current` on the running dasha, Sade Sati naming its state in
-words, and errors announced rather than only displayed.
-
-It found two real bugs axe could not (see PROJECT_STATUS PR 21).
-
-**What still needs a person** is the judgement the script exists for: with your eyes
-closed, is the chart *comprehensible*? Everything above proves the facts are present; none
-of it proves they are followable by ear. Budget about 15 minutes now rather than 40 —
-`docs/MANUAL-A11Y-PASS.md` §1b, steps 5 and 8.
-
-### 14 — performance budgets met
+### 14 — performance budgets met ⚖️ **needs a decision, not work**
 
 Enforced regression budgets ship and fail the build (PR 15). The spec's **180 KB**
-target does not pass: `/kundli/chart` is 199.0 KB gzipped, and the framework floor —
-React, react-dom and the Next client runtime, before any Ayana code — is **159.5 KB**.
-That leaves ~20 KB for the whole product, and the i18n dictionaries alone are 14.8 KB.
+target does not pass: `/kundli/chart` is **201.0 KB** gzipped (measured 2026-09-19), and
+the framework floor — React, react-dom and the Next client runtime, before any Ayana code
+— is **159.5 KB**. That leaves ~20 KB for the whole product, and the i18n dictionaries
+alone are 14.8 KB.
 
-Closing it means shipping one locale's dictionary instead of both (~15 KB, still short),
-or a decision about the framework. Neither is a Phase 3 call.
+It is not closeable by optimisation. Stripping the glossary prose (8.9 KB) **and** the
+entire Hindi dictionary (7.1 KB) — every removable byte — lands at 183.0 KB, measured.
+
+Three options, and this is a decision rather than work:
+
+- **A.** Ship one locale's dictionary. Saves ~15 KB, still misses, and costs Hindi.
+- **B.** Revise the target to the enforced regression budgets that already ship and fail
+  the build, recording the spec number as unmet. *Recommended: the 180 KB was written
+  before the framework was chosen, and a budget no product-code change can meet is not a
+  budget.*
+- **C.** Treat it as a framework decision and defer it out of Phase 3 entirely.
+
+**This is the only thing standing between Phase 3 and a closed gate.**
 
 ---
 
