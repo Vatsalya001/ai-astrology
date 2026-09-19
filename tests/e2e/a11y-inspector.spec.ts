@@ -247,6 +247,60 @@ test.describe('reading a table', () => {
     ).toMatch(/Moon,\s*Sign:\s*\w+,\s*House:\s*\d+\w+/)
   })
 
+  /**
+   * Q2 of the manual pass — "listen to the whole page top to bottom" —
+   * is about READING order, not focus order.
+   *
+   * The panel could only report the eight things you can Tab to on this
+   * route. Reading order is every heading, paragraph, table cell and
+   * visually-hidden string, in document order, and a tester handed a list
+   * of eight buttons cannot judge whether the page "tells a story or
+   * jumps around". They would have had to install a screen reader for the
+   * one question this tool exists to spare them.
+   */
+  test('reads the whole page in document order, not just the focusable parts', async () => {
+    const page = chartPage
+    await page.goto('/kundli/chart?a11y=1')
+    const panel = page.locator('[data-a11y-inspector]')
+    await expect(panel).toBeVisible({ timeout: 15_000 })
+
+    await panel.getByRole('button', { name: 'Read the page in order' }).click()
+    await page.waitForTimeout(400)
+
+    const lines = await panel.locator('ol li').allTextContents()
+
+    expect(lines.length, 'the reading produced almost nothing').toBeGreaterThan(15)
+
+    // Structure a reader navigates by, in the order it appears.
+    const markers = lines.filter((l) => l.startsWith('▸'))
+    expect(markers.some((l) => /heading 1/.test(l)), 'no h1 in the reading').toBe(true)
+    expect(markers.some((l) => /^▸ table/.test(l)), 'the data table is not announced as a table').toBe(true)
+
+    /*
+      The regression this pins.
+
+      The first version returned as soon as it met a `sr-only` element,
+      so the chart's visually-hidden data table — a sr-only <div> wrapping
+      a captioned <table> — came out as ONE 600-character line with every
+      cell run together. That is the same "a container is not its text"
+      mistake this file already fixed once in `accessibleName`, made again
+      twelve functions later.
+    */
+    const longest = Math.max(...lines.map((l) => l.length))
+    expect(
+      longest,
+      `a single line is ${longest} characters — the hidden table is being ` +
+        `flattened into a blob instead of read row by row. A wrapper is not ` +
+        `a leaf just because it is invisible.`,
+    ).toBeLessThan(200)
+
+    // And the data itself must survive, row-addressable.
+    expect(
+      lines.some((l) => /Moon,\s*Sign:\s*\w+,\s*House:\s*\d+\w+/.test(l)),
+      'the Moon row is not readable from the page reading',
+    ).toBe(true)
+  })
+
   test('a jump button is not counted as a tab stop', async ({ page }) => {
     await page.goto('/auth?a11y=1')
     const panel = page.locator('[data-a11y-inspector]')
