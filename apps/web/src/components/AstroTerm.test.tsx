@@ -173,15 +173,54 @@ describe('the accessible name when the children are data', () => {
     expect(button).toHaveAccessibleName(/nakshatra/i)
   })
 
-  it('keeps the plain label when the children ARE the term', () => {
-    // The case the original behaviour got right, and which the fix must
-    // not regress: nothing is lost by replacing "Nakshatra" with
-    // "What “Nakshatra” means", and prefixing it would stutter.
+  it('keeps the plain label when there are no children at all', () => {
     renderTerm(<AstroTerm term="nakshatra" />)
 
     expect(screen.getByRole('button').getAttribute('aria-label')).not.toMatch(
       /nakshatra\.\s*what/i,
     )
+  })
+
+  it('does not stutter when the children ARE the term', () => {
+    /*
+      The regression the first fix shipped, and the reason this test
+      exists in this exact shape.
+
+      The guard above renders <AstroTerm term="nakshatra" /> with NO
+      children, so it exercises the `entry.name` fallback — a branch the
+      bug never touched. The real call sites pass the term as children:
+
+        <AstroTerm term="rasi">Rasi</AstroTerm>
+
+      and prefixing unconditionally produced
+      `button "Rasi. What “Rasi” means"`, live on the chart page. A guard
+      aimed one branch away from the defect is not a guard.
+    */
+    renderTerm(<AstroTerm term="rasi">Rasi</AstroTerm>)
+
+    expect(
+      screen.getByRole('button').getAttribute('aria-label'),
+      'the term is announced twice — once as the value, once inside the ' +
+        'affordance. Prefix only when the children differ from the name.',
+    ).not.toMatch(/rasi\W+what/i)
+  })
+
+  it('ignores case when deciding whether it would stutter', () => {
+    /*
+      Call sites lower-case a term to fit a sentence — "the rasi chart".
+      "rasi" and "Rasi" are the same word said twice, and an exact string
+      compare would let that through.
+
+      `first_house` was the first spelling of this test and it passed
+      vacuously: no such glossary key exists, so `defineTerm` returned
+      null, the component rendered plain text with no button at all, and
+      `getByRole('button')` was querying something that was never there.
+      A real term is required for the assertion to reach the code.
+    */
+    renderTerm(<AstroTerm term="rasi">rasi</AstroTerm>)
+
+    const name = screen.getByRole('button').getAttribute('aria-label') ?? ''
+    expect(name).not.toMatch(/rasi\W+what/i)
   })
 
   it('falls back rather than announcing an object', () => {

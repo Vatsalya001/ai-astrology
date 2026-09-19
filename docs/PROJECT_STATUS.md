@@ -1305,3 +1305,98 @@ stale-build failure that `ayana test` exists to prevent — verify rebuilds the 
 under the running server, and the suite bailed after 29 tests with a 500 on a chunk.
 `./scripts/ayana test` restarts web between the two and passed 156. **The wrapper is not
 a convenience.**
+
+---
+
+# PR 28 — the tester's four answers, and a stutter I shipped an hour earlier
+
+The Phase 3 manual pass came back with four judgements, all negative, all actionable.
+
+## 1. "No, I would not have found it" — the jump controls
+
+Asked to answer *"which sign is my Moon in?"* from the inspector, the tester said they
+would not have found **The data table** unaided. Four flat buttons — *Start of page*,
+*Main content*, *The chart*, *The data table* — read as decoration; nothing said they
+were destinations, or that the answer lived behind one of them.
+
+Now a labelled `<select>` — *"Jump to a part of the page"* — whose options name what the
+tester will **find** rather than what the element **is**:
+
+```
+The very top — the skip link
+Main content — past the header
+The chart diagram — the twelve houses
+The planet table — every sign, house and nakshatra
+```
+
+## 2. "It looks like a database dump" — and it was my tool, for the third time
+
+`/kundli/chart` linearised as seven bare fragments where the switchers are:
+
+```
+Chart / Rasi / D1 / Navamsa / D9 / Dasamsa / D10
+```
+
+Chromium's own accessibility tree reads the same markup as:
+
+```
+group "Chart"
+  radio "Rasi D1" [checked]
+  radio "Navamsa D9"
+  radio "Dasamsa D10"
+```
+
+`VargaSwitcher` and `StyleSwitcher` are real `<fieldset>`s with a `<legend>` and radio
+inputs — correct markup that my linearisation walked straight past, emitting the label
+text as loose lines. **Third time this file has flattened a container into its text and
+made correct markup look broken**, after `accessibleName` and the `sr-only` table
+wrapper. Now:
+
+```
+▸ group — Chart
+    Rasi D1 — radio button 1 of 3, selected
+    Navamsa D9 — radio button 2 of 3
+```
+
+Position and state are included because they are most of what makes a radio group
+legible by ear.
+
+## 3. "Confusing" — a link promising what you were just given
+
+*"See every position in a table"* sat directly below the chart's own visually-hidden
+table. A listener hears all ten rows, then is offered a table of every position — which
+sounds like the thing they just received, so the reasonable conclusion is that they
+missed something. It goes to a different **page**. Renamed to *"Open the full planets
+screen"*, which names the destination and loses nothing for a sighted reader who could
+not see the hidden table anyway.
+
+## 4. The dasha tracks changed structure as you used them
+
+`Track` renders `<section aria-label="Mahadasha periods">` when populated and a bare
+`<div>` when empty. So with only the mahadasha track filled, the page had **one landmark
+and two stretches of loose paragraphs** — and drilling into a mahadasha turned the
+antardasha track into a landmark. Structure that appears and disappears as you use the
+page is harder to learn than structure that is merely sparse. Both branches now use the
+same `<section>`.
+
+## And a regression I had shipped an hour earlier
+
+Fixing the Nakshatra label (PR 27) introduced `button "Rasi. What “Rasi” means"` on the
+chart page — a stutter, because `<AstroTerm term="rasi">Rasi</AstroTerm>` passes children
+that are the term's own name.
+
+The test meant to guard it rendered `<AstroTerm term="nakshatra" />` with **no children**,
+so it exercised the `entry.name` fallback — a branch the bug never touched. **A guard
+aimed one branch away from the defect.** The prefix is now suppressed when the children
+equal the term, compared case- and punctuation-insensitively.
+
+Worth recording: the first replacement test used `term="first_house"`, which is not a
+glossary key — `defineTerm` returned null, the component rendered plain text with no
+button, and `getByRole('button')` queried something that never existed. It passed
+vacuously. Fifth sampling error in this file's history, and the same shape every time:
+**the assertion never reached the code.**
+
+## Verification
+
+`task verify` + **156** e2e + smoke, green. One visual baseline moved — the chart screen,
+whose link text changed. Every guard break-tested.

@@ -32,6 +32,42 @@ function flatten(node: ReactNode): string {
 }
 
 /**
+ * The accessible name for the glossary control.
+ *
+ * ── Why the value goes first ──
+ *
+ * `aria-label` wins accname over name-from-content, so a bare
+ * "What “{term}” means" REPLACES whatever the button wraps. That is
+ * correct where the children ARE the term and destroys data where they
+ * are a value: every Nakshatra cell on /kundli/planets announced
+ * "What “Nakshatra” means" instead of "Purva Ashadha 3".
+ *
+ * ── Why the equality check exists ──
+ *
+ * The first fix prefixed unconditionally, and immediately produced
+ * `button "Rasi. What “Rasi” means"` on the chart page — a stutter,
+ * because <AstroTerm term="rasi">Rasi</AstroTerm> passes children that
+ * are the term's own name. The test that was supposed to guard this
+ * rendered <AstroTerm term="nakshatra" /> with NO children, so it
+ * exercised the `entry.name` fallback and never saw the case that broke.
+ * A guard aimed one branch away from the defect.
+ *
+ * Compared case- and punctuation-insensitively: "Rasi" and "rasi" are
+ * the same word said twice, and so are "First house" and "first house".
+ */
+function prefixWithValue(value: string, termName: string, template: string): string {
+  // Substituted here rather than through the context's `fill`, so the
+  // accessible name is testable without standing up a locale provider.
+  const affordance = template.replace('{term}', termName)
+  if (!value) return affordance
+
+  const same = (a: string) => a.toLowerCase().replace(/[^a-z0-9]/g, '')
+  if (same(value) === same(termName)) return affordance
+
+  return `${value}. ${affordance}`
+}
+
+/**
  * A word in the chart UI that most users will not know, made tappable.
  *
  * "Combust", "Sade Sati", "Vimshottari", "navamsa" — a chart is dense
@@ -131,11 +167,7 @@ export function AstroTerm({
           `label-content-name-mismatch`, is experimental and outside the
           wcag2a/2aa tag sets this suite runs.
         */
-        aria-label={
-          flatten(children)
-            ? `${flatten(children)}. ${interpolateDefine(t.chart.defineTerm, entry.name)}`
-            : interpolateDefine(t.chart.defineTerm, entry.name)
-        }
+        aria-label={prefixWithValue(flatten(children), entry.name, t.chart.defineTerm)}
       >
         {label}
       </button>
@@ -151,15 +183,4 @@ export function AstroTerm({
       </Dialog>
     </>
   )
-}
-
-/**
- * Local rather than the context's `fill`.
- *
- * `fill` is reached through `useLocale()`, which is fine, but this is
- * the only substitution the component makes and keeping it here means
- * the aria-label is testable without standing up a provider.
- */
-function interpolateDefine(template: string, name: string): string {
-  return template.replace('{term}', name)
 }

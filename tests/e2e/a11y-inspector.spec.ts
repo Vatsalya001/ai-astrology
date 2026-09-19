@@ -1,6 +1,20 @@
-import { expect, test, type Page } from '@playwright/test'
+import { expect, test, type Locator, type Page } from '@playwright/test'
 
 import { uniquePhone, watchOTP } from './otp-log'
+
+/**
+ * Jump via the panel's selector.
+ *
+ * The four jump buttons became a labelled `<select>` because a tester
+ * asked to find the planet table did not recognise "The data table" as a
+ * destination. Driving it by OPTION VALUE rather than by visible label
+ * keeps these tests stable while the labels are reworded — and the
+ * labels are the part most likely to change, since their whole job is to
+ * be recognisable.
+ */
+async function jumpTo(panel: Locator, target: 'start' | 'main' | 'chart' | 'table') {
+  await panel.locator('select#a11y-jump').selectOption(target)
+}
 
 /**
  * The accessibility inspector.
@@ -34,9 +48,9 @@ test('?a11y=1 mounts it, and it reports what is focused', async ({ page }) => {
   const panel = page.locator('[data-a11y-inspector]')
   await expect(panel).toBeVisible({ timeout: 15_000 })
 
-  // A jump button, so the tester never has to "click on empty dark
+  // A jump target, so the tester never has to "click on empty dark
   // space" to put focus in the page.
-  await panel.getByRole('button', { name: 'Main content' }).click()
+  await jumpTo(panel, 'main')
 
   expect((await panel.textContent()) ?? '', 'the panel shows no focused element').toContain(
     'Focused now',
@@ -93,9 +107,9 @@ test('it does not count itself in the focus order', async ({ page }) => {
   const panel = page.locator('[data-a11y-inspector]')
   await expect(panel).toBeVisible({ timeout: 15_000 })
 
-  // Click two of the panel's OWN buttons. Neither is part of the page
+  // Use two of the panel's OWN controls. Neither is part of the page
   // under test, so neither may appear in the log.
-  await panel.getByRole('button', { name: 'Main content' }).click()
+  await jumpTo(panel, 'main')
   await panel.getByRole('button', { name: 'Reset' }).click()
   await page.waitForTimeout(300)
 
@@ -205,7 +219,7 @@ test.describe('reading a table', () => {
 
     const panel = page.locator('[data-a11y-inspector]')
     await expect(panel).toBeVisible({ timeout: 15_000 })
-    await panel.getByRole('button', { name: 'The data table' }).click()
+    await jumpTo(panel, 'table')
 
     const focusedBlock = panel.locator('text=Focused now').locator('..')
     const name = (await focusedBlock.textContent()) ?? ''
@@ -230,7 +244,7 @@ test.describe('reading a table', () => {
 
     const panel = page.locator('[data-a11y-inspector]')
     await expect(panel).toBeVisible({ timeout: 15_000 })
-    await panel.getByRole('button', { name: 'The data table' }).click()
+    await jumpTo(panel, 'table')
 
     const text = (await panel.textContent()) ?? ''
 
@@ -264,7 +278,7 @@ test.describe('reading a table', () => {
     const panel = page.locator('[data-a11y-inspector]')
     await expect(panel).toBeVisible({ timeout: 15_000 })
 
-    await panel.getByRole('button', { name: 'Read the page in order' }).click()
+    await panel.getByRole('button', { name: /Read the whole page aloud/i }).click()
     await page.waitForTimeout(400)
 
     const lines = await panel.locator('ol li').allTextContents()
@@ -307,9 +321,9 @@ test.describe('reading a table', () => {
     await expect(panel).toBeVisible({ timeout: 15_000 })
 
     // Three jumps, no Tab presses.
-    await panel.getByRole('button', { name: 'Main content' }).click()
-    await panel.getByRole('button', { name: 'Start of page' }).click()
-    await panel.getByRole('button', { name: 'Main content' }).click()
+    await jumpTo(panel, 'main')
+    await jumpTo(panel, 'start')
+    await jumpTo(panel, 'main')
 
     expect(
       (await panel.textContent()) ?? '',
