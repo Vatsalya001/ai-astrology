@@ -1477,3 +1477,73 @@ merged over red checks that never started. Every check in this repo is local, so
 means green on one machine. That is not a gate item and does not reopen one — but a
 budget that fails the build, a guard that fires and a suite that passes constrain nobody
 until a machine other than this one runs them. It should be fixed before Phase 4.
+
+---
+
+# PR 30 — §11.8 closed: a hostile profile label, asserted rather than assumed
+
+Asked which of the three open §11 security items I could actually fix. **One.**
+
+## What was true, and why that was not enough
+
+§11.8 — *"all rendered content escaped — a user-supplied profile label cannot inject
+markup"* — was **already true**, for a reason nobody had written down: React escapes every
+JSX child, `interpolate()` returns a plain string, and there is not one
+`dangerouslySetInnerHTML` in the codebase.
+
+True *by absence* is a fragile way to be safe. Nothing failed if somebody added the one
+API that turns a string into markup, and Phase 5 renders **model output**, where
+`.claude/rules/frontend.md` is explicit that `<img onerror=...>` is a real vector.
+
+## Two guards, because neither covers the other
+
+**Structural** (`no-raw-html.test.ts`) — no source file may assign `innerHTML`/`outerHTML`,
+call `insertAdjacentHTML`, or use `dangerouslySetInnerHTML`. An `ALLOWED` list exists and
+is empty; the first entry should be hard to add and obvious in a diff. This catches the
+vector being **introduced**.
+
+**Behavioural** (`xss-profile-label.spec.ts`) — four payloads (`<script>`, `<img onerror>`,
+a quote-break, `<svg/onload>`) stored through the real API and rendered in a real browser.
+This catches it being **exploited**. A component test would only have proved React
+escapes, which was never in doubt.
+
+Both break-tested against a real injection: rendering the label with
+`dangerouslySetInnerHTML` fails the structural guard *naming the file* and the behavioural
+guard *finding the payload in the DOM*.
+
+## The test passed vacuously twice before it worked
+
+Recorded because the shape is now familiar and the detection matters more than the bug:
+
+1. **Scraped `localStorage` for a JWT.** Found nothing — the access token lives in memory
+   *by design* (`users-api.ts`: localStorage is readable by any script). The POST went out
+   unauthenticated, returned 401, hit an early return, and **passed asserting nothing**.
+2. **Hardcoded `place_id: 1`.** No such place. The server answered 400 *"That birth place
+   could not be resolved"*, the test read any non-401 rejection as *"the server refused the
+   hostile label"* and passed — **concluding the opposite of the truth from an error about
+   geography**.
+
+Both now impossible: the token is minted through `/auth/refresh` with an explicit
+`expect(200)`, the place is looked up through the same search the UI uses, and a rejection
+only counts as a pass if the error body actually mentions the label.
+
+A third near-miss: the DOM assertion first counted `script:not([src])` and failed on
+**Next's own inline bootstrap scripts** — the very ones that keep `'unsafe-inline'` in the
+CSP. It reported a correct page as injected. Now scoped to elements carrying the payload's
+own marker.
+
+## The other two, and why I did not touch them
+
+**§11.9 — CSP `'unsafe-inline'`.** I can change it. I should not, now. The decision in
+`next.config.mjs` is dated, measured (`csp.spec.ts` failed on a click timeout under the
+strict policy) and already carries a **blocking Phase 5 gate item**. Both exits cost
+something real: a per-request nonce forces every page dynamic — killing static rendering
+and CDN caching for an audience on Indian mobile networks — and `experimental.sri` is
+experimental and needs an ADR. Introducing either into a just-closed phase, for a
+requirement that lands in Phase 5, is poor sequencing rather than diligence.
+
+**§11.5 — Chrome sandbox and network.** Half is mine and half is not. The network half is
+implementable (`chromedp.Flag("host-resolver-rules", …)` derived from `WEB_URL`, or
+`network.SetBlockedURLs`) and I have verified both APIs exist. The **sandbox** half is not
+a code change: `--no-sandbox` is set because the container has no user namespaces, and
+that is a deployment decision. Fixing one half and ticking the item would misrepresent it.
