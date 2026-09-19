@@ -340,6 +340,96 @@ cmd_up() {
 
 # ─── status ──────────────────────────────────────────────────────────
 
+# Is the running web server serving a build that still exists?
+#
+# ── The failure this catches ──
+#
+# `next start` holds a build manifest in memory. Rebuilding the app
+# underneath it — which `task verify` does, because `task build` is one
+# of its steps — replaces every hashed chunk on disk while the running
+# server keeps serving the old filenames. Those 404 or 500, the browser
+# refuses them ("MIME type text/plain is not executable"), and the page
+# never hydrates.
+#
+# The symptom is the worst kind: the page RENDERS correctly, text can be
+# typed into inputs (that is the browser, not React), and every button
+# silently does nothing. It reads as "the login is broken" and it has
+# cost this project three separate debugging sessions.
+#
+# So: fetch the page, pull out a chunk it references, and ask for it.
+web_build_check() {
+  local html chunk status
+  if ! html=$(curl -sf --max-time 5 "http://localhost:$WEB_PORT/auth" 2>/dev/null); then
+    printf '  %s✗%s web        not answering on :%s\n' "$RED" "$RESET" "$WEB_PORT"
+    return
+  fi
+
+  # EVERY chunk the page references, not just the first.
+  #
+  # The first is usually the framework bundle, whose hash does not move
+  # when product code changes — so sampling one chunk reported a live
+  # build while the page's own code was already 404ing. Found by
+  # breaking it: a dictionary string was edited, rebuilt, and the check
+  # still said ✓.
+  local chunks bad_chunk=""
+  chunks=$(printf '%s' "$html" | grep -oE '/_next/static/chunks/[A-Za-z0-9_-]+\.js' | sort -u)
+  if [[ -z "$chunks" ]]; then
+    printf '  %s!%s web        answering, but references no JS chunk — cannot verify\n' "$YELLOW" "$RESET"
+    return
+  fi
+
+  local n=0
+  while IFS= read -r chunk; do
+    [[ -z "$chunk" ]] && continue
+    n=$((n + 1))
+    status=$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "http://localhost:$WEB_PORT$chunk" 2>/dev/null)
+    if [[ "$status" != "200" ]]; then
+      bad_chunk="$chunk"
+      break
+    fi
+  done <<< "$chunks"
+
+  chunk="$bad_chunk"
+  if [[ -z "$bad_chunk" ]]; then
+    printf '  %s✓%s web        serving a live build (%s chunks verified)\n' "$GREEN" "$RESET" "$n"
+  else
+    printf '  %s✗%s web        STALE BUILD — %s returned %s\n' "$RED" "$RESET" "$chunk" "$status"
+    printf '             The page will render but NOTHING will be clickable:\n'
+    printf '             React never hydrates when a chunk fails to load.\n'
+    printf '             Almost always caused by a rebuild (task verify, task\n'
+    printf '             build) while this server was running.\n'
+    printf '             Fix: ./scripts/ayana restart-web\n'
+  fi
+}
+
+# Rebuild the web app and restart its server, in that order.
+#
+# The pair is the point. Restarting alone leaves the server on whatever
+# is on disk, which after a partial build is a mix; rebuilding alone
+# leaves the running server holding filenames that no longer exist,
+# which is the exact failure web_build_check reports.
+cmd_restart_web() {
+  say "web"
+  # All three arguments. Passing only the port left $pidfile and $label
+  # empty, and the redirect hid the resulting mess — the hand-started
+  # server survived and  then died on a port in use.
+  stop_port "$WEB_PORT" "$WEB_PID" "web"
+
+  info "rebuilding"
+  npm run build --workspace=web > "$RUN_DIR/web-build.log" 2>&1 \
+    || { tail -20 "$RUN_DIR/web-build.log"; die "web build failed"; }
+
+  npm run start --workspace=web > "$WEB_LOG" 2>&1 &
+  echo $! > "$WEB_PID"
+
+  if wait_for "http://localhost:$WEB_PORT" 60; then
+    ok "web restarted on a fresh build"
+    web_build_check
+  else
+    die "web did not come up — see $WEB_LOG"
+  fi
+}
+
 cmd_status() {
   say "Open in a browser"
   printf '  %s%-34s%s  %s\n' "$BLUE" "http://localhost:$WEB_PORT"         "$RESET" "landing page"
@@ -360,6 +450,10 @@ cmd_status() {
   printf '  %s%-34s%s  %s\n' "$DIM" "postgres://localhost:5433" "$RESET" "user: ayana  db: ayana  (5432 is taken on this machine)"
   printf '  %s%-34s%s  %s\n' "$DIM" "redis://localhost:6381"    "$RESET" "(6379 and 6380 are taken)"
   printf '  %s%-34s%s  %s\n' "$DIM" "http://localhost:11434"    "$RESET" "Ollama — free local models, no API key"
+  echo
+
+  say "Web"
+  web_build_check
   echo
 
   say "Background"
@@ -544,6 +638,7 @@ case "${1:-up}" in
   logs)   cmd_logs ;;
   down)   cmd_down ;;
   restart) cmd_down; echo; cmd_up ;;
+  restart-web) cmd_restart_web ;;
   *)
     cat <<EOF
 ${BOLD}ayana${RESET} — start, check and stop the whole stack
@@ -555,6 +650,7 @@ ${BOLD}ayana${RESET} — start, check and stop the whole stack
   ${BOLD}logs${RESET}     tail every service
   ${BOLD}down${RESET}     stop everything this script started
   ${BOLD}restart${RESET}  down, then up
+  ${BOLD}restart-web${RESET}  rebuild the web app and restart it ${DIM}(after a stale build)${RESET}
 EOF
     exit 1
     ;;
