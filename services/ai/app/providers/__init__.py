@@ -15,6 +15,7 @@ from app.providers.base import (
     FinishReason,
     LLMProvider,
     Message,
+    ModelMap,
     ModelTier,
     ProviderError,
     ProviderTier,
@@ -23,6 +24,8 @@ from app.providers.base import (
     SystemBlock,
     Usage,
 )
+from app.providers.mock import MockProvider, request_fingerprint
+from app.providers.openai_compatible import OpenAICompatibleProvider
 from app.providers.registry import NoProviderAvailableError, ProviderRegistry
 
 __all__ = [
@@ -34,8 +37,11 @@ __all__ = [
     "FinishReason",
     "LLMProvider",
     "Message",
+    "MockProvider",
+    "ModelMap",
     "ModelTier",
     "NoProviderAvailableError",
+    "OpenAICompatibleProvider",
     "ProviderError",
     "ProviderRegistry",
     "ProviderTier",
@@ -43,4 +49,5 @@ __all__ = [
     "Role",
     "SystemBlock",
     "Usage",
+    "request_fingerprint",
 ]
