@@ -1752,3 +1752,62 @@ Counting permanent failures toward the breaker, and letting an open circuit call
 each fail a test named for the decision rather than the symptom.
 
 147 Python tests. `task verify` green.
+
+---
+
+# Phase 4.10, 4.11 — prompts as artifacts, and the ordering that decides the bill
+
+## Immutability is a lockfile, not a rule
+
+The spec: *"You cannot debug a bad response from three weeks ago if the prompt that
+produced it has been edited since."* A response records its `prompt_version`, and that
+field only means something if `v1` today is byte-for-byte `v1` in six months.
+
+`published.lock.json` holds a SHA-256 per module. Three tests, each covering a different
+way the guarantee can be lost:
+
+- **edited in place** — the digest moves
+- **deleted** — a logged `prompt_version` now points at nothing, which is worse than
+  pointing at something changed
+- **added but not locked** — the module exists and *nothing stops anyone editing it*,
+  because the first test only compares names it already knows
+
+That third one is the failure the other two cannot see, and it is the one a new
+contributor produces by default.
+
+Break-tested both ways: appending a line to `safety_rules.v1.md` fails naming the module;
+adding an unlocked module fails naming that.
+
+## The builder enforces ordering structurally
+
+Prompt caching matches a byte-identical **prefix**. Stable content first, volatile last —
+one byte changing early invalidates everything downstream, so a timestamp at the top
+silently turns every request into a cache miss.
+
+`PromptBuilder` has two phases and cannot go back. `add()` after `cache_breakpoint()`
+raises; `chart_context()` before it raises; `build()` without one raises.
+
+**Why structural rather than documented:** *"remember to put stable content first"* is
+exactly the kind of instruction that survives review and not the next refactor — and when
+it is forgotten, **nothing fails**. Responses stay correct and the bill quietly doubles.
+That is the worst shape a regression can have, and it is the shape a comment cannot
+prevent.
+
+Also refused: a breakpoint at position zero (caches nothing, costs a round trip to
+discover), and an empty volatile block (a first-turn conversation has no summary; emitting
+an empty string for it makes turn one structurally different from turn two, for no
+content).
+
+## The stability test asserts the thing that matters
+
+Not "a build is deterministic" — **two different users' charts must share a prefix**. If
+they do not, the hit rate is zero however stable each individual prompt is. Plus the
+negative case: changing a stable module *does* move the prefix, so the test is not merely
+asserting that a constant equals itself.
+
+## A missing module raises rather than defaulting
+
+The failure mode of a missing prompt module is not a worse answer — it is an **unguarded**
+one. A silent fallback would send a request with the safety rules absent.
+
+164 Python tests. `task verify` green.
