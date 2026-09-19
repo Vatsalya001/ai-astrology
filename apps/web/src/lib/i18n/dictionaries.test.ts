@@ -111,3 +111,77 @@ describe('interpolation', () => {
     ).toContain('प्रिया')
   })
 })
+
+/**
+ * "a antardasha".
+ *
+ * The dasha screen said it for months. The string was
+ * `'Choose a {parent} above to see its periods.'` — one template with a
+ * hardcoded article, interpolating either "mahadasha" (correct) or
+ * "antardasha" (not). No amount of interpolation fixes that, because the
+ * article belongs to the word rather than the sentence, and adding an
+ * `{article}` placeholder would export an English grammar rule into
+ * every other locale — Hindi has no indefinite article at all.
+ *
+ * It is the kind of error a reader notices instantly and a reviewer
+ * never does, because the template reads correctly in isolation and the
+ * broken form only exists at runtime.
+ *
+ * Checked against the dictionary VALUES rather than the source file, so
+ * the prose above — which quotes the mistake — is not itself a failure.
+ * Two other guards in this repo had to learn that the hard way.
+ */
+describe('English indefinite articles', () => {
+  /*
+    a/e/i/o only. "u" is excluded wholesale: "a user", "a unique chart"
+    and "a union" are all correct, because the rule is about the SOUND
+    and "u" is the letter where sound and spelling disagree most often.
+    A guard that fires on those gets silenced.
+  */
+  const WRONG_ARTICLE = /\ba (?=[aeio])/gi
+
+  // Same exception in the other direction: these begin with a vowel and
+  // take "a", because they are pronounced with a leading consonant.
+  const CONSONANT_SOUNDED = /^(one|once|eu)/i
+
+  function flat(obj: object, prefix = ''): Array<[string, string]> {
+    return Object.entries(obj).flatMap(([key, value]) =>
+      typeof value === 'string'
+        ? [[`${prefix}${key}`, value] as [string, string]]
+        : flat(value as object, `${prefix}${key}.`),
+    )
+  }
+
+  it('never writes "a" before a vowel sound', () => {
+    const offences: string[] = []
+
+    for (const [key, value] of flat(en)) {
+      WRONG_ARTICLE.lastIndex = 0
+      let match: RegExpExecArray | null
+      while ((match = WRONG_ARTICLE.exec(value)) !== null) {
+        const following = value.slice(match.index + match[0].length)
+        if (CONSONANT_SOUNDED.test(following)) continue
+        offences.push(`${key}: "…${value.slice(match.index, match.index + 28)}…"`)
+      }
+    }
+
+    expect(
+      offences,
+      'these read "a" where English needs "an". Usually a sign that an ' +
+        'article was hardcoded into a template whose placeholder can hold ' +
+        'more than one word — split the string per case rather than ' +
+        'interpolating grammar.',
+    ).toEqual([])
+  })
+
+  it('would catch the string that shipped', () => {
+    // The guard, broken on purpose. Without this, a regex that silently
+    // stopped matching would leave the suite green and the bug live.
+    const shipped = 'Choose a antardasha above to see its periods.'
+    WRONG_ARTICLE.lastIndex = 0
+    expect(WRONG_ARTICLE.test(shipped)).toBe(true)
+
+    WRONG_ARTICLE.lastIndex = 0
+    expect(WRONG_ARTICLE.test(en.chart.dashaChooseAntardasha)).toBe(false)
+  })
+})

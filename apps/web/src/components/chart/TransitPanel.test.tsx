@@ -224,3 +224,81 @@ describe('TransitPanel', () => {
     expect(screen.getByText(/— current phase/i)).toBeInTheDocument()
   })
 })
+
+/**
+ * The nine grahas are listed in the traditional order, not alphabetically.
+ *
+ * ── Why this needed a test rather than a tidy-up ──
+ *
+ * The list shipped alphabetical — Ju, Ke, Ma, Me, Mo, Ra, Sa, Su, Ve —
+ * and that was nobody's decision. `ListTransitsAt` is a
+ * `SELECT DISTINCT ON (planet)`, and Postgres requires the DISTINCT ON
+ * expression to be leftmost in ORDER BY. So `ORDER BY planet` is load
+ * bearing for correctness, the alphabetical order leaks out of it, and
+ * the obvious fix — reorder the query — would break the deduplication
+ * that stops a stale row shadowing a fresh one.
+ *
+ * Sorting therefore lives in the view, and this pins it there. Without a
+ * test the next person to touch this file sees `[...].sort()` on data
+ * that arrives sorted-looking and removes it.
+ *
+ * It matters because a reader checking this screen against a printed
+ * kundli reads down two lists at once. Every panchanga prints Sun first.
+ */
+describe('the order the planets are listed in', () => {
+  const ALPHABETICAL = [
+    'Jupiter', 'Ketu', 'Mars', 'Mercury', 'Moon',
+    'Rahu', 'Saturn', 'Sun', 'Venus',
+  ]
+
+  it('is traditional even when the data arrives alphabetically', () => {
+    // Exactly what the query returns today.
+    renderPanel(data({ transits: ALPHABETICAL.map((planet) => position({ planet })) }))
+
+    /*
+      Read from the abbreviation cell, not by searching the row text.
+      Every row ends "Nth from Moon", so a substring match for a planet
+      name finds "Moon" in all nine of them — which is how the first
+      version of this assertion passed a list that was still wrong.
+    */
+    const order = transitItems().map((item) => item.firstElementChild?.textContent?.trim())
+
+    expect(
+      order,
+      'the transiting planets are listed alphabetically. That is the order ' +
+        '`SELECT DISTINCT ON (planet)` forces on the query, not an order ' +
+        'anyone chose to display — see GRAHA_ORDER in glyphs.ts.',
+    ).toEqual(['Su', 'Mo', 'Ma', 'Me', 'Ju', 'Ve', 'Sa', 'Ra', 'Ke'])
+  })
+
+  it('does not reorder the caller\'s array', () => {
+    /*
+      `sort()` mutates. Sorting props during render is a side effect,
+      and React's StrictMode double-render turns that into a real bug
+      rather than a style complaint.
+    */
+    const transits = ALPHABETICAL.map((planet) => position({ planet }))
+    const before = transits.map((p) => p.planet)
+
+    renderPanel(data({ transits }))
+
+    expect(
+      transits.map((p) => p.planet),
+      'the panel sorted the array it was handed, in place',
+    ).toEqual(before)
+  })
+
+  it('puts an unrecognised body last rather than first', () => {
+    // A tenth graha should appear at the end of a list the reader
+    // already understands, not displace the Sun.
+    renderPanel(
+      data({
+        transits: [position({ planet: 'Chiron' }), position({ planet: 'Sun' })],
+      }),
+    )
+
+    const items = transitItems()
+    expect(items[0]).toHaveTextContent('Sun')
+    expect(items[1]).toHaveTextContent('Chiron')
+  })
+})
