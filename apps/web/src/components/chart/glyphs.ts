@@ -37,6 +37,55 @@ export const PLANET_ABBREVIATIONS: Record<string, string> = {
  */
 export const RETROGRADE_MARK = '℞'
 
+/**
+ * The order the nine grahas are named in. Not alphabetical.
+ *
+ * Sun, Moon, Mars, Mercury, Jupiter, Venus, Saturn, then the two lunar
+ * nodes. It is the order of the Vimshottari sequence's parent scheme and
+ * the order every panchanga, every printed kundli and every competing
+ * product prints — so a reader comparing this screen against a paper
+ * chart reads down two lists in step.
+ *
+ * ── Why this is needed at all ──
+ *
+ * The transit list arrived alphabetical: Ju, Ke, Ma, Me, Mo, Ra, Sa, Su,
+ * Ve. That is not a display choice anybody made. `ListTransitsAt` is a
+ * `SELECT DISTINCT ON (planet)`, and Postgres REQUIRES the DISTINCT ON
+ * expression to be leftmost in ORDER BY — so `ORDER BY planet` is load
+ * bearing for correctness and must not be touched to fix presentation.
+ *
+ * Hence sorting in the view. The natal table is unaffected because
+ * astro-service already returns the grahas in this order; only rows that
+ * have been through that query need re-ordering.
+ */
+export const GRAHA_ORDER = [
+  'Sun',
+  'Moon',
+  'Mars',
+  'Mercury',
+  'Jupiter',
+  'Venus',
+  'Saturn',
+  'Rahu',
+  'Ketu',
+] as const
+
+const GRAHA_RANK: Record<string, number> = Object.fromEntries(
+  GRAHA_ORDER.map((planet, index) => [planet, index]),
+)
+
+/**
+ * Comparator for anything carrying a `planet` name.
+ *
+ * An unknown name sorts last rather than first: if astro-service ever
+ * grows a tenth body, it appears at the end of a list the reader already
+ * understands instead of displacing the Sun.
+ */
+export function byGrahaOrder(a: { planet: string }, b: { planet: string }): number {
+  const rank = (planet: string) => GRAHA_RANK[planet] ?? GRAHA_ORDER.length
+  return rank(a.planet) - rank(b.planet)
+}
+
 export function planetAbbreviation(planet: string): string {
   // Falls back to the first two letters rather than throwing. A planet
   // this map has not heard of should still appear on the chart — an

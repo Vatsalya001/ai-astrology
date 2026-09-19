@@ -380,7 +380,18 @@ export const en = {
     dashasAddBirthTime: 'Add a birth time',
     dashaCurrent: 'Current period',
     dashaLevelFailed: 'These periods could not be loaded.',
-    dashaChooseParent: 'Choose a {parent} above to see its periods.',
+    /*
+      Two strings, not one with a {parent} placeholder.
+
+      It was `'Choose a {parent} above to see its periods.'`, which reads
+      correctly as "a mahadasha" and incorrectly as "a antardasha". The
+      article belongs to the WORD, so no amount of interpolation fixes it
+      — and adding an {article} placeholder would export an English
+      grammar rule into every other locale. Hindi has no indefinite
+      article at all; it uses the numeral एक.
+    */
+    dashaChooseMahadasha: 'Choose a mahadasha above to see its periods.',
+    dashaChooseAntardasha: 'Choose an antardasha above to see its periods.',
     dashaPeriodsOf: '{level} periods',
 
     transitsLoading: 'Loading transits…',
@@ -796,7 +807,8 @@ export const hi: Dictionary = {
     dashasAddBirthTime: 'जन्म समय जोड़ें',
     dashaCurrent: 'वर्तमान दशा',
     dashaLevelFailed: 'ये दशाएँ लोड नहीं हो सकीं।',
-    dashaChooseParent: 'इसकी दशाएँ देखने के लिए ऊपर एक {parent} चुनें।',
+    dashaChooseMahadasha: 'इसकी दशाएँ देखने के लिए ऊपर एक महादशा चुनें।',
+    dashaChooseAntardasha: 'इसकी दशाएँ देखने के लिए ऊपर एक अंतर्दशा चुनें।',
     dashaPeriodsOf: '{level} काल',
 
     transitsLoading: 'गोचर लोड हो रहे हैं…',

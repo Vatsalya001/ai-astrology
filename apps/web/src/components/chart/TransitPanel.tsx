@@ -6,7 +6,7 @@ import { useLocale } from '@/lib/i18n/context'
 import { cn } from '@/lib/utils'
 
 import { formatDegree } from './format'
-import { RETROGRADE_MARK, ordinal, planetAbbreviation } from './glyphs'
+import { RETROGRADE_MARK, byGrahaOrder, ordinal, planetAbbreviation } from './glyphs'
 import { SadeSatiIndicator } from './SadeSatiIndicator'
 
 /**
@@ -89,7 +89,10 @@ export function TransitPanel({
            and a screen reader moving by landmark otherwise meets two
            unlabelled ones. */
         <ul aria-label={t.chart.transitsList} className="divide-y divide-border">
-          {data.transits.map((position) => (
+          {/* Copied before sorting: `data` is props, and sort() mutates
+              in place. Sorting props is a render-phase side effect that
+              React's StrictMode double-render turns into a real bug. */}
+          {[...data.transits].sort(byGrahaOrder).map((position) => (
             <li
               key={position.planet}
               className="flex items-baseline gap-3 py-3 text-sm"

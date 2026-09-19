@@ -357,3 +357,35 @@ describe('a level whose fetch failed', () => {
   })
 })
 
+
+/**
+ * Each unopened level names its own parent, with the right article.
+ *
+ * These two prompts came from one template — `Choose a {parent} above` —
+ * which is correct for "a mahadasha" and wrong for "a antardasha". The
+ * article belongs to the word, so the strings are now separate, and this
+ * pins which one each level reaches for. Getting them swapped would read
+ * perfectly and tell the reader to click the wrong track.
+ */
+describe('the prompt on a level nobody has opened', () => {
+  it('asks for a mahadasha on the antardasha track', () => {
+    renderTimeline([{ periods: mahadashas() }, { periods: [] }])
+
+    expect(screen.getByText(/choose a mahadasha above/i)).toBeInTheDocument()
+  })
+
+  it('asks for AN antardasha on the pratyantardasha track', () => {
+    renderTimeline([
+      { periods: mahadashas() },
+      { periods: mahadashas() },
+      { periods: [] },
+    ])
+
+    const prompt = screen.getByText(/choose an antardasha above/i)
+    expect(prompt).toBeInTheDocument()
+    expect(
+      prompt.textContent,
+      'the pratyantardasha prompt reads "a antardasha"',
+    ).not.toMatch(/\ba antardasha/i)
+  })
+})

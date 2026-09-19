@@ -227,10 +227,14 @@ function Track({
         <p className="mb-2 text-xs uppercase tracking-wide text-ink-muted">
           {levelInfo(level).name}
         </p>
+        {/*
+          Picked by level rather than assembled from a template. The
+          parent of level 1 is a mahadasha and the parent of level 2 is
+          an antardasha, and those two take different articles — which a
+          single `Choose a {parent}` string got wrong for the second one.
+        */}
         <p className="text-sm text-ink-muted">
-          {fill(t.chart.dashaChooseParent, {
-            parent: levelInfo(level - 1).name.toLowerCase(),
-          })}
+          {level === 1 ? t.chart.dashaChooseMahadasha : t.chart.dashaChooseAntardasha}
         </p>
       </div>
     )

@@ -997,3 +997,76 @@ to `745`.
 
 The email alphabet is fully exhausted — all 26 letters are claimed — so new specs must
 use the phone channel.
+
+---
+
+# PR 24 — two defects a judging pass found, and a validated chart
+
+A full validation of a real chart (26 Feb 2003, 20:55, Prayagraj) across six screens.
+The astrology was correct everywhere. Two presentation defects were not.
+
+## Validation result
+
+Every layer checked independently rather than against itself:
+
+| Layer | Method | Result |
+|---|---|---|
+| Inputs → stored | read `birth_profiles` | date, time, place, tz, UTC instant all correct |
+| Stored chart vs engine | recomputed from the stored instant and compared | **zero mismatches** across 9 planets + ascendant, to 6 dp (`173.366622`) |
+| Planet table on screen | 9 rows × sign, degree, house, nakshatra, **pada** | all 36 values correct; all nine padas re-derived by hand from longitude ÷ 13°20′ |
+| Dignity column | classical exaltation | Jupiter in Cancer marked Exalted; the other eight correctly blank |
+| North Indian diamond | 12 house→sign numbers + 9 glyph placements | all correct; Saturn correctly **without** ℞ (it stationed direct four days before birth) |
+| Dashas | Vimshottari order from the Moon's nakshatra lord | Venus → Sun → Moon → … correct; current period Moon, marker ~74% through a 2018–2028 span |
+| Yogas | kendra/trikona lordships re-derived by hand | 3 of 5 candidate pairs shown, and the **two absent ones verified absent** — neither conjunct nor in mutual aspect |
+| Transits | recomputed for the claimed slot | 9 positions to the arc-minute, 9 house-from-Moon counts, Rahu/Ketu exactly 180°, Sade Sati state |
+
+The yoga screen was the strongest evidence, because of what it does *not* show. A
+detector that over-fires would have printed five cards.
+
+## Defect 1 — "Choose a antardasha"
+
+`dashaChooseParent` was `'Choose a {parent} above to see its periods.'`: one template
+with a hardcoded article, interpolating "mahadasha" (correct) or "antardasha" (not).
+
+No amount of interpolation fixes this, because the article belongs to the **word**, and
+an `{article}` placeholder would export an English grammar rule into every locale —
+Hindi has no indefinite article at all, it uses the numeral एक. Split into two strings
+per level.
+
+## Defect 2 — the transit list was alphabetical
+
+Ju, Ke, Ma, Me, Mo, Ra, Sa, Su, Ve. Nobody chose that. `ListTransitsAt` is a
+`SELECT DISTINCT ON (planet)`, and Postgres **requires** the DISTINCT ON expression to
+be leftmost in `ORDER BY` — so `ORDER BY planet` is load bearing for the deduplication
+that stops a stale row shadowing a fresh one, and reordering the query would be a
+correctness regression to fix a cosmetic one.
+
+So the sort lives in the view: `GRAHA_ORDER` in `glyphs.ts`, traditional order, unknown
+bodies last. The natal table was already right because astro-service returns the grahas
+in that order; only rows that have been through that query need re-ordering.
+
+## Guards, each broken on purpose
+
+- `TransitPanel.test.tsx` — feeds the list in exactly the alphabetical order the query
+  produces and requires traditional order out. Plus: the panel must not sort its props
+  in place (React StrictMode double-renders), and an unknown tenth body sorts last
+  rather than displacing the Sun.
+- `dictionaries.test.ts` — no English string may write "a" before a vowel sound.
+  Restricted to a/e/i/o with a `one|once|eu` exception, because "u" is where spelling
+  and sound disagree most ("a user", "a unique chart") and a guard that fires on those
+  gets silenced.
+- `DashaTimeline.test.tsx` — pins which prompt each level reaches for. Swapping them
+  would read perfectly and send the reader to the wrong track.
+
+## One more sampling mistake, recorded because it is now a pattern
+
+The first version of the ordering assertion extracted planet names by searching each
+row's text. It passed on a list that was still wrong — every row ends *"Nth from Moon"*,
+so a substring search for a planet name finds "Moon" in all nine. Reading the
+abbreviation cell fixed it.
+
+That is the third time in this project a guard has been written against a convenient
+projection of the data rather than the thing itself — after sampling one JS chunk
+instead of all of them, and grepping one call shape for OTP mask letters instead of
+both. The shared lesson: **assert on the narrowest unambiguous field, not on whatever
+string is easiest to reach.**
