@@ -2,8 +2,8 @@
 
 ```
 Phase: 3 — Kundli UI
-Gate:  🔶 OPEN  (15 of 16 gate items closed)
-       One open, and it needs a decision rather than work.
+Gate:  ✅ CLOSED  (16 of 16 gate items closed)
+       Item 14 closed by decision, not by reaching the number. See ADR-010.
 ```
 
 Phase 2 closed with 20 of 20. Its record is `docs/TESTING-PHASE-2.md`, which lists what
@@ -12,7 +12,7 @@ to prove they fire. Phase 3 is being held to the same standard.
 
 ---
 
-## Closed (15)
+## Closed (16)
 
 | # | Item | Evidence |
 |---|---|---|
@@ -29,34 +29,51 @@ to prove they fire. Phase 3 is being held to the same standard.
 | 11 | Another user's PDF rejected | PR 12/13, break-tested |
 | 12 | Visual regression suite green | PR 16 — 15 baselines, 3 viewports, stable over 3 runs |
 | 13 | Manual keyboard and screen-reader pass | `docs/TESTING-PHASE-3.md` — closed 2026-09-19, six defects found and fixed first |
+| 14 | Performance budgets met and CI-enforced | ADR-010 — per-route regression budgets enforced, exit 1 on breach (break-tested); the spec's 180 KB recorded as unmet |
 | 15 | `task verify` green | run at each PR |
 | 16 | `PROJECT_STATUS.md` and this file updated | both current |
 
 ---
 
-## Open (1)
+## Phase 3 gate: closed
 
-### 14 — performance budgets met ⚖️ **needs a decision, not work**
+All sixteen items are closed. Two of them are worth reading rather than counting:
 
-Enforced regression budgets ship and fail the build (PR 15). The spec's **180 KB**
-target does not pass: `/kundli/chart` is **201.0 KB** gzipped (measured 2026-09-19), and
-the framework floor — React, react-dom and the Next client runtime, before any Ayana code
-— is **159.5 KB**. That leaves ~20 KB for the whole product, and the i18n dictionaries
-alone are 14.8 KB.
+**13 — the manual a11y pass** was not a formality. Q1 came back *"No, I would not have
+found it"* and Q2 came back *"correct but confusing"* in three places. Six defects, all
+fixed before the item closed, and three of them were in the inspector rather than the
+product — a tool that made correct markup look broken. `docs/TESTING-PHASE-3.md` records
+what was judged by a person and what was only measured, because those are not the same
+evidence.
 
-It is not closeable by optimisation. Stripping the glossary prose (8.9 KB) **and** the
-entire Hindi dictionary (7.1 KB) — every removable byte — lands at 183.0 KB, measured.
+**14 — the performance budget** closed by a decision, not by reaching 180 KB. The route
+is 201.0 KB and the framework floor under it is 159.5 KB, so the target leaves ~20 KB for
+the whole product; deleting every removable byte, including the entire Hindi dictionary,
+lands at 183.0 KB. ADR-010 replaces it as the gate criterion with the per-route
+regression budgets, which fail the build on breach — verified by setting one below the
+measured size and watching `npm run budget` exit 1.
 
-Three options, and this is a decision rather than work:
+The spec's number is **not** deleted. `specTargetKB: 180` still prints on every run and
+is still recorded below as unmet. A target quietly moved to whatever was achieved hides
+the gap; an unmet one stated plainly keeps it visible.
 
-- **A.** Ship one locale's dictionary. Saves ~15 KB, still misses, and costs Hindi.
-- **B.** Revise the target to the enforced regression budgets that already ship and fail
-  the build, recording the spec number as unmet. *Recommended: the 180 KB was written
-  before the framework was chosen, and a budget no product-code change can meet is not a
-  budget.*
-- **C.** Treat it as a framework decision and defer it out of Phase 3 entirely.
+### What "16 of 16" does not mean
 
-**This is the only thing standing between Phase 3 and a closed gate.**
+**Every check in this repo is local.** CI has never executed a single job — the runner
+refuses at dispatch over account billing — so "green" throughout this phase means *green
+on one developer's machine*. Eight PRs were merged over red checks that never started.
+
+That is not a gate item and it does not reopen one. It is the largest caveat on
+everything above, and it should be fixed before Phase 4 makes the codebase bigger: a
+budget that fails the build, a guard that fires, a suite that passes — none of them
+constrain anybody until a machine other than this one runs them.
+
+---
+
+## Unmet spec items, carried forward
+
+- **`< 180 KB` first-load JS on the kundli route** (PHASE-03 §7). Currently 201.0 KB.
+  Not a product-code problem — see ADR-010. Revisit if the framework floor moves.
 
 ---
 

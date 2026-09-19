@@ -1400,3 +1400,80 @@ vacuously. Fifth sampling error in this file's history, and the same shape every
 
 `task verify` + **156** e2e + smoke, green. One visual baseline moved — the chart screen,
 whose link text changed. Every guard break-tested.
+
+---
+
+# PR 29 — item 14 closed by decision: ADR-010
+
+The last Phase 3 gate item. It closes on a decision rather than on reaching the number,
+and the decision is written down rather than implied by a tick.
+
+## The measurement
+
+| route | first-load JS, gzipped |
+|---|---|
+| `/home` | 201.5 KB |
+| `/kundli/chart` | **201.0 KB** |
+| `/kundli/yogas` | 199.3 KB |
+
+Spec target: **180 KB**. Framework floor beneath it — React, react-dom, the Next client
+runtime, before a line of this product — **159.5 KB**, of which two chunks totalling
+112 KB contain no product code at all.
+
+So the target leaves roughly **20 KB for the whole of Ayana**, and the i18n dictionaries
+alone are 14.8 KB.
+
+**Not reachable by trimming product code, measured rather than estimated:** deleting the
+glossary prose (8.9 KB) *and* the entire Hindi dictionary (7.1 KB) — every removable byte
+— lands at **183.0 KB**. Still over, having deleted a whole locale from a product built
+for an Indian audience.
+
+## The decision
+
+ADR-010 replaces 180 KB **as the gate criterion** with the per-route regression budgets
+in `bundle-budget.json`. The spec number stays as `specTargetKB`, prints on every run, and
+is recorded as an unmet spec item.
+
+The reasoning that matters: 180 KB was written into the spec before the framework was
+chosen. A budget no product-code change can satisfy does not constrain product code — it
+fails permanently and teaches everyone to skip the budget line. What the regression
+budgets *do* deliver is real: an import that drags in a date library fails the build on
+the PR that adds it.
+
+**Verified rather than assumed.** Setting `/kundli/chart` to 195 KB and re-running:
+
+```
+Over budget:
+  /kundli/chart: 201.0 KB against 195 KB (+6.0 KB)
+exit code: 1
+```
+
+Exit 1 on breach, 0 when clean. A budget that cannot fail is not a budget, and this one
+had never been watched failing.
+
+## Also checked while measuring
+
+The a11y inspector is genuinely outside the first-load bundle — its own 12 KB chunk,
+referenced **zero** times in `/kundli/chart`'s HTML with or without `?a11y=1`. The
+201.0 KB is product code; the developer tool is not quietly charging every user for it.
+That property was claimed in the component's docstring and had not been tested.
+
+## Rejected
+
+- **Ship one locale.** Saves ~15 KB, lands at ~186 KB, still misses — and pays for it
+  with Hindi.
+- **Defer as a framework decision.** Leaves the phase open on a question nobody intends
+  to answer this quarter, and leaves working regression budgets unrecognised.
+
+Changing the framework is not foreclosed; it is simply not a Phase 3 call.
+
+---
+
+# Phase 3 gate: closed, 16 of 16
+
+With one caveat recorded in `current-phase.md` and repeated here because it qualifies
+every green tick above: **CI has never executed a job.** Eight PRs in this phase were
+merged over red checks that never started. Every check in this repo is local, so "green"
+means green on one machine. That is not a gate item and does not reopen one — but a
+budget that fails the build, a guard that fires and a suite that passes constrain nobody
+until a machine other than this one runs them. It should be fixed before Phase 4.
