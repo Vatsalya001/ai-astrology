@@ -163,3 +163,71 @@ test('the birth-place dropdown has a background of its own', async ({ page }) =>
     `a place name is ${ratio.toFixed(2)}:1 against the list behind it`,
   ).toBeGreaterThanOrEqual(4.5)
 })
+
+/**
+ * The skip link, in the one state it is ever seen in.
+ *
+ * ── Why this was invisible to everything ──
+ *
+ * It is `sr-only` — one pixel, clipped — until it takes focus, at which
+ * point it becomes a gold pill. axe scores `color-contrast` against the
+ * element's CURRENT rendered state, so the failing state does not exist
+ * during any scan. Three tests already focus this link
+ * (`a11y.spec.ts`, `smoke.spec.ts`, `kundli-keyboard.spec.ts`) and all
+ * three assert only that a focus ring appears and that Enter lands in
+ * `<main>` — never a colour.
+ *
+ * It shipped broken. `focus:text-base` was doing two jobs: the font size,
+ * and the navy that made the label readable on gold, back when the
+ * palette had a colour token named `base`. Removing that token to fix
+ * <Input> — whose text was being painted the page background by the same
+ * collision — left this class emitting `font-size: 1rem` and no colour,
+ * so the label inherited `text-ink`: #F2F3F8 on #D4A857, **1.99:1**
+ * against a 4.5:1 floor, on every route.
+ *
+ * `input-contrast.spec.ts` was written for exactly that collision and
+ * scoped to form fields, which is why it did not catch the second victim.
+ * The lesson is the scope, not the technique: a colour regression is not
+ * confined to the component that revealed it.
+ */
+test('the skip link is readable once it is visible', async ({ page }) => {
+  await page.goto('/kundli/chart')
+
+  await page.keyboard.press('Tab')
+  await page.waitForTimeout(250)
+
+  const link = await page.evaluate(() => {
+    const el = document.activeElement as HTMLElement | null
+    if (!el) return null
+    const cs = getComputedStyle(el)
+    return {
+      text: (el.textContent ?? '').trim(),
+      color: cs.color,
+      bg: cs.backgroundColor,
+    }
+  })
+
+  expect(link?.text, 'the first tab stop is not the skip link').toMatch(/skip to content/i)
+
+  /*
+    The background must be opaque. If the gold pill stopped applying, the
+    ratio below would be measured against the page and pass while the
+    link rendered as unreadable overlapping text.
+  */
+  expect(
+    /,\s*0\s*\)$/.test(link!.bg) || link!.bg === 'transparent',
+    `the focused skip link has no background of its own (${link!.bg}), so it ` +
+      `renders over whatever is beneath it`,
+  ).toBe(false)
+
+  const ratio = contrast(link!.color, link!.bg)
+  expect(
+    ratio,
+    `the focused skip link is ${ratio.toFixed(2)}:1 (${link!.color} on ` +
+      `${link!.bg}), below the 4.5:1 AA floor. This element exists for ` +
+      `sighted keyboard users and it is the FIRST thing they reach on every ` +
+      `route. Check that its foreground and background are named as a pair ` +
+      `— a colour class that silently became a font size is how this broke ` +
+      `the first time.`,
+  ).toBeGreaterThanOrEqual(4.5)
+})

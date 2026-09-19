@@ -51,6 +51,25 @@ function tsxFiles(dir: string): string[] {
   })
 }
 
+/**
+ * Source with comments removed, so the guard reads code and not prose.
+ *
+ * Every guard in this repo has now hit the same trap: the comment that
+ * explains a rejected pattern quotes that pattern, and the guard flags
+ * its own documentation. `mask-letters.spec.ts` excludes itself by
+ * filename; `tailwind-tokens` excluded `src/test/`. Neither helps when
+ * the explanation lives beside the FIX, in a product file — which is
+ * where it belongs, because that is where the next person will look.
+ *
+ * Block comments are stripped wholesale. Line comments only when `//`
+ * opens the line, so a `https://` inside a string cannot truncate a line
+ * and hide a real class name after it — a false negative in a guard is
+ * worse than the false positive it would prevent.
+ */
+function stripComments(source: string): string {
+  return source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
+}
+
 /** Flattens a colour map into the suffixes Tailwind generates. */
 function flatten(palette: Record<string, unknown>, into: Set<string>): void {
   for (const [key, value] of Object.entries(palette)) {
@@ -163,7 +182,7 @@ describe('every bg- colour class names a real token', () => {
     const unknown: string[] = []
 
     for (const file of tsxFiles(SRC)) {
-      const source = readFileSync(file, 'utf8')
+      const source = stripComments(readFileSync(file, 'utf8'))
 
       for (const match of source.matchAll(/\bbg-([a-z][a-z0-9-]*)\b/g)) {
         const token = match[1]!

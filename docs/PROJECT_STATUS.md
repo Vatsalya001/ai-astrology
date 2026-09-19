@@ -1141,3 +1141,93 @@ one, since a ref does not trigger a re-render and the heading would have shown a
 count. Derived from `stops` instead.
 
 Gate: `task verify` + **153** e2e + smoke, green.
+
+---
+
+# PR 26 — the skip link I broke, and a 15-agent audit of the Kundli routes
+
+## The regression
+
+`020d742` removed the `base` colour token from the Tailwind palette to fix `<Input>`,
+whose text was being painted the page background by a `text-base` collision. It fixed
+`bg-base` on the `<body>` in `layout.tsx` and **missed `focus:text-base` eight lines
+below**, on the skip link.
+
+That class was doing two jobs — the font size, and the navy that made the label readable
+on its gold pill. Afterwards it emitted `font-size: 1rem` and no colour, so the label
+inherited `text-ink`:
+
+```
+#F2F3F8 on #D4A857  =  1.99:1     (AA floor is 4.5:1)
+intended pairing    =  8.54:1
+```
+
+Measured in a browser, confirmed in the compiled stylesheet
+(`.focus\:text-base:focus{font-size:1rem;line-height:1.5rem}` — no `color`), broken on
+**every route**, for the sighted keyboard user the element exists for.
+
+Nothing saw it. axe scores `color-contrast` on the current rendered state and the link is
+`sr-only` until focused, so the failing state does not exist during a scan. Three
+existing tests focus it and all three assert only that a focus ring appears.
+`input-contrast.spec.ts` was written for this exact collision and scoped to form fields —
+**the lesson is the scope, not the technique: a colour regression is not confined to the
+component that revealed it.**
+
+Fixed as the semantic pair `focus:bg-primary focus:text-primary-foreground`, so the
+foreground cannot drift from its surface again. Gated by a computed-style assertion,
+break-tested (fails at `1.99:1`).
+
+## The audit
+
+Fifteen agents — five Kundli routes × three lenses (focus order, unlabelled controls,
+colour-only meaning) — over a real browser capture of each route, every finding then
+put to an adversarial verifier instructed to default to refuting it.
+
+**19 confirmed, 4 refuted, 1 verifier lost to an API error** (so
+`dasha-retry-drops-focus-to-body` is neither confirmed nor refuted and is recorded as
+unverified).
+
+Answers to the manual pass:
+
+- **Q2 — reading order:** follows the visual order on all five routes. No mismatch found.
+  What fails is what happens *after*: where focus goes when a control is activated, and
+  whether a state change is announced.
+- **Q3 — unlabelled controls:** none. Every interactive element has a name, which is why
+  axe is green. The confirmed findings are all the inverse — a name correct about the
+  control's *purpose* that destroys the *data* it wraps.
+- **Q4 — colour alone:** no. Every colour-carrying element pairs its colour with a glyph
+  or a word, each checked in source. The colour pass surfaced the skip-link contrast
+  regression above instead.
+
+The two majors worth naming here, both on `/kundli/chart`:
+
+- Activating **Download PDF** applies `disabled` to the focused button, which blurs it to
+  `document.body`; the success re-render then replaces the button with an anchor, so
+  there is nothing left to restore focus to.
+- The PDF's live region is **unmounted at the moment the PDF becomes ready** — the
+  `ready` branch returns a `<p>` with no `role`/`aria-live` at the same child index, so
+  React reuses the node and strips the attributes in the same commit that writes the
+  success text. Confirmed by execution, not by reading. The failure path keeps its
+  region; only success is silent.
+
+`ShareSheet.tsx` gets both of these right and is the fix template for both.
+
+**None of the confirmed findings is detectable by axe** under the `wcag2a/2aa/21a/21aa`
+tags the suite runs, and two would need `label-content-name-mismatch`, which is
+experimental and disabled in that set.
+
+## Two process notes
+
+**An agent ignored a read-only instruction, and I committed its output.** The audit brief
+said READ-ONLY; one agent wrote scratch probe files anyway. `git add -A` then swept
+`ZZFocusProbe.test.tsx` into a merged commit. The agent's error was ignoring the brief;
+mine was staging without reading the list. Removed.
+
+**The `bg-*` guard flagged its own documentation.** Explaining this regression in
+`layout.tsx` required writing the string `bg-base` in a comment, and the guard failed on
+it. Every guard in this repo has now hit that trap — `mask-letters` excludes itself by
+filename, `tailwind-tokens` excluded `src/test/` — and neither helps when the explanation
+lives beside the fix in a product file, which is where it belongs. The guard now strips
+comments before scanning. Block comments wholesale; line comments only when `//` opens
+the line, so a `https://` in a string cannot truncate a line and hide a real class after
+it. Re-break-tested: it still catches `bg-surface-2` in real code.
