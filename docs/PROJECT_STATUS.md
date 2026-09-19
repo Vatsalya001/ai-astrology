@@ -1070,3 +1070,74 @@ projection of the data rather than the thing itself — after sampling one JS ch
 instead of all of them, and grepping one call shape for OTP mask letters instead of
 both. The shared lesson: **assert on the narrowest unambiguous field, not on whatever
 string is easiest to reach.**
+
+---
+
+# PR 25 — the accessibility tool failed the product, not the other way round
+
+The Phase 3 manual pass asks: *"which sign is my Moon in, and which house?"*, answered
+from the inspector panel alone. The tester clicked **The data table** and read:
+
+```
+Planetary positions — …as a table.PlanetSignHouseDegreeNakshatraNotesAscendantVirgo1st2
+```
+
+The caption, with every cell of the first two rows run together, cut off at 120
+characters — before the Moon. Nineteen "focus stops" were logged on a page that has
+eight. The reasonable conclusion is that the chart is not usable by ear.
+
+**That conclusion would have been wrong, and acting on it would have damaged correct
+markup.** Measured in a browser, the product's hidden table is:
+
+```
+caption present · 6 headers, all scope="col" · 10 rows
+Moon row:  th:Moon | td:Sagittarius | td:4th | td:21 degrees | td:Purva Ashadha, pada 3
+```
+
+and the real tab order on `/kundli/chart` is **8 stops, with the table not among them**
+(`tabindex: null`). A screen reader on that markup says *"Moon, House, 4th"*.
+
+## Three defects, all in the tool
+
+**1. `accessibleName` fell back to `textContent` for every element.** Right for a button
+— whose content *is* its name — and wrong for a container, which a screen reader names
+and then lets you navigate *into*. No screen reader announces a table's flattened cells
+as its name; it reads the `<caption>`.
+
+**2. There was no way to navigate into anything.** A panel that reports a table's name
+and not its rows cannot answer a question whose answer is in a cell. It now reads the
+table row by row with each value prefixed by its column header — the panel now prints
+`Moon, Sign: Sagittarius, House: 4th`, which is the question answered in one line.
+
+**3. Jump-button clicks were counted as Tab presses.** "How many tabs to reach the
+Moon" is the one number this tool exists to report, and every click inflated it. Jumps
+are now shown with `→` and excluded from the count.
+
+## And the test that was passing for the wrong reason
+
+`?a11y=1 mounts it, and it reports what is focused` pressed Tab once from `main` and
+asserted the panel contained "Email address". It did — because focusing `main` dumped
+main's entire flattened text, and the label was in there. One Tab from `main` actually
+lands on the "Ayana home" link, which sits inside main and before the form, so the thing
+the test claims to check — that a `<label for>` resolves into an accessible name — was
+never exercised. It now walks until a field is focused, with a bound.
+
+## Break-testing, and a break-test that was itself wrong
+
+The first attempt at breaking the caption guard restored the `textContent` fallback and
+the test still passed. That looked like a weak assertion; it was a mis-aimed break. The
+`HTMLTableElement` branch returns the caption *before* the container check ever runs, so
+the line I broke could not affect tables. Removing the caption branch fails it properly,
+with the intended message.
+
+Worth recording alongside the other three sampling errors in this file: **a break test
+has to disable the code path the assertion actually depends on**, not a plausible
+neighbour.
+
+## Also
+
+`eslint` caught `counter.current` being read during render — a lint error and a real
+one, since a ref does not trigger a re-render and the heading would have shown a stale
+count. Derived from `stops` instead.
+
+Gate: `task verify` + **153** e2e + smoke, green.
