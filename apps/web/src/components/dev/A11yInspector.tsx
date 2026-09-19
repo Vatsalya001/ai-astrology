@@ -37,6 +37,30 @@ import { useCallback, useEffect, useRef, useState } from 'react'
  * every user 12 KB is a developer tool that gets deleted.
  */
 
+/**
+ * Where a tester can jump, named by what they will find there.
+ *
+ * The labels are the whole point. "The data table" is what the element
+ * IS; "The planet table — every sign, house and nakshatra" is what the
+ * tester is looking for, and it is the difference between a control
+ * someone uses and one they scroll past. A tester asked "which sign is
+ * my Moon in?" did not find the old label.
+ */
+const JUMP_TARGETS: ReadonlyArray<{ id: string; label: string; selector: string }> = [
+  { id: 'start', label: 'The very top — the skip link', selector: 'a[href="#main"], main' },
+  { id: 'main', label: 'Main content — past the header', selector: 'main' },
+  {
+    id: 'chart',
+    label: 'The chart diagram — the twelve houses',
+    selector: 'svg[role="group"]',
+  },
+  {
+    id: 'table',
+    label: 'The planet table — every sign, house and nakshatra',
+    selector: 'table',
+  },
+]
+
 interface Stop {
   /** Tab-stop number. Null when focus was moved by a jump button. */
   n: number | null
@@ -213,6 +237,65 @@ function readInOrder(root: Element): string[] {
     if (tag === 'A' || tag === 'BUTTON') {
       out.push(`▸ ${tag === 'A' ? 'link' : 'button'} — ${accessibleName(el)}`)
       return
+    }
+
+    /*
+      A radio or checkbox group, read as a group.
+
+      This is the third time this file has flattened a container into its
+      text and made correct markup look broken. The chart's two switchers
+      are real `<fieldset>`s with a `<legend>` and three radios each, and
+      Chromium's own accessibility tree reads them as
+
+          group "Chart"
+            radio "Rasi D1" [checked]
+            radio "Navamsa D9"
+            radio "Dasamsa D10"
+
+      — but this function walked past the fieldset and emitted seven bare
+      lines: "Chart", "Rasi", "D1", "Navamsa", "D9", "Dasamsa", "D10".
+      Asked whether the page sounded like a person or a database dump, a
+      tester read that and said database dump. The page is not the
+      problem; the transcript was.
+
+      A screen reader also announces position ("1 of 3") and state, which
+      is most of what makes a radio group legible by ear, so both are
+      reported here.
+    */
+    if (tag === 'FIELDSET') {
+      const legend = el.querySelector('legend')?.textContent?.trim()
+      const inputs = [...el.querySelectorAll('input[type="radio"], input[type="checkbox"]')]
+      if (inputs.length > 0) {
+        out.push(`▸ group — ${legend || '(unnamed)'}`)
+        inputs.forEach((input, index) => {
+          const box = input as HTMLInputElement
+          /*
+            Joined with a space across child elements, not by reading
+            textContent whole. The label holds two spans — "Rasi" and the
+            badge "D1" — with no whitespace between them in the markup,
+            so textContent yields "RasiD1". A screen reader inserts a
+            boundary between two elements; this mirrors that.
+          */
+          const label = box.labels?.[0]
+          const name =
+            [...(label?.childNodes ?? [])]
+              .map((n) => n.textContent?.trim() ?? '')
+              .filter(Boolean)
+              .join(' ')
+              .replace(/\s+/g, ' ') || accessibleName(box) || '(unnamed)'
+          const kind = box.type === 'radio' ? 'radio button' : 'checkbox'
+          const state = box.checked ? ', selected' : ''
+          out.push(`    ${name} — ${kind} ${index + 1} of ${inputs.length}${state}`)
+        })
+        // The rest of the fieldset — the explanatory paragraph under the
+        // switcher — still needs reading.
+        for (const child of el.childNodes) {
+          if (child instanceof Element && (child.tagName === 'LEGEND' || child.querySelector?.('input')))
+            continue
+          visit(child)
+        }
+        return
+      }
     }
 
     // A labelled region is a landmark: the thing a reader jumps between.
@@ -510,33 +593,59 @@ export function A11yInspector() {
         </div>
       </div>
 
-      {/* ── jump buttons ── */}
-      <div className="flex flex-wrap gap-2">
-        {(
-          [
-            ['Start of page', 'a[href="#main"], main'],
-            ['Main content', 'main'],
-            ['The chart', 'svg[role="group"]'],
-            ['The data table', 'table'],
-          ] as ReadonlyArray<readonly [string, string]>
-        ).map(([label, selector]) => (
-          <button
-            key={label}
-            type="button"
-            onClick={() => focusFirst(selector)}
-            className="rounded bg-accent/25 px-2.5 py-1.5 text-xs text-ink hover:bg-accent/40"
+      {/*
+        ── A labelled dropdown, not a row of buttons ──
+
+        These were four flat buttons — "Start of page", "Main content",
+        "The chart", "The data table" — and a tester asked to answer
+        "which sign is my Moon in?" said they would not have found the
+        one they needed. Four unexplained nouns in a strip look like
+        decoration; nothing said they were destinations, or that the
+        answer to the question lived behind one of them.
+
+        A select with a visible label states the job ("Jump to…"), keeps
+        the options closed until asked, and names each one by what the
+        tester will find there rather than by what it is called in the
+        DOM.
+      */}
+      <div className="flex flex-wrap items-end gap-2">
+        <div className="min-w-0 flex-1">
+          <label
+            htmlFor="a11y-jump"
+            className="mb-1 block text-xs uppercase tracking-wide text-ink-muted"
           >
-            {label}
-          </button>
-        ))}
+            Jump to a part of the page
+          </label>
+          <select
+            id="a11y-jump"
+            value=""
+            onChange={(event) => {
+              const chosen = JUMP_TARGETS.find((target) => target.id === event.target.value)
+              if (chosen) focusFirst(chosen.selector)
+            }}
+            className="w-full rounded border border-grid bg-elevated px-2.5 py-2 text-xs
+                       font-medium text-ink focus-visible:outline-none focus-visible:ring-2
+                       focus-visible:ring-ring"
+          >
+            <option value="">Choose a destination…</option>
+            {JUMP_TARGETS.map((target) => (
+              <option key={target.id} value={target.id}>
+                {target.label}
+              </option>
+            ))}
+          </select>
+        </div>
+
         {/* Not a jump: it moves no focus, it transcribes. Kept beside the
-            jump buttons because it answers the same tester's question. */}
+            selector because it answers the same tester's question. */}
         <button
           type="button"
           onClick={readPage}
-          className="rounded bg-gold/25 px-2.5 py-1.5 text-xs text-ink hover:bg-gold/40"
+          className="shrink-0 rounded bg-gold/25 px-3 py-2 text-xs font-medium text-ink
+                     hover:bg-gold/40 focus-visible:outline-none focus-visible:ring-2
+                     focus-visible:ring-ring"
         >
-          Read the page in order
+          Read the whole page aloud, in order
         </button>
       </div>
 

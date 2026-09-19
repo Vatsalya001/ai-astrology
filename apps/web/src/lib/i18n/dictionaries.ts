@@ -284,7 +284,20 @@ export const en = {
 
     chartTitle: 'Your Kundli',
     styleLegend: 'Style',
-    seePositions: 'See every position in a table',
+    /*
+      "See every position in a table" was the wording, and it sits
+      directly BELOW the chart's own visually-hidden table. A
+      screen-reader user hears all ten rows read out, and is then offered
+      a link promising a table of every position — which sounds like the
+      thing they have just been given, so the reasonable conclusion is
+      that they missed something.
+
+      It goes to a different PAGE, where each planet also has a detail
+      sheet. Naming the destination removes the ambiguity for a listener
+      and loses nothing for a sighted reader, who could not see the
+      hidden table in the first place.
+    */
+    seePositions: 'Open the full planets screen',
     planetsTitle: 'Planets & houses',
     planetsNoProfile:
       'There is no birth chart yet. Add your birth date, time and place and this fills in.',
@@ -718,7 +731,7 @@ export const hi: Dictionary = {
 
     chartTitle: 'आपकी कुंडली',
     styleLegend: 'शैली',
-    seePositions: 'हर स्थिति तालिका में देखें',
+    seePositions: 'पूरी ग्रह स्क्रीन खोलें',
     planetsTitle: 'ग्रह और भाव',
     planetsNoProfile:
       'अभी कोई जन्म कुंडली नहीं है। अपनी जन्म तिथि, समय और स्थान जोड़ें और यह भर जाएगी।',

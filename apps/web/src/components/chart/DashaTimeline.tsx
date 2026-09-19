@@ -223,7 +223,23 @@ function Track({
     // Only reachable for levels 2 and 3 before a parent is chosen.
     if (level === 0) return null
     return (
-      <div>
+      /*
+        The SAME <section aria-label> the populated track uses.
+
+        This branch rendered a bare <div>, so the three tracks were
+        structurally inconsistent: Mahadasha was a landmark named
+        "Mahadasha periods", while Antardasha and Pratyantardasha were
+        loose paragraphs in no region at all. To a sighted reader all
+        three look alike — small-caps label, then content — and to a
+        screen-reader user the page had one navigable section and two
+        stretches of text that begin without warning.
+
+        Worse, the inconsistency APPEARS AND DISAPPEARS: drill into a
+        mahadasha and the antardasha track becomes a landmark, because it
+        takes the other branch. Structure that changes as you use the
+        page is harder to learn than structure that is merely sparse.
+      */
+      <section aria-label={fill(t.chart.dashaPeriodsOf, { level: levelInfo(level).name })}>
         <p className="mb-2 text-xs uppercase tracking-wide text-ink-muted">
           {levelInfo(level).name}
         </p>
@@ -236,7 +252,7 @@ function Track({
         <p className="text-sm text-ink-muted">
           {level === 1 ? t.chart.dashaChooseMahadasha : t.chart.dashaChooseAntardasha}
         </p>
-      </div>
+      </section>
     )
   }
 
