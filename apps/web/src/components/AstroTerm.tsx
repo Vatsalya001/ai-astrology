@@ -15,6 +15,23 @@ import { useLocale } from '@/lib/i18n/context'
 import { cn } from '@/lib/utils'
 
 /**
+ * A React node flattened to the string a screen reader would hear.
+ *
+ * `children` here is always a string or a number in practice — a
+ * nakshatra, a house ordinal, a dignity — but the prop type permits a
+ * node, and a label built by interpolating `[object Object]` into speech
+ * would be worse than the bug it replaces. Anything that is not plain
+ * text yields '', which makes the caller fall back to the plain
+ * affordance label rather than announce nonsense.
+ */
+function flatten(node: ReactNode): string {
+  if (typeof node === 'string') return node.trim()
+  if (typeof node === 'number') return String(node)
+  if (Array.isArray(node)) return node.map(flatten).filter(Boolean).join(' ')
+  return ''
+}
+
+/**
  * A word in the chart UI that most users will not know, made tappable.
  *
  * "Combust", "Sade Sati", "Vimshottari", "navamsa" — a chart is dense
@@ -86,9 +103,39 @@ export function AstroTerm({
           'focus-visible:ring-offset-2 focus-visible:ring-offset-background rounded-sm',
           className,
         )}
-        // Without this a screen reader announces "Nakshatra, button" and
-        // the user has no idea what pressing it does.
-        aria-label={interpolateDefine(t.chart.defineTerm, entry.name)}
+        /*
+          The label must CARRY the children, not replace them.
+
+          It was `aria-label={interpolateDefine(…, entry.name)}`
+          unconditionally — "What “Nakshatra” means" — which is right
+          where the children ARE the term ("Nakshatra", "First house":
+          nothing is lost) and destroys data where they are a VALUE.
+
+          On /kundli/planets the children are the value, so every one of
+          the nine Nakshatra cells announced "What “Nakshatra” means"
+          instead of "Purva Ashadha 3". Confirmed against Playwright's
+          accname implementation: the Moon's row name came out as
+          `Moon in Sagittarius, 4th house, 21 degrees Sagittarius 20°44'
+          4th What “Nakshatra” means —` — the nakshatra absent from the
+          row entirely. It is not derivable by ear from the sign and
+          degree that ARE announced, and a voice-control user saying
+          "click Purva Ashadha 3" hit nothing.
+
+          Line 65 already draws this distinction for the visible text
+          (`children ?? entry.name`); the label did not. Now the value
+          comes first and the affordance follows, so a reader hears the
+          data and then what the control does.
+
+          axe cannot see this: it checks that a name EXISTS, never that
+          it preserves what it replaced. The rule that would catch it,
+          `label-content-name-mismatch`, is experimental and outside the
+          wcag2a/2aa tag sets this suite runs.
+        */
+        aria-label={
+          flatten(children)
+            ? `${flatten(children)}. ${interpolateDefine(t.chart.defineTerm, entry.name)}`
+            : interpolateDefine(t.chart.defineTerm, entry.name)
+        }
       >
         {label}
       </button>

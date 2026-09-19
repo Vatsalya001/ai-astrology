@@ -120,3 +120,84 @@ describe('locale coverage', () => {
     expect(defineTerm(GLOSSARY_KEYS[0]!, uncovered)).toBeNull()
   })
 })
+
+/**
+ * The label must CARRY the children, never replace them.
+ *
+ * ── The bug this pins ──
+ *
+ * `aria-label` was set unconditionally to "What “{term}” means". That is
+ * right where the children ARE the term — `<AstroTerm term="nakshatra"/>`
+ * renders the word "Nakshatra" and nothing is lost — and destroys data
+ * where the children are a VALUE.
+ *
+ * `PlanetTable.tsx` passes the value:
+ *   <AstroTerm term="nakshatra">{formatNakshatra(…)}</AstroTerm>
+ *
+ * `aria-label` wins accname over name-from-content, so every one of the
+ * nine Nakshatra cells announced "What “Nakshatra” means" instead of
+ * "Purva Ashadha 3". Confirmed in a browser against Playwright's accname
+ * implementation — the Moon's row name came out as
+ *   Moon in Sagittarius, 4th house, 21 degrees Sagittarius 20°44' 4th
+ *   What “Nakshatra” means —
+ * with the nakshatra absent from the row entirely. Not derivable by ear
+ * from the sign and degree that ARE announced, and a voice-control user
+ * saying "click Purva Ashadha 3" hit nothing.
+ *
+ * ── Why the suite did not catch it ──
+ *
+ * `PlanetTable.test.tsx:47` asserts `toHaveTextContent('Shatabhisha 3')`
+ * — DOM text, which was intact the whole time. The test above,
+ * "renders custom children rather than the canonical name", asserts
+ * `toHaveTextContent` too. Every assertion in reach was about what is on
+ * the screen; none about what is announced. `toHaveAccessibleName` is
+ * the distinction, and it is the whole bug.
+ *
+ * axe cannot see it either: it checks a name EXISTS, never that it
+ * preserves what it replaced.
+ */
+describe('the accessible name when the children are data', () => {
+  it('announces the value before the affordance', () => {
+    renderTerm(<AstroTerm term="nakshatra">Purva Ashadha 3</AstroTerm>)
+
+    const button = screen.getByRole('button')
+
+    expect(
+      button,
+      'the glossary label replaced the value it wraps, so a reader hears ' +
+        '"What “Nakshatra” means" where the data should be',
+    ).toHaveAccessibleName(/^Purva Ashadha 3\./)
+
+    // The affordance must survive too — without it the control announces
+    // as a value with no hint that pressing it does anything.
+    expect(button).toHaveAccessibleName(/nakshatra/i)
+  })
+
+  it('keeps the plain label when the children ARE the term', () => {
+    // The case the original behaviour got right, and which the fix must
+    // not regress: nothing is lost by replacing "Nakshatra" with
+    // "What “Nakshatra” means", and prefixing it would stutter.
+    renderTerm(<AstroTerm term="nakshatra" />)
+
+    expect(screen.getByRole('button').getAttribute('aria-label')).not.toMatch(
+      /nakshatra\.\s*what/i,
+    )
+  })
+
+  it('falls back rather than announcing an object', () => {
+    /*
+      `children` is typed ReactNode. A label built by interpolating
+      "[object Object]" into speech would be worse than the bug it
+      replaces, so a non-text child yields the plain affordance label.
+    */
+    renderTerm(
+      <AstroTerm term="nakshatra">
+        <em>styled</em>
+      </AstroTerm>,
+    )
+
+    const name = screen.getByRole('button').getAttribute('aria-label') ?? ''
+    expect(name).not.toMatch(/\[object/i)
+    expect(name).toMatch(/nakshatra/i)
+  })
+})
