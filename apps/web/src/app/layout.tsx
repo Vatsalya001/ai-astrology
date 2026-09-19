@@ -61,7 +61,32 @@ export default function RootLayout({
             slow connection is exactly who it is for. */}
         <a
           href="#main"
-          className="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-50 focus:rounded-lg focus:bg-gold focus:px-4 focus:py-2 focus:text-base"
+          /*
+            `bg-primary` + `text-primary-foreground`, stated as a pair.
+
+            This read `focus:bg-gold … focus:text-base`, and `text-base`
+            was doing two jobs: the font size, and — back when the palette
+            still had a colour named `base` — the navy that made the label
+            readable on gold. Commit 020d742 removed that token to fix
+            <Input>, whose text was being painted the page background by
+            the same collision. It fixed `bg-base` on the <body> six lines
+            above and did not notice line 64.
+
+            So the class kept compiling, kept emitting
+            `font-size: 1rem` and nothing else, and the label fell back to
+            inheriting `text-ink` from the body: #F2F3F8 on #D4A857, which
+            measures 1.99:1 against a 4.5:1 floor. The intended pairing is
+            8.54:1. It was broken on every route, for the sighted keyboard
+            user this element exists for, and axe cannot see it because
+            the link is `sr-only` until focused — the failing state does
+            not exist during a scan.
+
+            Named through the semantic pair rather than `text-background`,
+            so the foreground cannot drift from the surface again:
+            `primary.foreground` is defined as the colour that goes ON
+            `primary` (packages/ui/src/index.ts).
+          */
+          className="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-50 focus:rounded-lg focus:bg-primary focus:px-4 focus:py-2 focus:text-base focus:text-primary-foreground"
         >
           Skip to content
         </a>
