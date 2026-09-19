@@ -166,6 +166,31 @@ class CompletionChunk(BaseModel):
     usage: Usage | None = None
 
 
+class ModelMap(BaseModel):
+    """Which concrete model serves each tier, for one provider.
+
+    Carried by the adapter rather than resolved at the call site: a call
+    site asks for `fast` because the JOB is cheap and mechanical, and it
+    should never have to know that `fast` means `llama3.2:3b` here and
+    `claude-haiku-4-5` there. Swapping a model is then a config change in
+    one place, which is the whole premise of the phase.
+
+    The three names may be identical — in development they usually are,
+    because one 7B model on a laptop serves every tier adequately and
+    pulling three is a gigabyte each for no benefit.
+    """
+
+    fast: str
+    chat: str
+    deep: str
+
+    def for_tier(self, tier: ModelTier) -> str:
+        # A dict lookup keyed on the Literal, so adding a fourth tier to
+        # ModelTier fails here at type-check time rather than falling
+        # through to a KeyError on the first request that uses it.
+        return {"fast": self.fast, "chat": self.chat, "deep": self.deep}[tier]
+
+
 class Capabilities(BaseModel):
     """What a provider can actually do.
 

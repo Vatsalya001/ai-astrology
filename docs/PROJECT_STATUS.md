@@ -1621,3 +1621,78 @@ ever have reported the drift — and the day a fourth tier was added to one of t
 guard and the adapters would have disagreed about what `paid` means with no test failing.
 Settings owns it now; `base.py` re-exports with `as`, which is how a module tells
 `mypy --strict` that a name is public rather than an implementation detail.
+
+---
+
+# Phase 4.2, 4.3, 4.6 — the adapters
+
+Three providers, batched because `MockProvider` is what makes the other two testable and
+splitting them would have meant a PR whose tests could not run.
+
+## 4.6 `MockProvider` — the one CI is allowed to use
+
+**Keyed by a hash of the request, not by call order.** A queue of canned replies makes
+every assertion depend on how many calls the code under test happens to make, so
+inserting one classification step silently shifts every later assertion onto the wrong
+fixture — and the test still passes, against the wrong recording.
+
+**An unknown request raises.** The tempting alternative is a plausible default, and it is
+exactly wrong: *six times in the preceding day* a test in this repo passed while asserting
+nothing, every time because something returned a benign value where it should have
+refused. The error names the fingerprint, the path, and the two ways to fix it.
+`allow_unknown=True` exists for retry and circuit-breaker tests that genuinely do not care
+what the model said — opt-in, and visible in the test that chose it.
+
+The fingerprint deliberately **excludes `trace_id`** (unique per request by construction —
+including it would mean no fixture ever matches twice) and **includes the system prompt**
+(two requests with the same user message and different system prompts are different
+questions; sharing a fixture would let a prompt-regression test pass against the wrong
+recording).
+
+## 4.2 `OpenAICompatibleProvider` — five backends, one adapter
+
+Ollama, LM Studio, Groq, OpenRouter and Cerebras all speak the OpenAI wire format. The
+spec calls this the highest-leverage code in the phase and it is right.
+
+**Tested against a real `httpx` transport, not a patched SDK method.** Patching
+`chat.completions.create` would assert that the adapter calls a method — which it
+obviously does — and would keep passing if the SDK changed the shape it returns. Serving
+real HTTP through the SDK's own parsing is where version-skew bugs actually live.
+
+Three decisions worth naming:
+
+- **`max_retries=0` on the SDK client.** Retries are the registry's job. Leaving the SDK's
+  own retries on multiplies them: three SDK attempts inside three chain attempts is nine
+  calls to a provider that is down, and nine times the wait before the user sees anything.
+- **`content_filter` maps to `refusal`, not `error`.** A model declining is a product
+  outcome with a written response. Mapping it to `error` would make the chain retry a
+  refusal at every provider and then show a failure to a user whose question the product
+  has a real answer for.
+- **The model the backend *reports* is recorded, not the one we asked for.** OpenRouter
+  silently routes to whatever is cheapest, and a log recording the requested model cannot
+  explain the answer that came back.
+
+**Cost is not computed here.** Price per model changes without any code change, and an
+adapter hardcoding a rate is a bill that silently goes wrong the day a price does.
+
+## 4.3 `OllamaEmbeddingProvider`
+
+Separate from the chat adapter despite the same server: Ollama's `/api/embed` is not the
+OpenAI `/v1/embeddings` shape, and one class pretending to be both would be a branch on
+every method.
+
+Two guards, both for failures that are otherwise **silent**:
+
+- **A wrong-width vector is refused.** A 1024-wide vector in a 768 column either errors on
+  insert — fine — or lands in a column that accepts it, at which point every similarity
+  score in the product is meaningless and nothing reports a problem.
+- **A short batch is refused.** Two vectors for three texts, zipped naively, pairs text 3
+  with vector 2 and everything after it — a retrieval index that is subtly and permanently
+  wrong.
+
+## Break-tested
+
+Marking 400 retryable, mapping `content_filter` to `error`, and deleting the vector-width
+check each fail a test whose message explains the consequence rather than the symptom.
+
+`task verify` green. 128 Python tests in `services/ai`.
