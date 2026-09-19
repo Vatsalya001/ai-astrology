@@ -1547,3 +1547,77 @@ implementable (`chromedp.Flag("host-resolver-rules", …)` derived from `WEB_URL
 `network.SetBlockedURLs`) and I have verified both APIs exist. The **sandbox** half is not
 a code change: `--no-sandbox` is set because the container has no user namespaces, and
 that is a deployment decision. Fixing one half and ticking the item would misrepresent it.
+
+---
+
+# Phase 4 begins — AI Infrastructure
+
+Nothing in this phase is exposed to users. It builds the seam every model call passes
+through, so that Phase 5's chat is a consumer of a tested abstraction rather than a place
+where provider code and product code get written together.
+
+19 gate items, 21 tasks.
+
+## Task 4.1 — the provider protocols and registry
+
+**`LLMProvider` and `EmbeddingProvider` as `Protocol`, not ABC.** Adapters share no
+implementation and need no common base class. Structural typing means `mypy --strict`
+checks conformance at every *call site* rather than at registration, and a test double is
+a class with the right shape rather than an inheritance ceremony — `FakeProvider` in the
+tests is forty lines with no import from the thing it doubles.
+
+**Decisions worth naming, because each could have gone the other way:**
+
+- `cost_micros` is an **integer**, like the ledger's paise. Costs are summed across
+  millions of calls and float addition does not associate: the same charges in a different
+  order give a different total, which is indefensible on a bill.
+- `finish_reason` separates `refusal` from `error`. A model declining is a normal outcome
+  with a product response — a safety path, not a retry path — and collapsing the two makes
+  the retry logic hammer a provider that is working exactly as designed.
+- The system prompt is a **list** of blocks, not a string. Prompt caching works on a
+  byte-identical prefix; concatenating early makes every request a cache miss, and that is
+  the single biggest cost lever this service has.
+- `stream()` is not `async def`. It returns the iterator rather than awaiting it —
+  otherwise callers write `await (await p.stream(r)).__anext__()`.
+
+**The registry is a fallback chain, and two of its rules are the interesting part:**
+
+- A **non-retryable** failure stops the chain. A 400 from a malformed request fails
+  identically everywhere; walking three providers with it triples the latency and the
+  token spend, and produces a log blaming the last provider for the first one's mistake.
+- **Streaming does not fail over.** Once the first chunk has reached the user, switching
+  providers splices two models' prose together. A stream that fails before its first chunk
+  is the caller's to retry — against the chain, via `complete`.
+
+**The PII guard runs at registration, before the append.** `guards.py` owns the rule; the
+registry owns the moment. A caller that catches `UnsafeConfigurationError` and carries on
+still cannot end up with a half-registered provider serving traffic. Break-tested by
+moving the check after the append.
+
+## The vendor boundary is now enforced, not conventional
+
+§2's first line asks for an `import-linter` contract, "not by convention — conventions
+erode". Two contracts, wired into `task lint:py`:
+
+- nothing outside `app/providers/` may import `openai`, `anthropic`, `google`, `litellm`
+  or `ollama`
+- `providers/base.py` may not import any of them either — if the seam itself imports a
+  vendor type, that type becomes part of the protocol and every other adapter has to
+  construct it
+
+Break-tested: an `import openai` in `app/telemetry.py` fails with
+`app.telemetry is not allowed to import openai` and the line number.
+
+Two configuration facts worth recording, because both failed silently-ish first:
+`include_external_packages = true` is required or the contract passes while seeing no SDK
+imports at all; and subpackages of external packages are rejected, so `google` covers
+`google.generativeai`.
+
+## A duplicate removed while writing it
+
+`ProviderTier` was declared in `settings.py` **and** in `providers/base.py`, identically.
+Two `Literal` aliases with the same members typecheck against each other, so nothing would
+ever have reported the drift — and the day a fourth tier was added to one of them, the PII
+guard and the adapters would have disagreed about what `paid` means with no test failing.
+Settings owns it now; `base.py` re-exports with `as`, which is how a module tells
+`mypy --strict` that a name is public rather than an implementation detail.

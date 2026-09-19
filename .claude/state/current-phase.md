@@ -1,10 +1,43 @@
 # Current phase
 
 ```
-Phase: 3 — Kundli UI
-Gate:  ✅ CLOSED  (16 of 16 gate items closed)
-       Item 14 closed by decision, not by reaching the number. See ADR-010.
+Phase: 4 — AI Infrastructure
+Gate:  🔶 OPEN  (0 of 19 gate items closed)
+       21 tasks. Nothing is exposed to users in this phase.
 ```
+
+Phase 3 closed 16 of 16 on 2026-09-19. Its record is `docs/TESTING-PHASE-3.md` and
+`docs/PROJECT_STATUS.md` PRs 12–30; the gate closure and its caveats are in git history
+at `58fe1f2`. Three §11 security items were carried forward — see below.
+
+---
+
+## Phase 4 progress
+
+| # | Task | State |
+|---|---|---|
+| 4.1 | `LLMProvider` / `EmbeddingProvider` protocols + registry | ✅ `mypy --strict` clean; import-linter contract enforced and break-tested |
+| 4.2–4.21 | | not started |
+
+---
+
+## Carried from Phase 3
+
+- **§11.9 CSP `script-src 'unsafe-inline'`** — unmet. Blocks a Phase 5 gate item, and
+  PHASE-05 already carries a blocking item to replace it with a nonce or SRI before the
+  first model response is rendered. Not a Phase 4 concern.
+- **§11.5 Chrome sandbox / network** — `--no-sandbox` is a deployment constraint; the
+  network-restriction half is implementable and not yet done.
+- **§11.8 profile-label injection** — ✅ closed by PR 30.
+- **CI has never executed a job.** Still the largest caveat on everything: every check in
+  this repo is local. Ten PRs have now been merged over checks that never started.
+- `< 180 KB` first-load JS — unmet by decision, ADR-010.
+- No e2e drives PDF or share links; no share-management screen; no ADR for hand-rolled
+  auth; `memtest86+` unrun.
+
+---
+
+### Phase 3 detail, kept as the evidence trail
 
 Phase 2 closed with 20 of 20. Its record is `docs/TESTING-PHASE-2.md`, which lists what
 was *run* rather than what was read, and names the twenty-three guards broken on purpose
