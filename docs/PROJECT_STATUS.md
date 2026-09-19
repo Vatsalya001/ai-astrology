@@ -1231,3 +1231,77 @@ lives beside the fix in a product file, which is where it belongs. The guard now
 comments before scanning. Block comments wholesale; line comments only when `//` opens
 the line, so a `https://` in a string cannot truncate a line and hide a real class after
 it. Re-break-tested: it still catches `bg-surface-2` in real code.
+
+---
+
+# PR 27 — the glossary label was eating the data it wrapped
+
+Checking Q2 and Q4 of the manual pass myself, against the five Kundli routes.
+
+## Q2 — reading order: passes
+
+Captured the reading order of all five routes and compared the visual position of every
+heading, control, table and landmark against its DOM position. **Zero mismatches on all
+five.** `/kundli/chart` reads as 32 lines: h1, each switcher followed by its own
+explanation, the chart group with its summary, the ten table rows, then the three
+actions. `/kundli/transits` reads Sun → Moon → Mars → … in traditional order with
+retrograde spoken as a word and Sade Sati stated as a sentence.
+
+## Q4 — colour as the only signal: passes
+
+Eight colour-carrying elements across the five routes; **every one has a non-colour
+cue.** Verified by removing colour entirely (`filter: grayscale(1)`) and asking the three
+questions the doc names:
+
+- current dasha → `Moon mahadasha, Jan 2018 – Jan 2028, **Current period**`
+- yoga strength → the words **Strong** / **Moderate**, visible and in the label
+- Sade Sati → *"Not currently running. Saturn is in Pisces, the 4th sign from your Moon."*
+- retrograde → the `℞` glyph plus sr-only "retrograde"
+
+## Q3 — the defect
+
+The audit's biggest Q3 finding, confirmed independently against Playwright's accname
+implementation. `AstroTerm` set `aria-label` unconditionally to `What “{term}” means`.
+That is correct where the children ARE the term — `<AstroTerm term="nakshatra"/>` renders
+the word, nothing is lost — and destroys data where they are a VALUE.
+
+`PlanetTable` passes the value. `aria-label` wins accname over name-from-content, so the
+Moon's row announced:
+
+```
+Moon in Sagittarius, 4th house, 21 degrees Sagittarius 20°44' 4th
+What “Nakshatra” means —
+```
+
+The nakshatra absent from the row entirely, in all nine rows. Not derivable by ear from
+the sign and degree that *are* announced, and a voice-control user saying "click Purva
+Ashadha 3" hit nothing.
+
+Now:
+
+```
+Moon in Sagittarius, 4th house, 21 degrees Sagittarius 20°44' 4th
+Purva Ashadha 3. What “Nakshatra” means —
+```
+
+Value first, affordance after. Line 65 already drew this distinction for the visible text
+(`children ?? entry.name`); the label did not.
+
+**Why the suite missed it:** `PlanetTable.test.tsx:47` asserts
+`toHaveTextContent('Shatabhisha 3')` — DOM text, intact the whole time. The existing
+`AstroTerm` test "renders custom children rather than the canonical name" asserts
+`toHaveTextContent` too. Every assertion in reach was about what is on the SCREEN; none
+about what is ANNOUNCED. `toHaveAccessibleName` is the distinction, and it is the whole
+bug. axe checks a name exists, never that it preserves what it replaced.
+
+Break-tested. Also pinned: the plain case must not stutter into
+"Nakshatra. What “Nakshatra” means", and a non-text child must not interpolate
+`[object Object]` into speech.
+
+## A process note
+
+Running `task verify` and `npx playwright test` as separate commands reintroduced the
+stale-build failure that `ayana test` exists to prevent — verify rebuilds the web app
+under the running server, and the suite bailed after 29 tests with a 500 on a chunk.
+`./scripts/ayana test` restarts web between the two and passed 156. **The wrapper is not
+a convenience.**
