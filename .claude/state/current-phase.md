@@ -57,6 +57,37 @@ The spec's number is **not** deleted. `specTargetKB: 180` still prints on every 
 is still recorded below as unmet. A target quietly moved to whatever was achieved hides
 the gap; an unmet one stated plainly keeps it visible.
 
+### The other two checklists in the spec
+
+§15 is the gate, and it is the thing CLAUDE.md blocks Phase 4 on. The spec also carries a
+**§11 Security checklist** and a **§13 Definition of Done**, and those are not all ticked.
+Audited 2026-09-19 by executing the checks rather than reading them:
+
+**§11 — three items not fully met**
+
+| Item | State |
+|---|---|
+| 11.9 CSP allows inline SVG **without** allowing inline script | ❌ **Unmet.** `script-src 'self' 'unsafe-inline'` is live on every response, verified with `curl -I`. Inline script is allowed. |
+| 11.8 A user-supplied profile label cannot inject markup | ⚠️ **Untested.** React escapes by default so it is probably true, but no test asserts it — and "probably true" is what §11 exists to replace. |
+| 11.5 `chromedp` sandboxed, no network beyond the print route | ⚠️ **By argument, not by mechanism.** `--no-sandbox` is explicitly set (documented: container without user namespaces) and no network restriction is implemented. The reasoning in `chrome.go` is sound — it only ever loads our own print page — but nothing enforces it. |
+
+The other seven verified met: ownership 404s, signed short-lived PDF URLs with no PII in
+the path, pre-render authorisation, single-use print token (`printtoken.go` — redeeming
+deletes it), no birth data in analytics or query strings, server-side share resolution,
+and PDF rate limiting (`RenderLimit`).
+
+**§13 — two items with caveats, both already reasoned**
+
+- *"3 viewports × 2 themes"* → 3 viewports × **1** theme. Deliberate, and the reasoning is
+  written into `visual.spec.ts`: the second theme does not exist, the app is dark-only, and
+  screenshotting a theme no user can select would lock in appearance nobody sees.
+- *"Performance budgets met and CI-enforced"* → budgets exist and fail the build (exit 1,
+  break-tested). **CI-enforced is true in configuration and false in practice**, because CI
+  has never run.
+
+None of these reopen the gate. All three §11 items should be closed before Phase 5, which
+is where the CSP one starts actively blocking work.
+
 ### What "16 of 16" does not mean
 
 **Every check in this repo is local.** CI has never executed a single job — the runner
