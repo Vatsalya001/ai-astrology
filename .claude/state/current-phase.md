@@ -20,9 +20,12 @@ at `58fe1f2`. Three §11 security items were carried forward — see below.
 | 4.2 | `OpenAICompatibleProvider` (complete + stream) | ✅ 24 tests against a real httpx transport; retry classification break-tested |
 | 4.3 | `OllamaEmbeddingProvider` | ✅ 8 tests; width and batch-length guards break-tested |
 | 4.6 | `MockProvider` + fixtures | ✅ 17 tests; refuses unknown requests rather than inventing |
-| 4.4, 4.5, 4.7–4.21 | | not started |
+| 4.7 | PII guard | ✅ pre-existing; now enforced at registration and break-tested |
+| 4.8 | Model router + per-env overrides | ✅ all 10 job types mapped, derived from the enum |
+| 4.9 | Retry, timeout, circuit breaker, fallback | ✅ 12 tests on a fake clock; both breaker decisions break-tested |
+| 4.4, 4.5, 4.10–4.21 | | not started |
 
-**128 Python tests** in `services/ai`, `mypy --strict` clean, both import contracts kept.
+**147 Python tests** in `services/ai`, `mypy --strict` clean, both import contracts kept.
 
 ---
 

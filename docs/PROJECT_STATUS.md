@@ -1696,3 +1696,59 @@ Marking 400 retryable, mapping `content_filter` to `error`, and deleting the vec
 check each fail a test whose message explains the consequence rather than the symptom.
 
 `task verify` green. 128 Python tests in `services/ai`.
+
+---
+
+# Phase 4.8, 4.9 — routing and resilience
+
+## 4.8 The model router
+
+**Two hops, not one.** A call site knows what it is *doing* — classifying an intent,
+writing a paid interpretation — and must never know which model serves that. Job → tier is
+a cost-and-quality judgement that belongs in one table; tier → model is a per-provider fact
+that belongs in the adapter. Collapse them and every call site hardcodes a model name,
+which is how a provider swap becomes a hundred-file change.
+
+**The completeness test derives from the enum, not a count.** `test_every_job_type_has_a_tier`
+iterates `JobType`, so adding an eleventh job fails at the place where the cost decision
+belongs rather than at the first request that uses it.
+
+**An unrouted job raises its own error type.** Three frames up, a bare `KeyError` is
+indistinguishable from any other missing key, and the reflex fix is a defensive `.get()`
+with a default — which is exactly the silent mis-routing the type exists to prevent. An
+unrouted job silently taking the cheapest tier produces bad answers; silently taking the
+most expensive produces a bill.
+
+**Overrides merge over the defaults rather than replacing them.** A whole-table replacement
+is the mistake an operator makes at 3am: change one job, lose the other nine.
+
+## 4.9 Resilience as a decorator
+
+The registry chooses *which* provider; `ResilientProvider` decides how hard to try one. A
+wrapped provider is still an `LLMProvider`, so the registry cannot tell the difference.
+
+**Two decisions that could have gone the other way:**
+
+- **A permanent failure never opens the circuit.** A malformed request fails at a perfectly
+  healthy backend. Counting it toward the breaker lets one client with a bug open the
+  circuit for every other user of that provider.
+- **Streams get the breaker but not the retries.** Retrying a stream means either replaying
+  chunks the consumer has already seen or silently dropping the first part of an answer.
+
+**Full jitter, not `capped ± a bit`.** The failure being avoided is synchronised retry:
+without it, every request that failed at the same moment retries at the same moment, and a
+provider recovering from overload is immediately knocked over again by the herd it just
+shed.
+
+**`time.monotonic`, not `time.time`.** A clock adjustment mid-outage must not make a
+breaker believe an hour has passed.
+
+**The clock is injected**, so a 60-second breaker window is tested by advancing a float. A
+suite that really sleeps is a suite somebody eventually marks slow and stops running.
+
+## Break-tested
+
+Counting permanent failures toward the breaker, and letting an open circuit call through,
+each fail a test named for the decision rather than the symptom.
+
+147 Python tests. `task verify` green.
