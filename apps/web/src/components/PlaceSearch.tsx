@@ -224,7 +224,17 @@ export function PlaceSearch({
           id="place-results"
           role="listbox"
           aria-label={t.birth.placeLabel}
-          className="absolute z-10 mt-2 max-h-64 w-full overflow-y-auto rounded-lg border border-border bg-surface-2 py-1 shadow-lg"
+          /*
+            `bg-elevated`, not `bg-elevated`.
+
+            `surface-2` was never a token. Tailwind drops a class naming a
+            colour it does not know in SILENCE, so this list floated over
+            the page with no background at all — the suggestions were
+            painted straight onto whatever was behind them. `elevated`
+            (#1C2545) is the token for a surface above a surface, which is
+            exactly what a dropdown is.
+          */
+          className="absolute z-10 mt-2 max-h-64 w-full overflow-y-auto rounded-lg border border-border bg-elevated py-1 shadow-lg"
         >
           {results.map((place, index) => (
             <div
@@ -250,7 +260,14 @@ export function PlaceSearch({
                 index === highlighted ? 'bg-gold/10' : 'hover:bg-gold/5',
               )}
             >
-              <span className="text-sm">{place.name}</span>
+              {/*
+                The place name is the thing being chosen, so it is stated
+                at full strength and medium weight; the region beneath it
+                is context and stays quieter. Both colours are explicit —
+                inheriting is what left the input painting its text the
+                colour of the page.
+              */}
+              <span className="text-sm font-medium text-foreground">{place.name}</span>
               <span className="text-xs text-ink-muted">
                 {[place.admin1, place.country_code].filter(Boolean).join(', ')}
               </span>

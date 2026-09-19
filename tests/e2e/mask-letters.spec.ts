@@ -47,7 +47,25 @@ const LETTER_PATTERNS = [
  * at which point an unguarded thousand-value space is only better than a
  * guarded twenty-six-value one until two specs pick the same number.
  */
-const TAIL_PATTERN = /uniquePhone\(\s*'(\d{3})'/g
+/*
+  Two shapes here too, and the second was missing until it cost a run.
+
+  The email check above learned this lesson and wrote it down — a grep
+  for `uniqueEmail('x')` missed nine call sites that pass the letter to a
+  per-file helper — but the fix was only applied to LETTER_PATTERNS. The
+  phone check kept a single pattern, so two specs holding their tail in a
+  `const PHONE_TAIL` were invisible to it.
+
+  They collided on '744'. The guard passed. The failure surfaced in
+  kundli-keyboard.spec.ts as a sign-up that never left /auth/verify,
+  because the other spec's watcher had eaten its code — exactly the
+  "looks like broken authentication" symptom this file exists to prevent,
+  reported against an innocent spec.
+*/
+const TAIL_PATTERNS = [
+  /uniquePhone\(\s*'(\d{3})'/g,
+  /PHONE_TAIL\s*=\s*'(\d{3})'/g,
+]
 
 test('no two specs share an OTP mask letter', () => {
   const owners = new Map<string, Set<string>>()
@@ -103,11 +121,15 @@ test('no two specs share an OTP phone mask tail', () => {
 
   for (const file of specs) {
     const source = readFileSync(join(E2E_DIR, file), 'utf8')
-    TAIL_PATTERN.lastIndex = 0
-    for (const match of source.matchAll(TAIL_PATTERN)) {
-      const tail = match[1]!
-      if (!owners.has(tail)) owners.set(tail, new Set())
-      owners.get(tail)!.add(file)
+    for (const pattern of TAIL_PATTERNS) {
+      // Fresh lastIndex per file, as above: a /g regex reused across
+      // strings resumes mid-way and silently skips matches.
+      pattern.lastIndex = 0
+      for (const match of source.matchAll(pattern)) {
+        const tail = match[1]!
+        if (!owners.has(tail)) owners.set(tail, new Set())
+        owners.get(tail)!.add(file)
+      }
     }
   }
 

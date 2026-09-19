@@ -111,11 +111,11 @@ function OverallBanner({ health }: { health: Fetched<HealthResponse> }) {
             <p className="mt-1.5 text-sm text-ink-muted">{health.error}</p>
             <p className="mt-3 text-xs text-ink-faint">
               Expected at{' '}
-              <code className="rounded bg-base px-1.5 py-0.5 font-mono">
+              <code className="rounded bg-background px-1.5 py-0.5 font-mono">
                 {api.url}
               </code>
               . Start it with{' '}
-              <code className="rounded bg-base px-1.5 py-0.5 font-mono">
+              <code className="rounded bg-background px-1.5 py-0.5 font-mono">
                 task dev:api
               </code>
               .

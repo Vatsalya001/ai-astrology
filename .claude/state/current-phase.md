@@ -81,3 +81,44 @@ or a decision about the framework. Neither is a Phase 3 call.
 - Web CSP still has `script-src 'unsafe-inline'` (from Phase 1; blocks a **Phase 5** item).
 - No ADR for hand-rolled auth.
 - `memtest86+` unrun, against nine recorded data-corruption events. 👤
+  *(Not ten. See the correction below — I briefly logged a tenth and was wrong.)*
+
+## `ayana test` rebuilt the app underneath its own server (2026-09-19)
+
+`./scripts/ayana test` failed with ~40–60 red tests while `npx playwright test` passed
+**148/148 on the same commit**. The difference is that `ayana test` runs `task verify`
+first, and `task verify` builds the web app — underneath the `next start` that Playwright
+is about to drive.
+
+`next start` holds its build manifest in memory. After the rebuild it keeps serving HTML
+that references the **old** chunk hashes, and those files are gone. So the server is
+healthy by every obvious measure — `/auth` returns 200 for the whole run, same pid
+throughout — and no JavaScript loads. The failures land far downstream of the cause: an
+OTP request that never reaches the API, a dynamic import that never mounts, a URL that
+never changes.
+
+Fixed by calling `cmd_restart_web` after `task verify`, before Playwright.
+
+### Correction
+
+I diagnosed this three times before getting it right, and the middle two were wrong:
+
+1. **Rebuild underneath the server** — correct, but I discarded it after a bad experiment.
+2. **Memory corruption.** I read a `Segmentation fault` in `web.log` plus same-afternoon
+   faults in Chrome and `pysemgrep`, and logged it here as corruption event #10. That
+   entry has been removed. The failure reproduces deterministically, which corruption does
+   not, and the Chrome `trap invalid opcode` I cited is especially weak evidence — Chrome
+   compiles `CHECK()` failures to a deliberate `ud2`.
+3. Back to (1), confirmed by `web_build_check` reporting `STALE BUILD — …/3c9xdf586ehwi.js
+   returned 500`.
+
+The experiment that sent me down the wrong path: I watched port 3000 during a rebuild and
+saw `/auth` return 200 for sixty seconds straight, and concluded the server was unaffected.
+It was — the server was never the problem. I had checked the HTML and not the chunks, which
+is the one thing this specific failure does not touch. `web_build_check` gets this right
+because it extracts **every** chunk with `sort -u`; sampling one gives the framework bundle,
+whose hash does not move between builds.
+
+The original `Segmentation fault` remains unexplained and is plausibly the same cause — a
+process reading `.next` files replaced under it — but that is a guess, not a finding, and
+nothing here depends on it.

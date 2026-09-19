@@ -929,3 +929,161 @@ func TestAShortWindowsResponseWritesNoWindowsAndKeepsThePositions(t *testing.T) 
 			"downstream can tell them apart", rows)
 	}
 }
+
+// TestRefresherToleratesSlowAstro pins the worker's deadline budget.
+//
+// ── The failure this reproduces ──
+//
+// Both of the refresher's astro calls are ephemeris scans measured in
+// seconds, and the second one is disguised:
+//
+//   - /transits/sade-sati/windows scans forty years of Saturn's motion
+//     at a five-day step. ~22s, always.
+//   - /transits/compute returns nine positions AND the Sade Sati window
+//     for the natal Moon sign it was handed. That window needs the same
+//     scan — so the call is ~0.1s when the sign is not in Sade Sati, and
+//     ~12s when it is.
+//
+// ReferenceMoonSign is Aries. For most of Saturn's thirty-year circuit
+// Aries is nowhere near Sade Sati and the compute call is instant. For
+// the two and a half years Saturn spends in Pisces, Aries is one of the
+// three signs in the stretch, and the same call quietly costs twelve
+// seconds. Held to a ten-second interactive budget, every refresh then
+// fails. No code changed; Saturn moved.
+//
+// That is a hard property to notice and an easy one to reintroduce —
+// the fast path is what a developer sees on nine runs in ten — so the
+// budget is asserted rather than assumed.
+func TestRefresherToleratesSlowAstro(t *testing.T) {
+	const (
+		// Long enough to blow an interactive budget, short enough to keep
+		// the suite quick. Stands in for the real ~12s and ~22s.
+		scanCost           = 1500 * time.Millisecond
+		interactiveTimeout = 300 * time.Millisecond
+		batchTimeout       = 15 * time.Second
+	)
+
+	// slowPaths starts an astro stub that sleeps on the named paths, so
+	// each case can reproduce one failure mode exactly.
+	slowPaths := func(t *testing.T, slowCompute, slowWindows bool) *httptest.Server {
+		t.Helper()
+		stub := &stubAstro{saturnSign: capricorn}
+		return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			if strings.Contains(r.URL.Path, "sade-sati/windows") {
+				if slowWindows {
+					time.Sleep(scanCost)
+				}
+				_, _ = w.Write(stub.windowsResponse())
+				return
+			}
+			if slowCompute {
+				time.Sleep(scanCost)
+			}
+			_, _ = w.Write(stub.response())
+		}))
+	}
+
+	newRefresher := func(t *testing.T, pool *pgxpool.Pool, url string, budget time.Duration) *transits.Refresher {
+		t.Helper()
+		astro, err := clients.NewAstro(url, "token", budget)
+		if err != nil {
+			t.Fatalf("NewAstro: %v", err)
+		}
+		return transits.NewRefresher(dbgen.New(pool), astro, jobs.TransitRefreshInterval, testLogger())
+	}
+
+	countWindows := func(ctx context.Context, t *testing.T, pool *pgxpool.Pool) int {
+		t.Helper()
+		var rows int
+		if err := pool.QueryRow(ctx,
+			`SELECT COUNT(*) FROM sade_sati_windows`).Scan(&rows); err != nil {
+			t.Fatalf("count windows: %v", err)
+		}
+		return rows
+	}
+
+	t.Run("on the batch budget, both slow calls complete", func(t *testing.T) {
+		ctx := context.Background()
+		pool, stopDB := startPostgres(ctx, t)
+		defer stopDB()
+
+		server := slowPaths(t, true, true)
+		defer server.Close()
+
+		written, err := newRefresher(t, pool, server.URL, batchTimeout).Refresh(ctx, runAt)
+		if err != nil {
+			t.Fatalf("Refresh: %v — a scan that takes %v must fit a %v budget",
+				err, scanCost, batchTimeout)
+		}
+		if written == 0 {
+			t.Fatal("no positions stored")
+		}
+		if rows := countWindows(ctx, t, pool); rows != transits.SignCount {
+			t.Fatalf("stored %d Sade Sati windows, want %d", rows, transits.SignCount)
+		}
+	})
+
+	/*
+	   The two negative cases below are what make the one above mean
+	   something. Without them it would pass just as happily on a
+	   refresher wired to the interactive client, because the assertion
+	   would be measuring the stub's speed rather than the budget.
+
+	   They are separate cases because the two endpoints fail
+	   DIFFERENTLY, and the difference is why this went unnoticed for a
+	   phase.
+	*/
+
+	t.Run("a slow compute on the interactive budget fails the whole refresh", func(t *testing.T) {
+		ctx := context.Background()
+		pool, stopDB := startPostgres(ctx, t)
+		defer stopDB()
+
+		server := slowPaths(t, true, false)
+		defer server.Close()
+
+		written, err := newRefresher(t, pool, server.URL, interactiveTimeout).Refresh(ctx, runAt)
+		if err == nil {
+			t.Fatalf("a %v compute call succeeded inside a %v budget (wrote %d). This "+
+				"case is no longer reproducing the failure, so the positive case "+
+				"above proves nothing", scanCost, interactiveTimeout, written)
+		}
+		// Loud, at least: the task errors, asynq retries it, and the logs
+		// say so. This is the half of the bug that was visible.
+		if !clients.IsUnavailable(err) {
+			t.Fatalf("err = %v, want an unavailable-classified error so the job retries", err)
+		}
+	})
+
+	t.Run("a slow windows call on the interactive budget is silent", func(t *testing.T) {
+		ctx := context.Background()
+		pool, stopDB := startPostgres(ctx, t)
+		defer stopDB()
+
+		server := slowPaths(t, false, true)
+		defer server.Close()
+
+		written, err := newRefresher(t, pool, server.URL, interactiveTimeout).Refresh(ctx, runAt)
+		if err != nil {
+			t.Fatalf("Refresh errored: %v. Windows are best-effort by design — they "+
+				"must not take the positions down with them", err)
+		}
+		if written == 0 {
+			t.Fatal("no positions stored")
+		}
+
+		if rows := countWindows(ctx, t, pool); rows != 0 {
+			t.Fatalf("stored %d windows on a %v budget with a %v scan; this case is "+
+				"not reproducing the silent failure any more",
+				rows, interactiveTimeout, scanCost)
+		}
+
+		/*
+		   Zero rows, no error, positions fresh. On screen that is a Sade
+		   Sati end date frozen at whatever it last was, sitting beside
+		   positions current to the hour — which is precisely what the
+		   product shipped, and precisely why nobody saw it.
+		*/
+	})
+}

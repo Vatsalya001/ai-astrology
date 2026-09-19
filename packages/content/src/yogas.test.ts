@@ -3,7 +3,7 @@ import { join } from 'node:path'
 
 import { describe, expect, it } from 'vitest'
 
-import { YOGAS, YOGA_KEYS, describeYoga, hasYoga } from './yogas'
+import { YOGAS, YOGA_KEYS, describeYoga, hasYoga, type YogaKey } from './yogas'
 import { PREDICTIVE_PHRASES, type Entry, type Locale } from './types'
 
 const LOCALES: Locale[] = ['en', 'hi']
@@ -212,5 +212,92 @@ describe('lookup', () => {
       expect(hasYoga(key), key).toBe(false)
       expect(describeYoga(key, 'en'), key).toBeNull()
     }
+  })
+})
+
+/**
+ * Two configurations, one name.
+ *
+ * `detect_raja_yogas` and `detect_chandra_mangal` each accept a
+ * CONJUNCTION or a MUTUAL ASPECT and emit the same yoga name for either;
+ * the difference is carried in `strength` — `strong` for the conjunction,
+ * `moderate` for the aspect. The description is therefore read by users
+ * in both situations, and one that asserts a conjunction is wrong for
+ * every chart that got there the other way.
+ *
+ * This shipped. Raja Yoga read "An angular house lord joined with a
+ * trinal house lord", and a Virgo-ascendant chart with Jupiter in the
+ * 11th, Mercury and Venus in the 5th showed three Raja Yogas captioned
+ * identically — while two of the three pairs were six houses apart and
+ * had never been near each other. Chandra-Mangal sat directly below it
+ * already saying "together or in mutual aspect", which is what makes
+ * this a copy slip rather than a misunderstanding, and exactly the kind
+ * of inconsistency a test holds still.
+ *
+ * The list is derived from the Python, not written here, so a third
+ * dual-formation detector is covered the day it lands rather than the
+ * day somebody remembers this file.
+ */
+function dualFormationYogas(): string[] {
+  const source = readFileSync(YOGA_PY, 'utf8')
+
+  return [
+    ...new Set(
+      source
+        .split(/^def /m)
+        .filter((fn) => fn.includes('mutual_aspect('))
+        .flatMap((fn) => [...fn.matchAll(/name="([^"]+Yoga)"/g)].map((m) => m[1]!)),
+    ),
+  ]
+}
+
+describe('a yoga that can form two ways says so', () => {
+  // The aspect route, in each locale's own vocabulary.
+  const ASPECT_WORDS: Record<Locale, RegExp> = {
+    en: /aspect/i,
+    hi: /दृष्ट/,
+  }
+
+  it('the derivation finds the detectors that branch on an aspect', () => {
+    /*
+      Without this the suite below passes vacuously: a regex that stops
+      matching yields an empty list, and "none of zero yogas are wrong"
+      is a green test that checks nothing. Same failure the engine
+      contract above guards against.
+    */
+    const found = dualFormationYogas()
+    expect(found).toContain('Raja Yoga')
+    expect(found).toContain('Chandra-Mangal Yoga')
+  })
+
+  for (const locale of LOCALES) {
+    it(`names the aspect route in ${locale}`, () => {
+      const silent = dualFormationYogas().filter(
+        (key) => !ASPECT_WORDS[locale].test(YOGAS[key as YogaKey][locale].short),
+      )
+
+      expect(
+        silent,
+        `astro-service emits these for a mutual aspect as well as a conjunction, ` +
+          `but their one-line description never mentions an aspect. A user whose ` +
+          `chart formed the yoga across two houses reads a sentence describing ` +
+          `planets sitting together.`,
+      ).toEqual([])
+    })
+  }
+
+  it('the rule rejects the wording that actually shipped', () => {
+    /*
+      The guard, broken on purpose. "Prove it fires" is the house rule,
+      and a contrast assertion is the only thing separating a real check
+      from one that would accept the bug it was written for.
+    */
+    const shipped = 'An angular house lord joined with a trinal house lord.'
+    expect(
+      ASPECT_WORDS.en.test(shipped),
+      'the rule accepts the exact sentence this test was written to reject',
+    ).toBe(false)
+
+    expect(ASPECT_WORDS.en.test(YOGAS['Raja Yoga'].en.short)).toBe(true)
   })
 })

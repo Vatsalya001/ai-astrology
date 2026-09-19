@@ -277,7 +277,7 @@ export default function BirthDetailsPage() {
             {timeUnknown && (
               <p
                 role="status"
-                className="mt-3 rounded-lg bg-surface-2 p-4 text-sm leading-relaxed text-ink-muted"
+                className="mt-3 rounded-lg bg-elevated p-4 text-sm leading-relaxed text-ink-muted"
               >
                 {t.birth.unknownExplained}
               </p>

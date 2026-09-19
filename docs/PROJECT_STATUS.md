@@ -801,3 +801,199 @@ existed:
   **both** directions — skipped by "every declared event is emitted" and simultaneously
   reported as undeclared. A guard that fails on correct code and passes over its own
   case. Broadened, and the break test confirms it now catches what it missed.
+
+---
+
+# PR 22 — the sky moved and the transit table stopped
+
+Found while verifying a real chart (26 Feb 2003, 20:55, Prayagraj) against the engine.
+The chart itself was correct in every particular — nine positions, nine nakshatras, the
+North Indian house→sign mapping, the dasha sequence, Jupiter retrograde, Saturn *not*
+retrograde four days after its station — and the PDF matched to the arc-minute. Two
+things around it were not.
+
+## What shipped
+
+**A background job held to an interactive deadline.** `SERVICE_TIMEOUT=10s` is the budget
+for calls a user is waiting on. The transit worker was given the same one, and both of its
+astro calls are ephemeris scans measured in seconds:
+
+| call | cost | why |
+|---|---|---|
+| `/transits/sade-sati/windows` | ~22 s | 40 years of Saturn at a 5-day step ≈ 2,900 sequential ephemeris evaluations |
+| `/transits/compute` | 0.1 s **or ~12 s** | returns the Sade Sati *window* for the Moon sign it was handed, which needs the same scan |
+
+The worker now gets `BATCH_SERVICE_TIMEOUT` (120 s). There is deliberately no second
+client in `cmd/worker`: nothing in that process has a user waiting on it, so there is no
+call that should fail fast.
+
+**Raja Yoga claimed a conjunction it did not have.** `detect_raja_yogas` emits one name for
+two configurations — conjunct (`strong`) or in mutual aspect (`moderate`) — and the summary
+read "An angular house lord **joined** with a trinal house lord". The test chart showed
+three Raja Yogas with that identical caption while two of the three pairs were six houses
+apart. Wrong in English only; the Hindi already said योग. Chandra-Mangal, the other
+dual-formation yoga, was already correct — which is what makes it a copy slip.
+
+## What running it found that reading it did not
+
+**The compute timeout is seasonal, and that is the whole story.** `ReferenceMoonSign` is
+Aries. `/transits/compute` skips the window scan when the sign it is given is not currently
+in Sade Sati — so for roughly twenty-seven years out of Saturn's thirty-year circuit the
+call is instant, and for the two and a half years Saturn spends in **Pisces** it costs
+twelve seconds, because Aries is then one of the three signs in the stretch. Saturn is in
+Pisces now. No code changed; the sky did.
+
+This is why the first diagnosis was wrong. `curl` with `natal_moon_sign: 8` returned in
+0.09 s and looked like proof the endpoint was healthy; the worker sends `0`, and that is a
+different function. Reproducing it needed the worker's own request, not a plausible one.
+
+**The two endpoints fail differently, and the quiet one hid the loud one.** A slow
+`compute` fails the whole refresh — error returned, asynq retries, the log says so. A slow
+`windows` call is best-effort by design, so it logs and carries on: positions current to
+the hour, Sade Sati end dates frozen at whatever they were the last time it worked.
+Nothing on screen looks wrong. `sade_sati_windows` had not been rewritten since the day
+before.
+
+## Guards proven by breaking them
+
+- `TestRefresherToleratesSlowAstro` — three cases, not one. The positive case alone would
+  pass on the broken wiring, because it would be measuring the stub's speed rather than
+  the budget. The two negative cases reproduce both observed failures and fail if they
+  stop reproducing them.
+- `yogas.test.ts` — the dual-formation list is derived from `yoga.py` (functions that
+  branch on `mutual_aspect`) rather than written down, so a third such detector is covered
+  the day it lands. Break-tested: restoring "joined with" fails the suite naming
+  `Raja Yoga`, and the pre-existing "says what the configuration IS" test passes on the
+  bad wording — it could never have caught this.
+- `config_test.go` — asserts the batch budget *exceeds* the interactive one, so collapsing
+  them back is a failing build rather than a silent regression.
+
+## Verified end to end
+
+A real refresh against live astro-service and the real database: 21.5 s, nine positions
+written, twelve Sade Sati windows recomputed, and the 11:30 IST slot that had been missing
+all day now present.
+
+## Still outstanding
+
+The scan itself is slow for a reason that is fixable: `find_saturn_ingresses` makes ~2,900
+*sequential* calls where skyfield can evaluate a time array in one. Vectorising it means
+changing the `EphemerisProvider` protocol — an ADR-003 seam — so it is a performance task,
+not a bug fix, and the 120 s budget is headroom rather than a target.
+
+## The gate was breaking the thing it tested
+
+`./scripts/ayana test` failed with 40–60 red tests while `npx playwright test` passed
+**148/148 on the same commit**. `ayana test` runs `task verify` first, and `task verify`
+builds the web app — underneath the `next start` Playwright is about to drive.
+
+`next start` holds its build manifest in memory, so after a rebuild it serves HTML
+referencing chunk hashes whose files no longer exist. The server stays healthy by every
+obvious measure — `/auth` returns 200 for the whole run, same pid throughout — and no
+JavaScript loads. The failures surface far from the cause: an OTP request that never
+reaches the API, a dynamic import that never mounts, a URL that never changes.
+
+Fixed by restarting web between `task verify` and Playwright, plus a check that names a
+mid-run server death instead of letting it read as product breakage.
+
+**Three diagnoses, two of them wrong**, recorded because the wrong turn is the instructive
+part. I read a `Segmentation fault` in `web.log` alongside same-afternoon faults in Chrome
+and `pysemgrep`, and logged it as data-corruption event #10 — that entry has been removed.
+The failure reproduces deterministically, which corruption does not.
+
+What sent me wrong: I watched port 3000 through a rebuild, saw `/auth` return 200 for sixty
+seconds, and concluded the server was unaffected. It was. The server was never the problem.
+I had checked the HTML and not the chunks — the one thing this failure does not touch.
+`web_build_check` gets it right because it extracts **every** chunk with `sort -u`;
+sampling one returns the framework bundle, whose hash does not move between builds. That is
+the second time that exact sampling error has cost a diagnosis in this project.
+
+---
+
+# PR 23 — the text you typed was the colour of the page
+
+Reported as "the text I'm typing and the dropdowns don't look good". It was not a
+styling preference. Two defects, on the same screen, both invisible to every gate
+this project had.
+
+## 1. A colour token collided with a built-in utility
+
+Tailwind ships `text-base` as a **font size**. The palette also had a colour named
+`base`, so `text-base` was emitted a second time as `color: #0B1026` — and the colour
+won.
+
+`#0B1026` is `base`: the page background. Every `<Input>` in the product sets
+`text-base` deliberately, because iOS Safari zooms the viewport for any field under
+16px and strands the user at that zoom. So every input in the product painted its text
+the exact colour of the page behind it.
+
+Measured in a real browser, before: `color: rgb(11, 16, 38)`. **Contrast 1:1.** You
+typed and nothing appeared.
+
+`base` no longer generates utilities; it is reachable as `bg-background` /
+`text-foreground` through `semanticColors`, which is the name a component should have
+been using. `colors.base` is untouched for TypeScript callers.
+
+## 2. A colour class named a token that does not exist
+
+`bg-surface-2` was used in five places. There is no `surface-2`. Tailwind drops an
+unknown colour class **in silence**, so the birth-place dropdown had no background at
+all and its suggestions were drawn straight onto the page beneath them. Now
+`bg-elevated` (#1C2545), the token for a surface above a surface.
+
+Both fields and the dropdown options also now state their colour and weight
+explicitly rather than inheriting — inheriting is what let defect 1 reach a user.
+
+|  | before | after |
+|---|---|---|
+| typed text | `#0B1026` (= background) | `#F2F3F8` |
+| font weight | 400 | 500 |
+| dropdown background | *class dropped — transparent* | `#1C2545` |
+| option text | inherited | `#F2F3F8`, weight 500 |
+
+## Why nothing caught either
+
+The class names read correctly in a diff. `tsc` sees valid strings. Tailwind emits both
+rules without complaint. `next build` succeeds. And the **visual-regression baselines
+were captured with the bug present**, so they agreed with it — a screenshot suite
+cannot tell a deliberate dark theme from invisible text.
+
+## Guards added, each broken on purpose
+
+- `apps/web/src/test/tailwind-tokens.test.ts` — no colour token may be named after a
+  font size, and every `bg-*` class must name a real token. Break-tested both ways:
+  restoring `base` fails naming `base`; restoring `bg-surface-2` fails naming the file.
+  The palette is read from the config and Tailwind's defaults, so `bg-white` on the
+  print route (paper is white) and `bg-radial-glow` (a gradient) are not false
+  positives.
+- `tests/e2e/input-contrast.spec.ts` — a computed-style assertion in a real browser,
+  which `frontend.md` names as the only gate that notices this class of defect. It
+  asserts a **ratio**, not a hex: pinning the value would fail on a legitimate tweak
+  and pass on a different unreadable colour.
+
+The e2e break-test is worth recording because the first attempt at it was wrong. I
+reintroduced the `base` collision alone and the gate still passed — because the fixed
+`Input` now states `text-foreground` explicitly, which correctly protects it. Only
+reverting **both** halves reproduced the shipped state, at which point the gate failed
+with `rendered in rgb(11, 16, 38), which is the colour of the surface behind it`. A
+break-test that does not restore the original conditions proves nothing.
+
+## A guard that failed to protect me
+
+Picking a phone tail for the new spec, I took `744` — already used by
+`kundli-keyboard.spec.ts`. `mask-letters.spec.ts` exists precisely to prevent that and
+did not fire: its `TAIL_PATTERN` matched `uniquePhone('744')` but not
+`const PHONE_TAIL = '744'`, which is the form both specs use.
+
+Its own docstring describes this exact blind spot on the **email** side — "a grep is
+only as good as the call shape someone happened to use" — and the fix was applied to
+`LETTER_PATTERNS` only. The phone check kept one pattern.
+
+It surfaced as `kundli-keyboard.spec.ts` failing at `/auth/verify`, because my spec's
+watcher had eaten its OTP: the "looks like broken authentication" symptom that file was
+written to prevent, reported against an innocent spec. Guard fixed, break-tested (it
+now names `'744' in input-contrast.spec.ts and kundli-keyboard.spec.ts`), tail moved
+to `745`.
+
+The email alphabet is fully exhausted — all 26 letters are claimed — so new specs must
+use the phone channel.

@@ -297,7 +297,7 @@ function renderSouth({
     <>
       {/* The hollow middle, drawn as the page colour so the grid reads
           as a ring rather than as four blank cells. */}
-      <polygon points={toPoints(centre)} className="fill-base stroke-grid" strokeWidth={0.4} />
+      <polygon points={toPoints(centre)} className="fill-background stroke-grid" strokeWidth={0.4} />
 
       {southIndianSigns().map((cell) => {
         const house = ascendantSign === null ? null : houseOfSign(cell.sign, ascendantSign)

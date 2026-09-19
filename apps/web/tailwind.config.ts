@@ -15,12 +15,40 @@ import { colors, semanticColors } from '@ayana/ui'
  * same palette without a Tailwind dependency. Do not hardcode a hex
  * anywhere in a component, and do not restate one here.
  */
+/*
+  `base` is deliberately NOT a Tailwind colour.
+
+  Tailwind ships `text-base` as a FONT SIZE (1rem). Naming a colour
+  `base` generates a second `text-base` — this time `color: #0B1026` —
+  and the two collide on the same class name. The colour wins.
+
+  The effect was invisible in review and catastrophic in use: every
+  input in the product sets `text-base` on purpose, because iOS Safari
+  zooms the viewport for any field under 16px and strands the user
+  there. So every one of them was ALSO painting its text #0B1026, which
+  is `base` — the page background. Users typed into a box and watched
+  nothing appear. Contrast ratio 1:1.
+
+  Nothing catches this. `tsc` sees a valid string, Tailwind emits both
+  rules happily, `next build` succeeds, and the class name looks correct
+  in the diff. It is the same family of failure as an unknown colour
+  class being dropped, which `frontend.md` already warns about, except
+  louder: the class is not dropped, it is honoured twice with different
+  meanings.
+
+  The colour is still reachable as `bg-background` / `text-foreground`
+  through semanticColors, which is the name a component should be using
+  anyway — and `colors.base` is untouched for TypeScript callers such as
+  the contrast tests.
+*/
+const { base: _base, ...paletteWithoutBase } = colors
+
 const config: Config = {
   content: ['./src/**/*.{ts,tsx}'],
   theme: {
     extend: {
       colors: {
-        ...colors,
+        ...paletteWithoutBase,
         ...semanticColors,
       },
 

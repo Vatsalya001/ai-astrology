@@ -46,7 +46,7 @@ export function StepHeader({
             key={index}
             className={cn(
               'h-1 flex-1 rounded-full transition-colors',
-              index < current ? 'bg-gold' : 'bg-surface-2',
+              index < current ? 'bg-gold' : 'bg-elevated',
             )}
           />
         ))}
