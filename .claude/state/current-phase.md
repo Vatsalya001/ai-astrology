@@ -23,9 +23,11 @@ at `58fe1f2`. Three §11 security items were carried forward — see below.
 | 4.7 | PII guard | ✅ pre-existing; now enforced at registration and break-tested |
 | 4.8 | Model router + per-env overrides | ✅ all 10 job types mapped, derived from the enum |
 | 4.9 | Retry, timeout, circuit breaker, fallback | ✅ 12 tests on a fake clock; both breaker decisions break-tested |
-| 4.4, 4.5, 4.10–4.21 | | not started |
+| 4.10 | Prompt registry, immutable versions, `PromptBuilder` | ✅ lockfile of 8 module digests; editing one fails, break-tested |
+| 4.11 | Cache-breakpoint ordering + prefix stability | ✅ ordering enforced structurally, not by convention |
+| 4.4, 4.5, 4.12–4.21 | | not started |
 
-**147 Python tests** in `services/ai`, `mypy --strict` clean, both import contracts kept.
+**164 Python tests** in `services/ai`, `mypy --strict` clean, both import contracts kept.
 
 ---
 
