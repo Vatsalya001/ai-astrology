@@ -25,11 +25,15 @@ from app.providers.base import (
     Usage,
 )
 from app.providers.mock import MockProvider, request_fingerprint
+from app.providers.ollama_embeddings import OllamaEmbeddingProvider
 from app.providers.openai_compatible import OpenAICompatibleProvider
 from app.providers.registry import NoProviderAvailableError, ProviderRegistry
+from app.providers.resilience import BreakerState, CircuitOpenError, ResilientProvider
 
 __all__ = [
+    "BreakerState",
     "Capabilities",
+    "CircuitOpenError",
     "CompletionChunk",
     "CompletionRequest",
     "CompletionResponse",
@@ -41,11 +45,13 @@ __all__ = [
     "ModelMap",
     "ModelTier",
     "NoProviderAvailableError",
+    "OllamaEmbeddingProvider",
     "OpenAICompatibleProvider",
     "ProviderError",
     "ProviderRegistry",
     "ProviderTier",
     "RequestMetadata",
+    "ResilientProvider",
     "Role",
     "SystemBlock",
     "Usage",
