@@ -197,6 +197,9 @@ export function A11yInspector() {
   */
   const jumped = useRef(false)
 
+  /** The element last logged, so a re-focus of it is not a second stop. */
+  const lastFocused = useRef<Element | null>(null)
+
   // ─── focus tracking ───────────────────────────────────────────────
 
   useEffect(() => {
@@ -205,6 +208,24 @@ export function A11yInspector() {
       if (!el || el === document.body) return
       // The panel's own controls are not part of the page under test.
       if (el.closest('[data-a11y-inspector]')) return
+
+      /*
+        Focus returning to the element it just left is not a new stop.
+
+        Press Tab on the LAST focusable element and focus leaves for the
+        browser's own chrome; press it again and Chrome hands focus back
+        to that same element, firing `focusin` a second time. The log
+        showed "Download PDF" three times in a row and read as three
+        distinct controls — on a page whose entire tab order is eight
+        stops, one of which is Download PDF.
+
+        Same reasoning as the announcements list below: a thing repeating
+        with no change is one occurrence, and counting it twice makes the
+        number this tool exists to report wrong in the direction that
+        looks like a product defect.
+      */
+      if (el === lastFocused.current) return
+      lastFocused.current = el
 
       const viaJump = jumped.current
       jumped.current = false
@@ -298,6 +319,7 @@ export function A11yInspector() {
   const reset = useCallback(() => {
     counter.current = 0
     jumped.current = false
+    lastFocused.current = null
     setStops([])
     setAnnouncements([])
     setCurrent(null)
