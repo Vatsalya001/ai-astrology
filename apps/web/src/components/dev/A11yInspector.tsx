@@ -152,6 +152,123 @@ function readTable(table: HTMLTableElement): string[] {
   )
 }
 
+/**
+ * The page linearised into the order a screen reader speaks it.
+ *
+ * ── Why focus order is not enough ──
+ *
+ * The panel reported the FOCUS order, which is the eight things you can
+ * Tab to on the chart route. The Phase 3 manual pass asks a different
+ * question — "listen to the whole page top to bottom; does the order
+ * tell a story or jump around" — and that is the READING order, which
+ * includes every heading, paragraph, table cell and visually-hidden
+ * string. A tester handed a list of eight buttons cannot answer it, and
+ * would have had to install a screen reader for the one question the
+ * tool was built to spare them.
+ *
+ * ── What this is and is not ──
+ *
+ * It is a linearisation, not an emulation. Real screen readers differ on
+ * verbosity, punctuation and how they chunk text, and none of that
+ * changes the ORDER — which is the only thing the question asks about.
+ *
+ * Elements are marked with ▸ when they carry structure a reader
+ * navigates by (heading, landmark, table, control), because "does it
+ * tell a story" is largely a question about whether that scaffolding
+ * arrives in a sensible sequence. `aria-hidden` subtrees are skipped, as
+ * a screen reader skips them; `sr-only` text is marked, because a
+ * sighted tester needs to know which lines exist only in the audio.
+ */
+function readInOrder(root: Element): string[] {
+  const out: string[] = []
+
+  const visit = (node: Node): void => {
+    if (node.nodeType === Node.TEXT_NODE) {
+      const text = node.textContent?.trim().replace(/\s+/g, ' ')
+      if (text) out.push(text)
+      return
+    }
+    if (node.nodeType !== Node.ELEMENT_NODE) return
+
+    const el = node as Element
+    // A screen reader skips these entirely, so this must too — otherwise
+    // the decorative chart glyphs drown the reading.
+    if (el.getAttribute('aria-hidden') === 'true') return
+    if (el.closest('[data-a11y-inspector]')) return
+
+    if (el instanceof HTMLTableElement) {
+      const caption = el.querySelector('caption')?.textContent?.trim()
+      out.push(`▸ table — ${caption || '(no caption)'}`)
+      for (const row of readTable(el)) out.push(`    ${row}`)
+      return
+    }
+
+    const tag = el.tagName
+
+    if (/^H[1-6]$/.test(tag)) {
+      out.push(`▸ heading ${tag[1]} — ${el.textContent?.trim().replace(/\s+/g, ' ')}`)
+      return
+    }
+
+    if (tag === 'A' || tag === 'BUTTON') {
+      out.push(`▸ ${tag === 'A' ? 'link' : 'button'} — ${accessibleName(el)}`)
+      return
+    }
+
+    // A labelled region is a landmark: the thing a reader jumps between.
+    const landmark = el.getAttribute('role') ?? (tag === 'MAIN' ? 'main' : null)
+    if (landmark && ['main', 'region', 'navigation', 'group', 'list'].includes(landmark)) {
+      const name = el.getAttribute('aria-label') ?? accessibleName(el)
+      out.push(`▸ ${landmark}${name ? ` — ${name}` : ''}`)
+      // An svg group's children are decorative by construction here.
+      if (tag === 'svg' || el.tagName.toLowerCase() === 'svg') return
+    }
+
+    if (el.classList.contains('sr-only')) {
+      /*
+        Descend if it HOLDS something; flatten only if it is text.
+
+        The first version returned here unconditionally, and the chart's
+        visually-hidden data table — a `<div class="sr-only">` wrapping a
+        captioned `<table>` — came out as one 600-character blob with
+        every cell run together. That is precisely the bug this file
+        already fixed once in `accessibleName`, reproduced twelve
+        functions later by the same instinct: treat a container as its
+        text. A wrapper is not a leaf just because it is invisible.
+      */
+      if (el.children.length === 0) {
+        const text = el.textContent?.trim().replace(/\s+/g, ' ')
+        if (text) out.push(`🔊 (heard, not seen) ${text}`)
+        return
+      }
+      out.push('🔊 (heard, not seen) — below:')
+    }
+
+    for (const child of el.childNodes) visit(child)
+  }
+
+  visit(root)
+
+  /*
+    Three kinds of noise a reader would not hear as separate utterances:
+
+      - an exact repeat (the announcements list uses the same rule)
+      - a line already contained in the one before it, which is what an
+        `aria-labelledby` target produces: the group announces its name,
+        then the hidden paragraph that SUPPLIES that name follows
+      - punctuation alone, from a text node between two elements, e.g.
+        the em dash in "Rasi — The birth chart itself"
+  */
+  return out.filter((line, i) => {
+    if (!line.replace(/[—–\-·,.:;|]/g, '').trim()) return false
+    const previous = out[i - 1]
+    if (!previous) return true
+    if (line === previous) return false
+    const bare = line.replace(/^🔊 \(heard, not seen\)\s*/, '')
+    return !(bare.length > 12 && previous.includes(bare))
+  })
+}
+
 /** The role a screen reader would announce, explicit or implied. */
 function role(el: Element): string {
   const explicit = el.getAttribute('role')
@@ -185,6 +302,7 @@ export function A11yInspector() {
   const [current, setCurrent] = useState<Stop | null>(null)
   const [open, setOpen] = useState(true)
   const [tableRows, setTableRows] = useState<string[] | null>(null)
+  const [reading, setReading] = useState<string[] | null>(null)
   const counter = useRef(0)
 
   /*
@@ -316,6 +434,16 @@ export function A11yInspector() {
     return true
   }, [])
 
+  /*
+    Q2 of the manual pass: "listen to the whole page top to bottom".
+    Reads <main> if there is one, so the panel's own chrome and the site
+    header do not bury the content the question is about.
+  */
+  const readPage = useCallback(() => {
+    const root = document.querySelector('main') ?? document.body
+    setReading(readInOrder(root))
+  }, [])
+
   const reset = useCallback(() => {
     counter.current = 0
     jumped.current = false
@@ -324,6 +452,7 @@ export function A11yInspector() {
     setAnnouncements([])
     setCurrent(null)
     setTableRows(null)
+    setReading(null)
   }, [])
 
   if (!open) {
@@ -400,6 +529,15 @@ export function A11yInspector() {
             {label}
           </button>
         ))}
+        {/* Not a jump: it moves no focus, it transcribes. Kept beside the
+            jump buttons because it answers the same tester's question. */}
+        <button
+          type="button"
+          onClick={readPage}
+          className="rounded bg-gold/25 px-2.5 py-1.5 text-xs text-ink hover:bg-gold/40"
+        >
+          Read the page in order
+        </button>
       </div>
 
       <p className="text-xs leading-relaxed text-ink-muted">
@@ -428,6 +566,31 @@ export function A11yInspector() {
           </div>
         )}
       </div>
+
+      {/* ── the whole page, in reading order ── */}
+      {reading && (
+        <div>
+          <div className="mb-1 text-xs uppercase tracking-wide text-ink-muted">
+            The page in reading order ({reading.length} lines)
+          </div>
+          <ol className="space-y-0.5">
+            {reading.map((line, i) => (
+              <li
+                key={i}
+                className={
+                  line.startsWith('▸')
+                    ? 'text-xs font-medium text-gold'
+                    : line.startsWith('🔊')
+                      ? 'text-xs text-accent-soft'
+                      : 'text-xs text-ink-muted'
+                }
+              >
+                {line}
+              </li>
+            ))}
+          </ol>
+        </div>
+      )}
 
       {/* ── the table, read as a screen reader would ── */}
       {tableRows && (
