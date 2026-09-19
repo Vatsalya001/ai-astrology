@@ -269,3 +269,69 @@ test.describe('reading a table', () => {
     expect(await panel.textContent()).toContain('Focus order — 1 tab stop')
   })
 })
+
+/**
+ * Tabbing past the last control does not invent new stops.
+ *
+ * Press Tab on the final focusable element and focus leaves for the
+ * browser's own chrome; press it again and Chrome hands focus back to
+ * that same element, firing `focusin` a second time. The log showed
+ * "Download PDF" as stops 3, 4 AND 5 — on a page whose entire tab order
+ * is eight stops, exactly one of which is Download PDF.
+ *
+ * Read literally that says there are three download buttons. It sent a
+ * tester hunting a duplicate-control bug that does not exist, which is
+ * the same class of failure as the table blob: the tool inventing a
+ * product defect out of its own bookkeeping.
+ */
+test('focus returning to the same element is not a second tab stop', async ({ page }) => {
+  await page.goto('/auth?a11y=1')
+  const panel = page.locator('[data-a11y-inspector]')
+  await expect(panel).toBeVisible({ timeout: 15_000 })
+
+  /*
+    Reproduced by blur-then-refocus, NOT by pressing Tab past the end.
+
+    The first version of this test pressed Tab fourteen times and asserted
+    the count stayed low. It passed with the guard REMOVED, so it was
+    testing nothing: headless Chromium has no browser chrome to hand focus
+    to, so Tab wraps inside the page and the same element is never
+    re-focused back-to-back. The behaviour only occurs in a real browser.
+
+    `blur()` sends focus to the document body — the same place it goes
+    when it leaves for the address bar — and `focus()` brings it back to
+    the element it just left, firing `focusin` a second time. That is the
+    exact sequence, and it reproduces headlessly.
+  */
+  await page.keyboard.press('Tab')
+  await page.waitForTimeout(150)
+
+  await page.evaluate(() => {
+    const el = document.activeElement as HTMLElement
+    el.blur()
+    el.focus()
+    el.blur()
+    el.focus()
+  })
+  await page.waitForTimeout(250)
+
+  const text = (await panel.textContent()) ?? ''
+  const stops = Number((text.match(/Focus order — (\d+) tab stop/) ?? [])[1] ?? -1)
+
+  expect(
+    stops,
+    `one Tab press plus two re-focuses of that SAME element produced ` +
+      `${stops} tab stops. Focus re-entering the element it just left is ` +
+      `being counted as a new stop, which reads as duplicate controls that ` +
+      `do not exist — a tester saw "Download PDF" logged as stops 3, 4 and ` +
+      `5 on a page with exactly one download button.`,
+  ).toBe(1)
+
+  // And no control may appear twice in a row in the log.
+  const names = [...text.matchAll(/(\d+)\. ([^(]+)\(/g)].map((m) => m[2]!.trim())
+  const backToBack = names.filter((n, i) => i > 0 && n === names[i - 1])
+  expect(
+    backToBack,
+    'the same control is logged as two consecutive tab stops',
+  ).toEqual([])
+})
