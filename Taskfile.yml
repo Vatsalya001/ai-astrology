@@ -188,6 +188,12 @@ tasks:
       - uv run --directory {{.AI_DIR}} ruff check .
       - uv run --directory {{.AI_DIR}} ruff format --check .
       - uv run --directory {{.AI_DIR}} mypy --strict app
+      # The vendor boundary. PHASE-04 §2 requires that nothing outside
+      # app/providers/ imports a model SDK, "enforced by an import-linter
+      # contract in CI, not by convention — conventions erode". Neither
+      # ruff nor mypy can see this: an `import openai` in an orchestrator
+      # is valid Python and correctly typed.
+      - uv run --directory {{.AI_DIR}} lint-imports
 
   lint:web:
     # Both, not either. `tsc` is a type checker and ESLint is a linter;

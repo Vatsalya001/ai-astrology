@@ -37,6 +37,11 @@ dev = [
     "pytest-asyncio>=0.24",
     "ruff>=0.7",
     "mypy>=1.13",
+    # Enforces the vendor-SDK boundary below. The rule that only
+    # app/providers/ may import openai/anthropic/google is the whole
+    # reason a model swap is a config change — and a rule nothing checks
+    # is a comment.
+    "import-linter>=2.1",
 ]
 
 [tool.ruff]
@@ -69,3 +74,65 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["app"]
+
+
+# ─── the vendor boundary ─────────────────────────────────────────────
+#
+# PHASE-04 §2, first line: "Nothing outside `app/providers/` may import a
+# vendor SDK. Enforced by an import-linter contract in CI, not by
+# convention — conventions erode."
+#
+# Run with: uv run lint-imports
+
+[tool.importlinter]
+root_package = "app"
+# Required whenever a forbidden module is a third-party package rather
+# than one of our own — without it import-linter only builds a graph of
+# first-party imports and would report every contract as passing while
+# seeing none of the SDK imports it exists to catch.
+include_external_packages = true
+
+[[tool.importlinter.contracts]]
+name = "Vendor SDKs live only in app.providers"
+type = "forbidden"
+source_modules = [
+    "app.api",
+    "app.guards",
+    "app.main",
+    "app.middleware",
+    "app.observability",
+    "app.prompts",
+    "app.schemas",
+    "app.settings",
+    "app.telemetry",
+]
+forbidden_modules = [
+    "openai",
+    "anthropic",
+    # `google` only: import-linter rejects subpackages of external
+    # packages, and the top-level name covers google.generativeai and
+    # google.genai — which is what we actually care about.
+    "google",
+    "litellm",
+    "langchain",
+    "ollama",
+]
+# Listed module by module rather than as "app" minus "app.providers",
+# because import-linter's `forbidden` contract has no exclusion syntax
+# and a wildcard source would forbid the providers package from importing
+# the SDKs it exists to wrap.
+
+[[tool.importlinter.contracts]]
+name = "The base protocol depends on no adapter"
+type = "forbidden"
+source_modules = ["app.providers.base"]
+forbidden_modules = [
+    "openai",
+    "anthropic",
+    "google",
+    "litellm",
+    "ollama",
+]
+# base.py defines the seam. If it ever imports a vendor type, that type
+# becomes part of the protocol and every other adapter has to construct
+# it — which is the exact coupling this phase exists to avoid.
