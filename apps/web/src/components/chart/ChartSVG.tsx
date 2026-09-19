@@ -175,7 +175,7 @@ export function ChartSVG({
           y={0}
           width={SIZE}
           height={SIZE}
-          className="fill-surface stroke-border"
+          className="fill-surface stroke-grid"
           strokeWidth={0.5}
         />
 
@@ -234,7 +234,7 @@ function renderNorth({
         <polygon
           points={toPoints(cell.polygon)}
           className={cn(
-            'stroke-border transition-colors',
+            'stroke-grid transition-colors',
             marked ? 'fill-gold/15' : 'fill-transparent',
           )}
           strokeWidth={0.4}
@@ -255,7 +255,7 @@ function renderNorth({
           y={cell.label.y}
           textAnchor="middle"
           dominantBaseline="middle"
-          className="fill-ink-faint"
+          className="fill-ink-muted"
           style={{ fontSize: `${SIZE * 0.032}px` }}
           aria-hidden="true"
         >
@@ -297,7 +297,7 @@ function renderSouth({
     <>
       {/* The hollow middle, drawn as the page colour so the grid reads
           as a ring rather than as four blank cells. */}
-      <polygon points={toPoints(centre)} className="fill-base stroke-border" strokeWidth={0.4} />
+      <polygon points={toPoints(centre)} className="fill-base stroke-grid" strokeWidth={0.4} />
 
       {southIndianSigns().map((cell) => {
         const house = ascendantSign === null ? null : houseOfSign(cell.sign, ascendantSign)
@@ -310,7 +310,7 @@ function renderSouth({
             <polygon
               points={toPoints(cell.polygon)}
               className={cn(
-                'stroke-border transition-colors',
+                'stroke-grid transition-colors',
                 marked ? 'fill-gold/15' : 'fill-transparent',
               )}
               strokeWidth={0.4}
@@ -344,7 +344,7 @@ function renderSouth({
             <text
               x={cell.label.x}
               y={cell.label.y}
-              className="fill-ink-faint"
+              className="fill-ink-muted"
               style={{ fontSize: `${SIZE * 0.028}px` }}
               aria-hidden="true"
             >

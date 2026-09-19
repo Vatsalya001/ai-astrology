@@ -67,6 +67,21 @@ const ENGLISH_BY_DESIGN = new Set([
   'app/layout.tsx',
   'app/error.tsx',
   'app/not-found.tsx',
+
+  /*
+    The accessibility inspector is a developer tool, not product UI.
+
+    It never renders for a user: it is behind `?a11y=1` and lazily
+    imported, so it is not even in the bundle unless somebody asks for
+    it. Its audience is whoever is testing the product, and translating
+    "Focus order" into Hindi would be work that helps nobody while
+    putting developer vocabulary into the user-facing dictionary.
+
+    This is the distinction the rule is actually about — untranslated
+    copy a USER can reach is the defect. Nothing here is reachable.
+  */
+  'components/dev/A11yInspector.tsx',
+  'components/dev/A11yInspectorMount.tsx',
 ])
 
 /**

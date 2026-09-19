@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from 'next'
 import { Inter, JetBrains_Mono, Cormorant_Garamond } from 'next/font/google'
 import '@/styles/globals.css'
 
+import { A11yInspectorMount } from '@/components/dev/A11yInspectorMount'
 import { LocaleProvider } from '@/lib/i18n/context'
 import { ProfileProvider } from '@/lib/profile-context'
 
@@ -73,6 +74,12 @@ export default function RootLayout({
         */}
         <LocaleProvider>
           <ProfileProvider>{children}</ProfileProvider>
+
+          {/*
+            The accessibility inspector, when the URL carries ?a11y=1.
+            Lazily imported, so it stays out of the first-load bundle.
+          */}
+          <A11yInspectorMount />
         </LocaleProvider>
       </body>
     </html>

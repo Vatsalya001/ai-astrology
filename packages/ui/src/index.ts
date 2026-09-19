@@ -42,6 +42,31 @@ export const colors = {
   ink: { DEFAULT: '#F2F3F8', muted: '#9AA3C0', faint: '#858DA8' },
 
   /*
+    The chart's structural lines.
+
+    Not `border`. `border` is #252F52, which sits at 1.30:1 against the
+    chart's `surface` background — measured, not estimated. WCAG 1.4.11
+    asks for 3:1 on "graphical objects required to understand the
+    content", and the twelve-house grid is the single most load-bearing
+    graphic in this product: without it the diamond is a field of
+    floating abbreviations.
+
+    #5469B0 is 3.25:1 on surface and 3.61:1 on base. Same hue (226°) and
+    saturation as the rest of the navy family, lightness raised until it
+    cleared — so the chart reads as drawn rather than as washed out,
+    without introducing a colour from outside the palette.
+
+    ── Why the background was NOT lightened instead ──
+
+    That was the first instinct and the measurements refused it. Lifting
+    `surface` from #141B35 to #1E2847 drops `ink-faint` from 5.15:1 to
+    4.40:1 — below AA — while the planet glyphs lose 2 points of an
+    already-comfortable 15:1. The dark field is what makes the text
+    legible; the lines were the problem all along.
+  */
+  grid: '#5469B0',
+
+  /*
     Ink for paper, which is the one place this palette inverts.
 
     Every screen in the product is midnight navy with near-white text.
