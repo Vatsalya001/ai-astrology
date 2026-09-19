@@ -147,16 +147,23 @@ if (stale.length > 0) {
   fail('remove them, or fix the route name — a budget for a route that does not exist checks nothing')
 }
 
-// ─── the spec's target, reported but not enforced ────────────────────
+// ─── the spec's target: reported, deliberately not enforced ──────────
+//
+// ADR-010. 180 KB was written into the spec before the framework was
+// chosen, and the framework floor is 159.5 KB of it. Enforcing it would
+// fail every build forever, which teaches people to ignore the budget
+// line rather than to watch it. So it is printed and not enforced, and
+// the gate is the per-route regression budgets above.
 
 const overSpec = measured.filter((row) => row.kb > budgets.specTargetKB)
 if (overSpec.length > 0) {
   console.log(
     `\nNote: ${overSpec.length} route(s) exceed the spec's ${budgets.specTargetKB} KB target.\n` +
-      `  The framework floor alone — React, react-dom and the Next client runtime —\n` +
-      `  is larger than the headroom that target leaves for product code. Tracked in\n` +
-      `  PROJECT_STATUS.md as an unmet spec item; see bundle-budget.json for why the\n` +
-      `  enforced numbers differ.`,
+      `  This is expected and is a recorded decision, not a pending failure — see\n` +
+      `  docs/decisions/010-bundle-budget-target.md. The framework floor alone is\n` +
+      `  159.5 KB, so the target leaves ~20 KB for the whole product; deleting every\n` +
+      `  removable byte still lands at 183.0 KB. The budgets enforced above catch\n` +
+      `  REGRESSIONS, which is what a CI budget can actually deliver.`,
   )
 }
 
