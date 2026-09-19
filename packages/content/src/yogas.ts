@@ -179,15 +179,33 @@ export const YOGAS: Localised<YogaKey> = {
       long: 'तब बनता है जब अपनी नीच राशि में बैठे ग्रह की निर्बलता समाप्त हो जाए — प्रायः तब, जब उस राशि का स्वामी, या उसमें उच्च होने वाला ग्रह, लग्न या चंद्रमा से केंद्र में हो। परंपरा इस उलटफेर को ही महत्वपूर्ण मानती है, और इसे असंभावित मार्ग से आने वाले बल के लिए पढ़ती है।',
     },
   },
+  /*
+    "Connected", not "joined".
+
+    The detector emits this name for TWO different configurations —
+    `detect_raja_yogas` in astro-service marks a conjunction `strong` and
+    a mutual aspect `moderate` — and only the first is a joining. The
+    summary said "joined with", so a chart with three Raja Yogas showed
+    the same conjunction claim three times when two of the pairs were in
+    different houses entirely, several signs apart.
+
+    It was wrong in English only: the Hindi already said योग, which
+    carries combination without asserting contact. Both now name the two
+    mechanisms, because "connected" alone is vague enough to be useless
+    and the distinction is the interesting part.
+
+    `yogas.test.ts` forbids conjunction-only wording on any yoga the
+    engine can also produce from an aspect.
+  */
   'Raja Yoga': {
     en: {
       name: 'Raja Yoga',
-      short: 'An angular house lord joined with a trinal house lord.',
+      short: 'An angular house lord and a trinal house lord connected — by conjunction or aspect.',
       long: 'Formed when the lord of an angular house (1st, 4th, 7th, 10th) and the lord of a trinal house (1st, 5th, 9th) come together — conjunct, in exchange, or aspecting each other. The name means "royal combination", and the tradition reads it for capability and circumstance arriving at the same time rather than for rank.',
     },
     hi: {
       name: 'राज योग',
-      short: 'केंद्र भाव के स्वामी का त्रिकोण भाव के स्वामी से योग।',
+      short: 'केंद्र भाव के स्वामी का त्रिकोण भाव के स्वामी से संबंध — युति या दृष्टि द्वारा।',
       long: 'तब बनता है जब केंद्र भाव (1, 4, 7, 10) के स्वामी और त्रिकोण भाव (1, 5, 9) के स्वामी मिलें — युति में, राशि-परिवर्तन में, या परस्पर दृष्टि में। नाम का अर्थ "राजसी योग" है, और परंपरा इसे पद के बजाय सामर्थ्य और परिस्थिति के एक साथ आने के लिए पढ़ती है।',
     },
   },

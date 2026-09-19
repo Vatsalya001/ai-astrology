@@ -45,6 +45,15 @@ func TestLoadSucceedsWithValidEnvironment(t *testing.T) {
 	if cfg.ServiceTimeout != 10*time.Second {
 		t.Errorf("ServiceTimeout = %v, want 10s", cfg.ServiceTimeout)
 	}
+	// The batch budget must default WIDER than the interactive one, and
+	// must have a default at all: the Sade Sati windows scan takes ~22s
+	// by construction, so a batch client that falls back to 10s is the
+	// bug this field was added to fix, silently reintroduced.
+	if cfg.BatchServiceTimeout <= cfg.ServiceTimeout {
+		t.Errorf("BatchServiceTimeout = %v, must exceed ServiceTimeout (%v) — "+
+			"a background scan held to an interactive deadline cannot finish",
+			cfg.BatchServiceTimeout, cfg.ServiceTimeout)
+	}
 	// Every feature flag must default to off. Phase 0 ships no features,
 	// and a flag that defaults on is a feature shipped by accident.
 	if cfg.FeatureAIChat || cfg.FeaturePayments || cfg.FeatureVoice ||

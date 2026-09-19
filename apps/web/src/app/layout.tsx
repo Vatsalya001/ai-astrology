@@ -51,7 +51,7 @@ export default function RootLayout({
       lang="en"
       className={`${sans.variable} ${serif.variable} ${mono.variable}`}
     >
-      <body className="min-h-dvh bg-base text-ink">
+      <body className="min-h-dvh bg-background text-ink">
         {/* Skip link: the first thing a keyboard user hits, letting them
             jump past the header instead of tabbing through it.
 

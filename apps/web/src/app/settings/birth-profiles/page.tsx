@@ -84,7 +84,7 @@ export default function BirthProfilesPage() {
           </div>
         )
       ) : profiles.length === 0 ? (
-        <div className="mt-10 rounded-xl border border-border bg-surface-2 p-8 text-center">
+        <div className="mt-10 rounded-xl border border-border bg-elevated p-8 text-center">
           <p className="text-sm text-ink-muted">{t.profiles.empty}</p>
           <Button asChild size="lg" className="mt-6">
             <Link href="/onboarding/birth">{t.profiles.emptyCta}</Link>
@@ -126,7 +126,7 @@ function ProfileCard({
   const [confirming, setConfirming] = useState(false)
 
   return (
-    <article className="rounded-xl border border-border bg-surface-2 p-5">
+    <article className="rounded-xl border border-border bg-elevated p-5">
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0">
           <h2 className="truncate font-medium">{profile.label}</h2>

@@ -88,7 +88,17 @@ func run() error {
 	// with no phase-2 benefit. The transit refresh calls astro-service,
 	// so it needs retry with backoff and must run ONCE across the fleet.
 	// See internal/platform/jobs.
-	astro, err := clients.NewAstro(cfg.AstroServiceURL, cfg.InternalToken, cfg.ServiceTimeout)
+	// BatchServiceTimeout, not ServiceTimeout, and there is no second
+	// client here on purpose.
+	//
+	// SERVICE_TIMEOUT is an interactive budget — it exists because a user
+	// is waiting. Nothing in this process has a user waiting on it: every
+	// astro call the worker makes is a scheduled ephemeris scan measured
+	// in seconds, and the correct response to a slow one is to wait, not
+	// to abandon six hours of freshness. Giving the worker the API's
+	// budget is what left the transit table and the Sade Sati end dates
+	// stale for a whole phase. See config.BatchServiceTimeout.
+	astro, err := clients.NewAstro(cfg.AstroServiceURL, cfg.InternalToken, cfg.BatchServiceTimeout)
 	if err != nil {
 		return fmt.Errorf("astro client: %w", err)
 	}

@@ -50,6 +50,27 @@ type Config struct {
 	AIServiceURL    string        `env:"AI_SERVICE_URL,required"    validate:"required,url"`
 	ServiceTimeout  time.Duration `env:"SERVICE_TIMEOUT"            envDefault:"10s" validate:"required"`
 
+	// BatchServiceTimeout bounds internal calls that nobody is waiting on.
+	//
+	// ServiceTimeout is an INTERACTIVE budget: a user is on the other end
+	// of the request, and ten seconds is already longer than they will
+	// tolerate. Background recomputation is a different job with a
+	// different shape — it runs every six hours on a worker, and the only
+	// cost of it taking half a minute is that it takes half a minute.
+	//
+	// Applying the interactive budget to a batch call is what broke the
+	// Sade Sati windows: the twelve-sign ephemeris scan takes ~22s by
+	// construction (a 40-year span at a 5-day step is ~2,900 sequential
+	// ephemeris evaluations), so the call could never once succeed inside
+	// 10s. It failed on every attempt from the day it shipped, the failure
+	// was logged and swallowed by design, and the stored end dates simply
+	// stopped advancing while the positions beside them stayed current.
+	//
+	// Two minutes is not a target — the scan should get faster. It is
+	// headroom wide enough that this particular failure cannot recur while
+	// that work is outstanding.
+	BatchServiceTimeout time.Duration `env:"BATCH_SERVICE_TIMEOUT" envDefault:"120s" validate:"required"`
+
 	// ─── Observability (all optional) ───────────────────────────
 	// Empty values disable the exporter/reporter. The instrumentation
 	// still runs, so these code paths cannot rot between releases, and

@@ -57,6 +57,32 @@ const (
 const ReferenceMoonSign = 0
 
 // Refresher recomputes the global transit table.
+//
+// ── Its astro client must be on the BATCH budget ──
+//
+// Nothing waits on a Refresher. It runs every six hours on a worker, and
+// the only cost of a call taking half a minute is that it takes half a
+// minute. Both of the calls it makes are long by construction, and
+// neither fact is obvious from the endpoint names:
+//
+//   - ComputeSadeSatiWindows scans forty years of Saturn's motion at a
+//     five-day step — ~2,900 sequential ephemeris evaluations, ~22s.
+//   - ComputeTransits looks like nine positions at an instant, and is
+//     ~0.1s most of the time. But astro's /transits/compute also returns
+//     the Sade Sati WINDOW for the natal Moon sign it was given, and
+//     computing that window means the same ingress scan — about twelve
+//     seconds. It is skipped only when that sign is not currently in
+//     Sade Sati.
+//
+// The second one is the trap. ReferenceMoonSign is Aries, so this call
+// is instant for roughly seven years out of every thirty and then, for
+// the two and a half years Saturn spends in Pisces, silently becomes a
+// twelve-second call — because Aries is then one of the three signs in
+// Sade Sati. Saturn entered Pisces and every refresh began timing out
+// against a ten-second interactive budget. Nothing about the code
+// changed; the sky did.
+//
+// See config.BatchServiceTimeout.
 type Refresher struct {
 	q        dbgen.Querier
 	astro    *clients.Astro
@@ -160,6 +186,9 @@ func (r *Refresher) Refresh(ctx context.Context, at time.Time) (int, error) {
 //
 // Twelve rows, upserted on the sign, so a retry or a second replica
 // rewrites rather than duplicates — the same reasoning as UpsertTransit.
+//
+// This is the forty-year ephemeris scan and it does not fit an
+// interactive deadline. See the Refresher doc comment.
 func (r *Refresher) refreshSadeSatiWindows(ctx context.Context, slot time.Time) error {
 	response, err := r.astro.ComputeSadeSatiWindows(ctx, slot)
 	if err != nil {
