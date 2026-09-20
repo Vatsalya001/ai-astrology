@@ -222,7 +222,8 @@ type CompleteRequest struct {
 
 // CompleteResult defines model for CompleteResult.
 type CompleteResult struct {
-	Blocked *bool `json:"blocked,omitempty"`
+	Blocked  *bool `json:"blocked,omitempty"`
+	Declined *bool `json:"declined,omitempty"`
 
 	// Intent The 21 intents from PHASE-04 §6.
 	//

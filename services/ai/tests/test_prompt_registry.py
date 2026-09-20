@@ -14,6 +14,7 @@ from app.prompts import (
     all_modules,
     load_module,
 )
+from app.prompts.registry import ANTHROPIC_MIN_CACHEABLE_TOKENS
 
 LOCKFILE = Path(__file__).parent.parent / "app" / "prompts" / "published.lock.json"
 
@@ -236,3 +237,73 @@ def test_the_versions_used_are_recorded() -> None:
         "system_base": "v1",
         "personas/vedic_guide": "v1",
     }
+
+
+# ─── whether the breakpoint actually engages ─────────────────────────
+
+
+def test_the_shipped_prefix_is_still_below_anthropics_minimum() -> None:
+    """Pins a fact that is currently uncomfortable, so it cannot change
+    without anyone noticing.
+
+    Anthropic ignores `cache_control` below ~1024 tokens (2048 on
+    Haiku). Today's five-module prefix is ~770, so the breakpoint the
+    whole builder is built around is a NO-OP on every tier — no write,
+    no read, and no error saying so.
+
+    §15 names "prompt caching silently stops working in prod" as a risk.
+    A cache that never STARTED working is indistinguishable from the
+    outside, and the only thing that would have surfaced it is a
+    measurement. This is that measurement.
+
+    When Phase 5's RAG corpus pushes the prefix over the line, this test
+    fails — which is the point. Flip the assertion then, and know the
+    date the cache began paying for itself.
+    """
+    builder = (
+        PromptBuilder()
+        .add("system_base", "v1")
+        .add("astrology_rules", "v1")
+        .add("safety_rules", "v1")
+        .persona("vedic_guide", "v1")
+        .add("output_format", "v1")
+        .cache_breakpoint()
+    )
+
+    tokens = builder.cacheable_prefix_tokens
+
+    assert tokens < ANTHROPIC_MIN_CACHEABLE_TOKENS, (
+        f"the cacheable prefix is now ~{tokens} tokens, at or above Anthropic's "
+        f"~{ANTHROPIC_MIN_CACHEABLE_TOKENS}-token minimum. The breakpoint has begun "
+        f"to engage — which is good news. Flip this assertion to >= and record the "
+        f"date in docs/PROJECT_STATUS.md."
+    )
+    # A floor as well, so the prefix cannot quietly SHRINK. A shorter
+    # prompt is a cheaper request and a worse answer, and nothing else
+    # would report it.
+    assert tokens > 500, f"the stable prefix collapsed to ~{tokens} tokens"
+
+
+def test_every_persona_produces_a_similar_prefix_length() -> None:
+    """They differ by one module, so they should differ by little.
+
+    A persona far longer than the others would cross the caching
+    threshold on its own, making the cache engage for some users and not
+    others — the hardest kind of cost anomaly to diagnose, because the
+    answers are all correct.
+    """
+    lengths = {}
+    for persona in ("vedic_guide", "career_guide", "relationship_guide", "spiritual_guide"):
+        builder = (
+            PromptBuilder()
+            .add("system_base", "v1")
+            .add("astrology_rules", "v1")
+            .add("safety_rules", "v1")
+            .persona(persona, "v1")
+            .add("output_format", "v1")
+            .cache_breakpoint()
+        )
+        lengths[persona] = builder.cacheable_prefix_tokens
+
+    spread = max(lengths.values()) - min(lengths.values())
+    assert spread < 200, f"personas differ by ~{spread} tokens: {lengths}"

@@ -59,6 +59,11 @@
             "title": "Blocked",
             "type": "boolean"
           },
+          "declined": {
+            "default": false,
+            "title": "Declined",
+            "type": "boolean"
+          },
           "intent": {
             "$ref": "#/components/schemas/Intent",
             "default": "general_astrology"

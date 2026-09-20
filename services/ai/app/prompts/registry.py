@@ -108,6 +108,24 @@ class BuilderOrderError(RuntimeError):
     """
 
 
+# Anthropic ignores `cache_control` on a prefix below roughly this many
+# tokens — 2048 on Haiku. Below it the breakpoint is a no-op: no write,
+# no read, and no error saying so.
+#
+# TODAY'S PREFIX IS ~770 TOKENS, so the breakpoint this class is built
+# around does not engage on any tier. That is not a bug in the builder;
+# it is the honest state of Phase 4, where the stable prefix is five
+# short modules. PHASE-04 §2 expects "the astrology rule corpus" to be
+# large, and Phase 5's RAG corpus is what takes it past the threshold.
+#
+# Recorded here, and asserted by `test_prompt_registry.py`, because
+# §15 names "prompt caching silently stops working in prod" as a risk —
+# and a cache that never STARTED working looks identical from the
+# outside. When Phase 5 pushes the prefix over the line, that test
+# fails and somebody notices it began working.
+ANTHROPIC_MIN_CACHEABLE_TOKENS = 1024
+
+
 class PromptBuilder:
     """Composes a system prompt with the cacheable prefix first.
 
@@ -199,6 +217,16 @@ class PromptBuilder:
         once the prompts have moved on.
         """
         return dict(self._versions)
+
+    @property
+    def cacheable_prefix_tokens(self) -> int:
+        """A rough token count for the prefix, at four characters each.
+
+        Rough on purpose: the exact number depends on the tokenizer and
+        the provider, and the decision it feeds is a coarse one — "is
+        this anywhere near the minimum, or nowhere near it?"
+        """
+        return len(self.cacheable_prefix) // 4
 
     @property
     def cacheable_prefix(self) -> str:

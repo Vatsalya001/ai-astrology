@@ -66,10 +66,15 @@ from app.providers.base import (
 )
 from app.routing import JobType, ModelRouter
 from app.safety import (
+    ABUSE_RESPONSE,
     SafetyCategory,
     SafetyClassifier,
+    SafetyVerdict,
+    declines,
     detect_crisis,
     load_crisis_response,
+    posture_for,
+    short_circuits,
 )
 from app.validation import OutputValidator, Violation
 
@@ -121,6 +126,14 @@ class CompleteResult(BaseModel):
     """Validation failed twice and the graceful fallback is what the
     user sees. Distinct from a crisis: nothing was wrong with the
     QUESTION."""
+
+    declined: bool = False
+    """Abuse. The static refusal was returned and nothing was generated.
+
+    Separate from `blocked` because the client renders them differently
+    and because they mean opposite things: `blocked` is the product
+    failing the user, `declined` is the product declining the message.
+    """
 
 
 # Human-written, like the crisis response and for a weaker version of
@@ -210,6 +223,48 @@ class Orchestrator:
             ),
         )
 
+    def _declined_envelope(
+        self,
+        req: CompleteRequest,
+        verdict: SafetyVerdict,
+        started: float,
+        model_calls: int,
+        *,
+        trace_id: str,
+        usage: Usage | None = None,
+    ) -> AIResponseEnvelope[CompleteResult]:
+        """Abuse. A static refusal, on the same reasoning as crisis.
+
+        There is nothing for a model to add, and asking one to compose a
+        refusal is how a refusal turns into an argument — which is
+        exactly what an abusive message is trying to start. §7's table
+        says decline, log, and let rate limiting do the rest.
+        """
+        return AIResponseEnvelope(
+            result=CompleteResult(
+                text=ABUSE_RESPONSE,
+                safety_category=verdict.category,
+                declined=True,
+            ),
+            telemetry=Telemetry(
+                trace_id=trace_id,
+                user_id=req.user_id,
+                conversation_id=req.conversation_id,
+                job_type=req.job.value,
+                # Blank, like the crisis path: nothing generated this.
+                input_tokens=(usage or Usage()).input_tokens,
+                output_tokens=(usage or Usage()).output_tokens,
+                cached_tokens=(usage or Usage()).cached_input_tokens,
+                cache_write_tokens=(usage or Usage()).cache_write_input_tokens,
+                cost_micros=(usage or Usage()).cost_micros,
+                latency_ms=int((time.monotonic() - started) * 1000),
+                finish_reason="refusal",
+                safety_flags=[SafetyFlag(type=verdict.category.value, severity="block")],
+                validation_passed=True,
+                model_calls=model_calls,
+            ),
+        )
+
     # ─── prompt assembly ─────────────────────────────────────────────
 
     def _persona(self, intent: Intent) -> str:
@@ -223,6 +278,7 @@ class Orchestrator:
         conversation_recent: str,
         knowledge: str,
         correction: str = "",
+        posture: str = "",
     ) -> PromptBuilder:
         builder = (
             PromptBuilder()
@@ -233,11 +289,21 @@ class Orchestrator:
             .add("output_format", self._prompt_version)
             # Everything above is identical for every user asking a
             # question of this persona. Everything below is theirs.
+            # Everything above is identical for every user asking a
+            # question of this persona. Everything below is theirs.
             .cache_breakpoint()
             .knowledge_context(knowledge)
             .chart_context(chart_text)
             .conversation_context(conversation_summary, conversation_recent)
         )
+
+        if posture:
+            # After the breakpoint, always. A posture placed among the
+            # stable blocks would change the cached prefix whenever
+            # anyone asked a health question — taking the hit rate to
+            # zero for every OTHER user of the same persona, invisibly,
+            # because every answer would still be correct.
+            builder.user_context(posture)
 
         if correction:
             # Last, so it is the most recent thing the model read, and
@@ -324,8 +390,19 @@ class Orchestrator:
         # "I don't see the point of anything anymore" carries no crisis
         # keyword. Still a bypass: this returns before any context is
         # built and before the generation provider is touched.
-        if verdict.category is SafetyCategory.CRISIS:
+        # Branch on the ACTION, not the category. §7 pairs every
+        # category with one, and until now only SHORT_CIRCUIT was read:
+        # a MEDICAL, LEGAL, ABUSE or PROMPT_INJECTION verdict was
+        # computed, paid for and recorded — and changed nothing about
+        # the answer, so §7's table was a statement of intent. Reading
+        # ACTION_FOR means a category added later cannot be half-wired.
+        if short_circuits(verdict.category):
             return self._crisis_envelope(req, started, calls, trace_id=trace_id, usage=usage)
+
+        if declines(verdict.category):
+            return self._declined_envelope(
+                req, verdict, started, calls, trace_id=trace_id, usage=usage
+            )
 
         # ── 3. context (stubs in Phase 4) ────────────────────────────
         chart, conversation, knowledge = await asyncio.gather(
@@ -335,12 +412,15 @@ class Orchestrator:
         )
 
         # ── 4. compose ───────────────────────────────────────────────
+        posture = posture_for(verdict.category)
+
         builder = self._build_prompt(
             intent,
             chart.text,
             conversation.summary,
             conversation.recent,
             knowledge.text,
+            posture=posture,
         )
 
         validator = OutputValidator(system_prompt=builder.cacheable_prefix)
@@ -367,6 +447,7 @@ class Orchestrator:
                 conversation.recent,
                 knowledge.text,
                 correction=OutputValidator.corrective_instruction(violations),
+                posture=posture,
             )
             try:
                 response = await self._generate(req, corrected)
