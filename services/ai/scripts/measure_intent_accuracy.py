@@ -34,7 +34,7 @@ import json
 from collections import Counter
 from pathlib import Path
 
-from app.classification import Intent, IntentClassifier, classify_by_keywords
+from app.classification import MIN_CONFIDENCE, Intent, IntentClassifier, classify_by_keywords
 from app.providers import ModelMap, OpenAICompatibleProvider
 from app.settings import settings
 
@@ -47,23 +47,109 @@ def load() -> list[dict[str, str]]:
 
 
 async def score(classifier: IntentClassifier, rows: list[dict[str, str]]) -> tuple[int, list[str]]:
+    """Post-policy accuracy, plus the breakdown of where answers were lost.
+
+    Post-policy alone was the whole report, and it cannot answer the
+    first question anyone asks: is the model wrong, or are we throwing
+    its answers away? Three things discard a classification before it is
+    scored — an unparseable reply, a provider error, and the confidence
+    threshold — and the last one silently converts a CORRECT answer into
+    a miss whenever the model is right but unsure.
+
+    So the loss is now attributed. "The model is only 60% accurate" and
+    "the model is 78% accurate and our threshold discards a fifth of its
+    right answers" are different findings with different fixes, and the
+    difference is one number in app/classification/intents.py.
+    """
     correct = 0
     confusions: list[str] = []
+    raw_correct = 0
+    lost_to_threshold = 0
+    lost_to_parsing = 0
+    lost_to_provider = 0
+    confidences: list[float] = []
 
     # Sequential rather than gathered. Ollama on a laptop serves one
     # request at a time regardless; firing 200 at once only fills a queue
     # and makes the first timeout look like a model failure.
     for row in rows:
         result = await classifier.classify(row["message"], trace_id=f"acc-{row['id']}")
+
+        # What the MODEL said, before policy. Identical to `primary`
+        # except on the low-confidence path, which is the point.
+        raw = result.fallback_from or result.primary
+        raw_right = raw.value == row["intent"]
+        if raw_right:
+            raw_correct += 1
+
+        match result.source:
+            case "low_confidence":
+                confidences.append(result.fallback_confidence)
+                if raw_right:
+                    lost_to_threshold += 1
+            case "unparseable":
+                lost_to_parsing += 1
+            case "provider_error":
+                lost_to_provider += 1
+
         if result.primary.value == row["intent"]:
             correct += 1
         else:
+            note = ""
+            if result.source == "low_confidence":
+                note = f"  [model said {raw.value} @ {result.fallback_confidence}]"
             confusions.append(
                 f"  {row['id']}  {row['message'][:52]:<52} "
-                f"want {row['intent']:<18} got {result.primary.value}"
+                f"want {row['intent']:<18} got {result.primary.value}{note}"
             )
 
+    _report_losses(
+        len(rows),
+        correct,
+        raw_correct,
+        lost_to_threshold,
+        lost_to_parsing,
+        lost_to_provider,
+        confidences,
+    )
     return correct, confusions
+
+
+def _report_losses(
+    total: int,
+    correct: int,
+    raw_correct: int,
+    threshold: int,
+    parsing: int,
+    provider: int,
+    confidences: list[float],
+) -> None:
+    """Where the difference between the two numbers went."""
+    print(f"  post-policy  {correct}/{total} = {correct / total:.1%}")
+    print(
+        f"  raw model    {raw_correct}/{total} = {raw_correct / total:.1%}  "
+        f"(before the confidence threshold)"
+    )
+
+    if threshold:
+        print(
+            f"  -> {threshold} CORRECT answers were discarded as low-confidence. "
+            f"MIN_CONFIDENCE is {MIN_CONFIDENCE}."
+        )
+    if parsing:
+        print(f"  -> {parsing} replies did not parse at all")
+    if provider:
+        print(
+            f"  -> {provider} calls failed at the provider (a loaded machine "
+            f"looks exactly like a bad model here)"
+        )
+    if confidences:
+        confidences.sort()
+        mid = confidences[len(confidences) // 2]
+        print(
+            f"  -> discarded confidences: min {min(confidences)}, median {mid}, "
+            f"max {max(confidences)} across {len(confidences)} answers"
+        )
 
 
 def report_pre_pass(rows: list[dict[str, str]]) -> None:

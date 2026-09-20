@@ -348,3 +348,74 @@ async def test_the_fingerprint_ignores_the_trace_id(tmp_path: Path) -> None:
     first, second = provider.requests
     assert isinstance(first, CompletionRequest)
     assert request_fingerprint(first) == request_fingerprint(second)
+
+
+# ─── telling "wrong model" apart from "wrong threshold" ──────────────
+
+
+class TestTheDiscardedAnswerIsRecorded:
+    """A model answering CAREER at 0.55 and a model answering nothing
+    used to be indistinguishable downstream.
+
+    Both arrived as GENERAL_ASTROLOGY with confidence 0.0, so two very
+    different problems looked identical:
+
+        "the classifier is wrong"     -> change the model or the prompt
+        "our threshold is too high"   -> change one number
+
+    `scripts/measure_intent_accuracy.py` could not tell them apart
+    either, so it reported POST-POLICY accuracy as though it were model
+    accuracy — which is exactly the question anyone asks first when the
+    number comes in low.
+    """
+
+    async def test_a_discarded_answer_is_kept(self, tmp_path: Path) -> None:
+        classifier = IntentClassifier(
+            answering(tmp_path, {"primary": "career", "confidence": 0.55})
+        )
+
+        result = await classifier.classify("something ambiguous")
+
+        assert result.primary is Intent.GENERAL_ASTROLOGY, "the policy must still apply"
+        assert result.fallback_from is Intent.CAREER
+        assert result.fallback_confidence == 0.55
+
+    async def test_a_confident_answer_records_no_discard(self, tmp_path: Path) -> None:
+        # The negative case: a field set on every result would make the
+        # measurement report every answer as policy-discarded.
+        classifier = IntentClassifier(answering(tmp_path, {"primary": "career", "confidence": 0.9}))
+
+        result = await classifier.classify("something ambiguous")
+
+        assert result.primary is Intent.CAREER
+        assert result.fallback_from is None
+
+    async def test_an_unparseable_reply_records_no_discard(self, tmp_path: Path) -> None:
+        """There was nothing to discard — the distinction the fields exist for.
+
+        Conflating "unparseable" with "low confidence" would attribute a
+        parser problem to the threshold, and send someone to change a
+        number that was never involved.
+        """
+        classifier = IntentClassifier(answering(tmp_path, "I think it's about work."))
+
+        result = await classifier.classify("something ambiguous")
+
+        assert result.source == "unparseable"
+        assert result.fallback_from is None
+
+    async def test_the_fields_never_change_routing(self, tmp_path: Path) -> None:
+        """Diagnostic only. §6 still gets its broad-context fallback.
+
+        A field added for measurement that quietly became a routing
+        input would mean the measurement changed the thing it measures.
+        """
+        classifier = IntentClassifier(
+            answering(tmp_path, {"primary": "medical", "confidence": 0.55})
+        )
+
+        result = await classifier.classify("something about my health maybe")
+
+        assert result.primary is Intent.GENERAL_ASTROLOGY
+        assert result.confidence == 0.0
+        assert result.requires_safety_review is True

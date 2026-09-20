@@ -125,7 +125,11 @@ class IntentClassifier:
         return result
 
     @staticmethod
-    def _fallback(reason: str, stats: CallStats | None = None) -> IntentResult:
+    def _fallback(
+        reason: str,
+        stats: CallStats | None = None,
+        discarded: IntentResult | None = None,
+    ) -> IntentResult:
         """Broad context beats a narrow guess.
 
         PHASE-04 §6: below 0.6, fall back to GENERAL_ASTROLOGY "rather
@@ -147,6 +151,11 @@ class IntentClassifier:
             # billed. A counter that only recorded parseable answers
             # would show the retry-heavy requests as the cheap ones.
             stats=stats or CallStats(),
+            # What policy overrode, kept for diagnosis. See the field
+            # docstring in intents.py: without it, "the model was wrong"
+            # and "our threshold was too high" are indistinguishable.
+            fallback_from=discarded.primary if discarded else None,
+            fallback_confidence=discarded.confidence if discarded else 0.0,
         )
 
     async def classify(self, message: str, *, trace_id: str = "") -> IntentResult:
@@ -196,7 +205,7 @@ class IntentClassifier:
         result = result.model_copy(update={"stats": stats})
 
         if not result.is_confident:
-            return self._fallback("low_confidence", stats)
+            return self._fallback("low_confidence", stats, discarded=result)
 
         if result.primary in SAFETY_REVIEWED_INTENTS:
             # Asserted here rather than trusted from the model. The three

@@ -127,6 +127,30 @@ class IntentResult(BaseModel):
         "pre-pass answered, which is what makes the saving measurable.",
     )
 
+    fallback_from: Intent | None = Field(
+        default=None,
+        description="What the model actually said, when POLICY overrode it.",
+    )
+    fallback_confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+    """The confidence that was too low, recorded rather than discarded.
+
+    Without these two fields, a model answering CAREER at 0.55 and a
+    model answering nothing at all are indistinguishable downstream:
+    both arrive as GENERAL_ASTROLOGY with confidence 0.0. That made two
+    very different problems look identical —
+
+        "the classifier is wrong"      -> change the model or the prompt
+        "our threshold is too high"    -> change one number
+
+    — and the measurement script could not tell them apart either, so
+    `scripts/measure_intent_accuracy.py` was reporting post-policy
+    accuracy as though it were model accuracy.
+
+    They are diagnostic, never routing: nothing branches on them. The
+    fallback is still GENERAL_ASTROLOGY with broad context, which is
+    what §6 asks for.
+    """
+
     @property
     def is_confident(self) -> bool:
         return self.confidence >= MIN_CONFIDENCE
