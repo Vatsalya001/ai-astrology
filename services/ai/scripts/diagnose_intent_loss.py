@@ -54,6 +54,7 @@ async def main() -> int:
     classifier = IntentClassifier(provider, use_keywords=False)
 
     raw_correct = final_correct = 0
+    model_answers = 0
     lost_to_threshold = 0
     sources: Counter[str] = Counter()
     discarded_confidences: list[float] = []
@@ -70,16 +71,27 @@ async def main() -> int:
         result = await classifier.classify(row["message"], trace_id=f"diag-{row['id']}")
         sources[result.source] += 1
 
-        # What the MODEL said, before policy. Identical to `primary`
-        # except on the low-confidence path — which is the whole point.
-        raw = result.fallback_from or result.primary
-        raw_right = raw.value == row["intent"]
+        # What the MODEL said, before policy — or None when there was no
+        # answer for a policy to act on.
+        #
+        # The first version was `result.fallback_from or result.primary`,
+        # which silently counted an UNPARSEABLE reply as a raw answer of
+        # GENERAL_ASTROLOGY. 27 of the 200 rows carry that label, so a
+        # model returning nothing useful scored "raw correct" by luck —
+        # inflating the exact number this script exists to establish, in
+        # the direction that would have made the threshold look guilty.
+        answered = result.source in ("model", "low_confidence")
+        raw = (result.fallback_from or result.primary) if answered else None
+
+        raw_right = raw is not None and raw.value == row["intent"]
         final_right = result.primary.value == row["intent"]
 
-        raw_correct += raw_right
+        if answered:
+            model_answers += 1
+            raw_correct += raw_right
         final_correct += final_right
 
-        if result.source == "low_confidence":
+        if result.source == "low_confidence" and raw is not None:
             discarded_confidences.append(result.fallback_confidence)
             if raw_right:
                 lost_to_threshold += 1
@@ -103,8 +115,19 @@ async def main() -> int:
     print(f"ON THE {len(deferred)} MESSAGES THAT REACH THE MODEL")
     print(f"{'=' * 66}")
     n = len(deferred)
-    print(f"  raw model answer   {raw_correct}/{n} = {raw_correct / n:.1%}")
-    print(f"  after our policy   {final_correct}/{n} = {final_correct / n:.1%}")
+    print(
+        f"  the model ANSWERED {model_answers}/{n} times "
+        f"({n - model_answers} unparseable or failed at the provider)"
+    )
+    if model_answers:
+        print(
+            f"  of those, right    {raw_correct}/{model_answers} = "
+            f"{raw_correct / model_answers:.1%}   <- the MODEL's accuracy"
+        )
+    print(
+        f"  after our policy   {final_correct}/{n} = {final_correct / n:.1%}"
+        f"   <- what the product delivers"
+    )
     print(
         f"  CORRECT answers discarded by the threshold: {lost_to_threshold}"
         f"  (MIN_CONFIDENCE = {MIN_CONFIDENCE})"

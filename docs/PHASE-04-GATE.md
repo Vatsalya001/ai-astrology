@@ -66,6 +66,43 @@ Two things are **not** the explanation, and were ruled out:
 - **Not a broken parser.** Local models wrap JSON in fences, single backticks and
   prose. `app/structured.py` handles all of them.
 
+### The loss is mostly OURS, not the model's
+
+The first measurement reported post-policy accuracy as though it were model
+accuracy. It is not. Three things discard a classification before it is scored — an
+unparseable reply, a provider error, and the **confidence threshold** — and the third
+silently turns a correct answer into a miss whenever the model is right but unsure.
+
+Partial run, `llama3.2:1b`, first 30 messages that reach the model:
+
+| | |
+|---|---|
+| Model answered **correctly** | 12 |
+| Product delivered | 2 |
+| **Discarded by the threshold** | **10 — 83% of the model's correct answers** |
+
+The sample is small and the model is the weakest one installed, so the *ratio* will
+not hold for a better model. But the mechanism is not in doubt, and it is arithmetic,
+not inference: none of those 30 rows is labelled `general_astrology`, so an
+unparseable reply cannot score "raw correct" by luck and every one of the 10 must be
+a low-confidence discard.
+
+`MIN_CONFIDENCE = 0.6` is applied to a **self-reported** number. Small models are
+poorly calibrated and report low confidence on answers they got right.
+
+**This has deliberately not been changed.** The threshold is §6's, and re-tuning it
+against a 1B model is precisely the trap §15 describes. What has changed is that the
+loss is now *visible*: `IntentResult.fallback_from` and `.fallback_confidence` carry
+what policy overrode, so production reports it from the first request rather than
+needing this investigation repeated.
+
+It also marks the right seam for Phase 5. §6 asks for *"GENERAL_ASTROLOGY **with
+broad context**"* — the safety property is the context BREADTH, not the discarded
+label. Phase 4's context builders are stubs, so today discarding the label is the
+entire effect. Phase 5's builder can read `fallback_from` and `confidence` and widen
+retrieval while keeping the model's best guess for persona and tier, which satisfies
+§6 without throwing the answer away.
+
 ### What would close it
 
 1. **Measure against the paid provider.** Production is Claude; §15's whole point is
