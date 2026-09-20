@@ -103,11 +103,40 @@ entire effect. Phase 5's builder can read `fallback_from` and `confidence` and w
 retrieval while keeping the model's best guess for persona and tier, which satisfies
 §6 without throwing the answer away.
 
+### Why the full number is still missing
+
+Not for lack of trying — four runs were started and none finished.
+
+An Ollama `llama-server` process has been stuck in a runaway `qwen2.5:7b` generation
+for hours, holding 350–970% CPU with the machine at load ~23. It is a root-owned snap
+process, so it cannot be killed from this session, and Ollama's own
+`{"keep_alive": 0}` unload returns `done_reason: unload` without releasing it. Under
+that contention a single classification takes minutes, and 118 of them do not
+complete.
+
+This is a machine condition, not a property of the code or the model — and it is
+worth writing down, because "the measurement kept failing" and "the model is bad"
+would otherwise be indistinguishable in six months.
+
 ### What would close it
 
-1. **Measure against the paid provider.** Production is Claude; §15's whole point is
-   that dev quality misleads. This needs a key — see `docs/PROVIDER-VERIFICATION.md`.
-2. **Re-run as-shipped on an idle machine:** `uv run python -m scripts.measure_intent_accuracy`.
+1. **Free the machine** (one command, needs root):
+
+   ```bash
+   sudo snap restart ollama
+   ```
+
+2. **Re-run.** Either is enough; the second is faster and answers the diagnostic
+   question directly:
+
+   ```bash
+   cd services/ai
+   uv run python -m scripts.measure_intent_accuracy          # full, both passes
+   uv run python -m scripts.diagnose_intent_loss qwen2.5:7b  # deferred only, attributed
+   ```
+
+3. **Measure against the paid provider.** Production is Claude; §15's whole point is
+   that dev quality misleads. Needs a key — see `docs/PROVIDER-VERIFICATION.md`.
 
 ### What must NOT close it
 

@@ -2378,3 +2378,65 @@ And the verifiers caught three defects in the *fixers'* work, two in the safety 
 that moves the bias the wrong way, and three of them did.
 
 **836 Python tests. `task verify` green.**
+
+---
+
+# Phase 4 close-out — four more defects, found by asking one question
+
+"Is the LLM not giving better accuracy?" turned out to be a question my own
+instrumentation could not answer, and chasing it down surfaced four more defects.
+
+## The measurement was measuring the wrong thing
+
+`scripts/measure_intent_accuracy.py` reported **post-policy** accuracy as though it
+were **model** accuracy. Three things discard a classification before it is scored —
+an unparseable reply, a provider error, and the confidence threshold — and the third
+silently turns a correct answer into a miss whenever the model is right but unsure.
+
+So two findings with completely different fixes looked identical:
+
+```
+"the classifier is wrong"     -> change the model or the prompt
+"our threshold is too high"   -> change one number in intents.py
+```
+
+Partial evidence, `llama3.2:1b`, 30 deferred messages: the model answered **correctly
+12 times** and the product delivered **2**. Ten correct answers discarded.
+
+The threshold is deliberately **unchanged** — it is §6's, and re-tuning it against a
+1B model is exactly the trap §15 describes. What changed is that the loss is now
+visible in telemetry, so production reports it from the first request.
+
+### I nearly reported that finding while it was an artifact
+
+The first version of the diagnostic computed the raw answer as
+`fallback_from or primary`, which counts an **unparseable** reply as a raw answer of
+`general_astrology`. 27 of the 200 rows carry that label — so a model returning
+nothing useful would score "raw correct" by luck, inflating the exact number the
+script exists to establish, in the direction that makes the threshold look guilty.
+
+I checked the subset composition *before* publishing the number. It happens to
+contain zero `general_astrology` rows, so the finding survives. Had it contained
+twenty, I would have reported a confident and wrong conclusion.
+
+## Three security items that were listed as met
+
+| | |
+|---|---|
+| **`X-Internal-Token` had never been observed to fire** | `app/middleware.py` was at **0% coverage**. Neither Python service tested that omitting the token is refused — `services/astro/tests` bakes the header into its `TestClient`, so every test there passes the guard and none watches it work. This is the control that keeps `ai-service` off the internet, and Phase 4 added the two routes that spend money. 24 tests now, including that a correct **prefix** is refused — `_constant_time_equals` exists so a naive `==` cannot leak the secret a byte at a time, and a prefix being accepted is the same bug with a louder symptom |
+| **`prompt_leak` checked the cached prefix and stopped** | The validator was built from `cacheable_prefix`, which ends at the cache breakpoint — so the safety posture (*"Do not name a condition"*) and the corrective retry instruction went unchecked. Both are instructions. The **data** blocks stay excluded on purpose: a user's own chart is theirs, and a leak check covering it would block every correct reading |
+| **The provider key could reach a Sentry payload** | `_scrub_event` was untested and covered only the request. Every adapter builds its error from a status code so the key cannot reach it — but each does `raise _classify(err) from err`, and Sentry serialises the whole `__cause__` chain. The vendor's own exception is in it |
+
+## And two more of my tests that did not catch their own break
+
+- `test_the_users_own_chart_is_not_a_leak` used a **five-word** chart against an
+  eight-word shingle. It could not collide however the check was scoped, so widening
+  `leakable` to swallow the data blocks left it green.
+- `test_a_cyclic_structure_does_not_hang` built a 60-deep **tree** and called it
+  cyclic. Python handles 60 frames without complaint, so removing the depth bound
+  changed nothing. A dict containing itself does raise `RecursionError` — confirmed.
+
+That is now **eight** vacuous tests in this phase, every one found the same way:
+break the thing the test claims to protect, and watch whether it fails.
+
+**873 Python tests, 92.2% coverage of `app/`. 16 Go packages. `task verify` green.**

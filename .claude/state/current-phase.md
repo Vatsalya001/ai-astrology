@@ -39,13 +39,24 @@ at `58fe1f2`. Three §11 security items were carried forward — see below.
 | 4.19 | Admin config, usage, incidents, playground | ✅ SUPER_ADMIN only, break-tested four ways |
 | 4.21 | Provider parity suite | ✅ one suite, four adapters, each through its own SDK |
 
-**836 Python tests** in `services/ai`, `mypy --strict` clean, both import contracts kept.
+**873 Python tests** in `services/ai`, `mypy --strict` clean, both import contracts kept.
 Go: `go build`/`go vet` clean, unit + integration suites green.
 
 **Phase 4 gate: one item NOT met** — intent-classifier accuracy. The keyword
 pre-pass is 100% precise at 41% coverage (CI-asserted), but a free local model
 reaches only 40% (`llama3.2:3b`) / 60.5% (`qwen2.5:7b`) against the spec's ≥85%.
 §15 predicted this. Full report: `docs/PHASE-04-GATE.md`.
+
+The measurement is **blocked on the machine, not the code**: a root-owned Ollama
+`llama-server` has been stuck in a runaway generation for hours at 350–970% CPU, and
+its own unload API will not release it. `sudo snap restart ollama` frees it; then
+`uv run python -m scripts.diagnose_intent_loss qwen2.5:7b` gives the attributed
+number in one pass.
+
+Partial evidence already says most of the loss is **ours**: on 30 deferred messages
+`llama3.2:1b` answered correctly 12 times and the product delivered 2 — ten correct
+answers discarded by `MIN_CONFIDENCE = 0.6`, which is applied to a self-reported
+number that small models do not calibrate.
 
 A nine-dimension adversarial review found **39 confirmed defects in this phase's own
 code**, all fixed and break-tested — including a crisis message that could reach
