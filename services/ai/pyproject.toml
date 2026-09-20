@@ -17,6 +17,8 @@ dependencies = [
     "openai>=1.54",
     # Phase 4 adds: anthropic (production provider)
     # Phase 5 adds: asyncpg, pgvector
+    "anthropic>=0.40",
+    "google-genai>=1.0",
 ]
 
 [project.optional-dependencies]
@@ -101,7 +103,9 @@ source_modules = [
     "app.main",
     "app.middleware",
     "app.observability",
+    "app.pricing",
     "app.prompts",
+    "app.routing",
     "app.schemas",
     "app.settings",
     "app.telemetry",

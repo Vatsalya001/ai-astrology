@@ -6,6 +6,7 @@ an orchestrator cannot quietly `from openai import ...` and turn a
 configuration change back into a code change.
 """
 
+from app.providers.anthropic_provider import AnthropicProvider
 from app.providers.base import (
     Capabilities,
     CompletionChunk,
@@ -24,6 +25,7 @@ from app.providers.base import (
     SystemBlock,
     Usage,
 )
+from app.providers.google_provider import GoogleEmbeddingProvider, GoogleProvider
 from app.providers.mock import MockProvider, request_fingerprint
 from app.providers.ollama_embeddings import OllamaEmbeddingProvider
 from app.providers.openai_compatible import OpenAICompatibleProvider
@@ -31,6 +33,7 @@ from app.providers.registry import NoProviderAvailableError, ProviderRegistry
 from app.providers.resilience import BreakerState, CircuitOpenError, ResilientProvider
 
 __all__ = [
+    "AnthropicProvider",
     "BreakerState",
     "Capabilities",
     "CircuitOpenError",
@@ -39,6 +42,8 @@ __all__ = [
     "CompletionResponse",
     "EmbeddingProvider",
     "FinishReason",
+    "GoogleEmbeddingProvider",
+    "GoogleProvider",
     "LLMProvider",
     "Message",
     "MockProvider",
