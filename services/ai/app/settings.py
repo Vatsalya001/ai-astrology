@@ -2,7 +2,7 @@
 
 from typing import Literal
 
-from pydantic import Field
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # A provider's tier determines whether it may be used in production.
@@ -10,6 +10,41 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 #   free-hosted — a free API tier; may train on inputs
 #   paid        — commercial tier with a no-training commitment
 ProviderTier = Literal["local", "free-hosted", "paid"]
+
+# Per-provider tier→model defaults, as (fast, chat, deep).
+#
+# WHY THIS EXISTS. The three model names used to be plain field defaults
+# naming Ollama tags, which made `LLM_PROVIDER=google` plus a key — the
+# entire documented setup for a free Google run — send the model name
+# `llama3.2:3b` to the Gemini API. That is a 404 `model not found`, and
+# the obvious reading of it is "my key is bad" or "the adapter is
+# broken". Neither is true, and both cost an hour.
+#
+# A model name is not really provider-independent configuration: it is
+# part of naming the provider. So selecting a provider selects its
+# models, and anything explicitly configured still wins (see
+# `_default_models_to_the_provider`).
+DEFAULT_MODELS: dict[str, tuple[str, str, str]] = {
+    # Ollama. Small enough to run on a laptop; §11's documented set.
+    "openai-compatible": ("llama3.2:3b", "qwen2.5:7b", "qwen2.5:7b"),
+    # §3 routes by job: classification and extraction go to the cheapest
+    # model that can do them, conversation to the middle one, and paid
+    # interpretation to the largest.
+    # The undated alias, matching the other two and app/pricing.json.
+    # `cost_micros` looks up an exact string and RAISES on a miss, so
+    # `claude-haiku-4-5-20251001` here would make every fast-tier
+    # Anthropic call fail at billing time rather than answer.
+    "anthropic": ("claude-haiku-4-5", "claude-sonnet-5", "claude-opus-5"),
+    # `deep` is Pro, which has thin-to-absent free-tier quota — expected,
+    # because `deep` is the PAID interpretation tier. A free-hosted run
+    # exercises `fast` and `chat`, both Flash.
+    "google": ("gemini-2.5-flash", "gemini-2.5-flash", "gemini-2.5-pro"),
+    # MockProvider ignores this map and reports `mock-{tier}` from the
+    # fixture. These are those names, so `describe()` prints what the
+    # responses will actually say — and so they are priced, since an
+    # unpriced model raises.
+    "mock": ("mock-fast", "mock-chat", "mock-deep"),
+}
 
 
 class Settings(BaseSettings):
@@ -38,6 +73,10 @@ class Settings(BaseSettings):
     llm_api_key: str = ""
     llm_provider_tier: ProviderTier = "local"
 
+    # These defaults are the `openai-compatible` row of DEFAULT_MODELS,
+    # repeated here only because a field needs a default. The provider's
+    # row replaces any of the three that configuration did not set —
+    # `_default_models_to_the_provider` below.
     llm_model_fast: str = "llama3.2:3b"
     llm_model_chat: str = "qwen2.5:7b"
     llm_model_deep: str = "qwen2.5:7b"
@@ -165,6 +204,27 @@ class Settings(BaseSettings):
     # hosted models are 1024. A pgvector column is fixed-dimension, so a
     # literal in a migration means re-embedding the whole corpus later.
     embedding_dim: int = Field(default=768, ge=64, le=4096)
+
+    @model_validator(mode="after")
+    def _default_models_to_the_provider(self) -> "Settings":
+        """Fill the tier models nobody configured from the provider's row.
+
+        `model_fields_set` holds only what a source actually supplied —
+        an env var, a `.env` line, a keyword — so an operator who names a
+        model keeps it, including one that happens to equal the field
+        default. Silently overriding an explicit choice would be a worse
+        bug than the one this fixes.
+        """
+        for field, name in zip(
+            ("llm_model_fast", "llm_model_chat", "llm_model_deep"),
+            DEFAULT_MODELS[self.llm_provider],
+            strict=True,
+        ):
+            if field not in self.model_fields_set:
+                # `object.__setattr__`-free: assignment here would
+                # re-enter validation, and Settings is not frozen.
+                self.__dict__[field] = name
+        return self
 
     @property
     def effective_llm_timeout_seconds(self) -> float:

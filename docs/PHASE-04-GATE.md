@@ -87,14 +87,34 @@ not inference: none of those 30 rows is labelled `general_astrology`, so an
 unparseable reply cannot score "raw correct" by luck and every one of the 10 must be
 a low-confidence discard.
 
-`MIN_CONFIDENCE = 0.6` is applied to a **self-reported** number. Small models are
-poorly calibrated and report low confidence on answers they got right.
+The threshold is applied to a **self-reported** number. Small models are poorly
+calibrated and report low confidence on answers they got right.
 
-**This has deliberately not been changed.** The threshold is §6's, and re-tuning it
-against a 1B model is precisely the trap §15 describes. What has changed is that the
-loss is now *visible*: `IntentResult.fallback_from` and `.fallback_confidence` carry
-what policy overrode, so production reports it from the first request rather than
-needing this investigation repeated.
+**It is now 0.4, down from §6's 0.6, and that was the owner's call against my
+recommendation.** Recording both halves, because a doc that reports only the decision
+teaches nothing:
+
+- *Against:* 0.6 is §6's number, and the evidence for moving it is a 30-message
+  partial run on `llama3.2:1b` — the weakest model installed. Tuning a policy constant
+  against a model production will never use is precisely the trap §15 describes.
+- *For:* the failure is asymmetric. A discarded correct answer costs a worse reply on
+  every request it touches; a kept wrong one costs the same as the fallback already
+  does, because `GENERAL_ASTROLOGY` is itself a guess. And Phase 5 is where the
+  threshold acquires real teeth — better to have the seam explicit now.
+
+What makes it safe to have been overruled: **the number is no longer a constant.**
+`intent_min_confidence` is a setting (`app/settings.py`), so production can move it
+without a deploy and the eventual measurement against a real model can be run at
+several values. `MIN_CONFIDENCE = 0.4` in `app/classification/intents.py` is the
+*default*, not necessarily what is running — read `min_confidence()`.
+
+The loss is also *visible* now: `IntentResult.fallback_from` and
+`.fallback_confidence` carry what policy overrode, so production reports it from the
+first request rather than needing this investigation repeated.
+
+**What would settle it:** `diagnose_intent_loss` run at 0.4 and at 0.6 against a
+hosted model. If a well-calibrated model loses nothing at 0.6, 0.4 is buying noise and
+should go back.
 
 It also marks the right seam for Phase 5. §6 asks for *"GENERAL_ASTROLOGY **with
 broad context**"* — the safety property is the context BREADTH, not the discarded
@@ -135,8 +155,33 @@ would otherwise be indistinguishable in six months.
    uv run python -m scripts.diagnose_intent_loss qwen2.5:7b  # deferred only, attributed
    ```
 
-3. **Measure against the paid provider.** Production is Claude; §15's whole point is
-   that dev quality misleads. Needs a key — see `docs/PROVIDER-VERIFICATION.md`.
+3. **Measure against a hosted model**, which does not need the local machine at all
+   and is the run that actually matters — §15's whole point is that dev quality
+   misleads. Both scripts now build whatever `LLM_PROVIDER` names and **print what
+   they are talking to before they start**:
+
+   ```bash
+   cd services/ai
+   # three lines in services/ai/.env, and NOTHING else:
+   #   LLM_PROVIDER=google
+   #   LLM_PROVIDER_TIER=free-hosted
+   #   LLM_API_KEY=<https://aistudio.google.com/apikey>
+   uv run python -m scripts.verify_provider google   # 3 probes, reads as tables
+   uv run python -m scripts.diagnose_intent_loss     # model defaults follow the provider
+   ```
+
+   Two defects stood between that instruction and it being true, and both were found
+   by *running* it rather than reading it:
+
+   - Both scripts hardcoded `OpenAICompatibleProvider` while the service built from
+     config, so this would have produced a number measured against `localhost:11434`
+     under a heading naming Gemini. `app/providers/factory.py` is now the single
+     construction path, and every script prints what it resolved before it starts.
+   - The three model names were provider-independent settings, so `LLM_PROVIDER=google`
+     sent the model name `llama3.2:3b` to the Gemini API — a `404 model not found`
+     whose obvious readings are "my key is bad" and "the adapter is broken". Models now
+     follow the provider unless explicitly pinned, and **both `.env.example` files
+     stopped pinning them**, which is where the bug survived the first fix.
 
 ### What must NOT close it
 
@@ -168,7 +213,7 @@ date the cache began paying for itself.
 
 | Item | Why a test cannot do it |
 |---|---|
-| **A human must dial each crisis helpline number** in `services/ai/app/safety/responses/` | A test proves a number is *present*. A wrong one costs someone in crisis the single attempt they were willing to make |
+| ~~A human must dial each crisis helpline number~~ — **closed by removing the numbers** | A test proves a number is *present*; only a human proves it *answers*, and a wrong one costs someone in crisis the single attempt they were willing to make. Rather than ship unverified numbers, `crisis.en.md` and `crisis.hi.md` now point at **findahelpline.com**, which maintains them as a full-time job. The debt is not deferred, it is discharged: there is no unverified number left in the repo. `app/safety/responses/README.md` records the reasoning and the procedure for adding a number back once someone has dialled it |
 | A native speaker should review the Hinglish crisis phrases | The regexes match the sentences claimed; whether those are the sentences real users write is not something this repo can assert |
 | `AnthropicProvider` verified once against a real key, **including prompt caching** | Offline tests exercise our parsing of a response shape *we wrote down*. See `docs/PROVIDER-VERIFICATION.md` |
 | `GoogleProvider` free-tier run | Same |

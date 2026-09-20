@@ -2440,3 +2440,88 @@ That is now **eight** vacuous tests in this phase, every one found the same way:
 break the thing the test claims to protect, and watch whether it fails.
 
 **873 Python tests, 92.2% coverage of `app/`. 16 Go packages. `task verify` green.**
+
+---
+
+# Phase 4 close-out — making the owner's three decisions actually work
+
+Three decisions came back: run the free **Google** tier, **remove** the crisis helpline
+numbers until a human has dialled them, and lower the intent threshold to **0.4**.
+Implementing them surfaced three defects that had nothing to do with the decisions and
+everything to do with paths nobody had walked.
+
+## The measurement would have measured the wrong model
+
+`app/api/complete.py` matched on `LLM_PROVIDER`; both measurement scripts hardcoded
+`OpenAICompatibleProvider` at `http://localhost:11434`. Harmless while everything was
+Ollama, and wrong the moment it was not: with `LLM_PROVIDER=google`, the service runs on
+Gemini and `measure_intent_accuracy.py` quietly keeps talking to localhost — printing a
+number for one model under a heading naming another.
+
+That number was going to be read as the gate number. A measurement that silently
+measures something else is worse than no measurement.
+
+`app/providers/factory.py` is the single construction path now, used by the route and
+both scripts, and `describe()` prints the resolved provider and model before a run
+starts. The test asserts the route and the scripts build the **same type**, not merely
+that a factory exists.
+
+## …and it would have sent `llama3.2:3b` to Gemini
+
+Fixing the factory was not enough, which only became visible by running the documented
+setup rather than reading it. The three model names were provider-independent settings
+defaulting to Ollama tags, so the entire documented free-Google setup —
+`LLM_PROVIDER=google` plus a key — sent the model name `llama3.2:3b` to the Gemini API.
+
+That is a `404 model not found`. Its two obvious readings are "my key is bad" and "the
+adapter is broken", and neither is true; the adapter was correct and being handed a
+model name from a different vendor.
+
+A model name is not really provider-independent configuration — it is part of naming the
+provider. `DEFAULT_MODELS` in `app/settings.py` now carries a row per provider and a
+validator fills only the tiers **nobody set**, keyed on `model_fields_set` rather than on
+the value. That distinction is the whole safety of it: "fill it if it still looks like a
+default" would rewrite an operator who deliberately pins `llama3.2:3b` at a local
+Gemini-compatible proxy, and there is a test that fails for exactly that implementation.
+
+**The fix did not hold on its own.** Both `.env.example` files shipped all three model
+names *uncommented*, so the documented path produces a config where they **are** set and
+the validator correctly leaves them alone. Copy the example, change `LLM_PROVIDER`, and
+the bug survives — through the file everyone starts from. Nothing in the settings module
+can catch that; `test_no_env_example_re_pins_a_model` can, and does.
+
+The same pin was live in this machine's gitignored repo-root `.env`, which `Taskfile.yml`
+loads into every task. Commented out there too.
+
+## Two more, found by tying two tables together
+
+`cost_micros` looks up an exact model string and **raises** on a miss — deliberately, so
+an unpriced model can never bill zero on the dashboard and something real on the invoice.
+That makes any default model missing from `pricing.json` a hard failure on the first call
+to that tier. Comparing the two tables found:
+
+- `claude-haiku-4-5-20251001` — the price table carries the undated alias.
+- A mock row naming models that do not exist; `MockProvider` reports `mock-{tier}`.
+
+Neither is visible from reading either file alone. `test_every_default_model_has_a_price`
+compares them, and is the artifact worth keeping — more than the two point fixes.
+
+## The threshold, and being overruled on the record
+
+`intent_min_confidence` is **0.4**, down from §6's 0.6, against my recommendation. Both
+halves are recorded in `docs/PHASE-04-GATE.md` and in the field's own docstring, because
+a doc that reports only the decision teaches nothing. What makes it safe to have lost the
+argument is that it is no longer a constant: production can move it without a deploy, and
+Phase 6's eval harness is where the value gets chosen on evidence. `diagnose_intent_loss`
+run at 0.4 and 0.6 against a hosted model settles it.
+
+## One test that read the machine instead of its fixture
+
+`test_an_explicit_model_is_never_overridden` passed under bare `pytest` and failed under
+`task verify` — which loads the repo-root `.env`, where the models were pinned. Not a
+flake to retry: the test was reading the developer's environment. `delenv` first.
+
+Worth noting how it was caught. The bare `pytest` run was green; running the **project's
+actual gate** was not. Those are different commands and only one of them is the gate.
+
+**896 Python tests. `task verify` green.**

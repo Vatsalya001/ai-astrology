@@ -349,6 +349,203 @@ class TestTheProviderFactory:
 
         assert (models.fast, models.chat, models.deep) == (override,) * 3
 
+
+class TestTheModelsFollowTheProvider:
+    """Selecting a provider selects its models.
+
+    The three model names used to be plain field defaults naming Ollama
+    tags, so `LLM_PROVIDER=google` plus a key — the whole documented
+    setup for a free Google run — sent the model name `llama3.2:3b` to
+    the Gemini API. A 404 `model not found`, whose obvious readings are
+    "my key is bad" and "the adapter is broken". Neither is true.
+
+    This was not caught by the factory work that preceded it: that
+    checked the adapter TYPE was right, and it was. The adapter was
+    correct and being handed a model name from a different vendor.
+    """
+
+    def test_every_provider_in_the_literal_has_models(self) -> None:
+        """A fifth provider cannot ship without a row.
+
+        `DEFAULT_MODELS[self.llm_provider]` would raise KeyError at
+        import time — but only for whoever configured the new provider,
+        which is exactly the person least able to diagnose it. Read off
+        the Literal rather than a hand-kept list, so the two cannot
+        drift.
+        """
+        from typing import get_args, get_type_hints
+
+        from app.settings import DEFAULT_MODELS, Settings
+
+        declared = set(get_args(get_type_hints(Settings)["llm_provider"]))
+
+        assert declared == set(DEFAULT_MODELS), (
+            f"providers without a DEFAULT_MODELS row: {declared - set(DEFAULT_MODELS)}"
+        )
+
+    def test_every_default_model_has_a_price(self) -> None:
+        """The guard that found two bugs in the row above it.
+
+        `cost_micros` looks up an exact string and RAISES on a miss —
+        deliberately, so an unpriced model can never bill zero on the
+        dashboard and something real on the invoice. That makes a
+        default model missing from `pricing.json` a hard failure on the
+        first call to that tier.
+
+        It caught `claude-haiku-4-5-20251001` (the table carries the
+        undated alias) and a mock row naming models that do not exist.
+        Neither was visible from reading either file alone; both are
+        obvious the moment the two are compared.
+        """
+        from app.pricing import PRICES
+        from app.settings import DEFAULT_MODELS
+
+        unpriced = {
+            f"{provider}:{model}"
+            for provider, models in DEFAULT_MODELS.items()
+            for model in models
+            if model not in PRICES
+        }
+
+        assert not unpriced, f"default models with no price: {sorted(unpriced)}"
+
+    @pytest.mark.parametrize(
+        ("provider", "expected"),
+        [
+            ("google", ("gemini-2.5-flash", "gemini-2.5-flash", "gemini-2.5-pro")),
+            ("anthropic", ("claude-haiku-4-5", "claude-sonnet-5", "claude-opus-5")),
+            ("openai-compatible", ("llama3.2:3b", "qwen2.5:7b", "qwen2.5:7b")),
+            ("mock", ("mock-fast", "mock-chat", "mock-deep")),
+        ],
+    )
+    def test_an_unconfigured_model_follows_the_provider(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        provider: str,
+        expected: tuple[str, str, str],
+    ) -> None:
+        """Asserted on all three tiers, by exact name.
+
+        Not `"gemini" in fast`: a substring check passes for a provider
+        whose three tiers are wired to one model, which is the mistake
+        §3's routing exists to prevent. The first version of this test
+        made exactly that error — and caught itself on
+        `openai-compatible`, whose chat tier is qwen, not llama.
+        """
+        from app.settings import Settings
+
+        # Cleared so a developer's own exported vars cannot make this
+        # pass — the bug being fixed is precisely about what happens
+        # when NOTHING is configured.
+        for var in ("LLM_MODEL_FAST", "LLM_MODEL_CHAT", "LLM_MODEL_DEEP"):
+            monkeypatch.delenv(var, raising=False)
+
+        config = Settings(_env_file=None, llm_provider=provider)  # type: ignore[call-arg]
+
+        assert (
+            config.llm_model_fast,
+            config.llm_model_chat,
+            config.llm_model_deep,
+        ) == expected
+
+    def test_an_explicit_model_is_never_overridden(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """The other half, and the one that makes this safe.
+
+        Filling in a default must not become silently rewriting a
+        deliberate choice — an operator pinning a preview model, or
+        pointing a local proxy at a Gemini-compatible endpoint.
+        """
+        # CHAT and DEEP cleared first. Without this the test passes on a
+        # bare `pytest` and fails under `task verify`, which loads the
+        # repo-root `.env` — where these were pinned. That is not a flake
+        # to retry: it is this test reading the developer's machine
+        # instead of its own fixture.
+        for var in ("LLM_MODEL_CHAT", "LLM_MODEL_DEEP"):
+            monkeypatch.delenv(var, raising=False)
+        monkeypatch.setenv("LLM_MODEL_FAST", "gemini-3-preview-i-chose-this")
+
+        from app.settings import Settings
+
+        config = Settings(_env_file=None, llm_provider="google")  # type: ignore[call-arg]
+
+        assert config.llm_model_fast == "gemini-3-preview-i-chose-this"
+        # ...and the two nobody set still follow the provider.
+        assert "gemini" in config.llm_model_chat
+
+    def test_an_explicit_model_equal_to_the_field_default_survives(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The case a value-comparison implementation gets wrong.
+
+        "Fill it if it still looks like the default" passes every other
+        test in this class and loses this one: running llama3.2:3b
+        against a local Gemini-compatible proxy is a real configuration,
+        and it must not be rewritten to `gemini-2.5-flash` because the
+        chosen value happened to equal a field default.
+        """
+        monkeypatch.setenv("LLM_MODEL_FAST", "llama3.2:3b")
+
+        from app.settings import Settings
+
+        config = Settings(_env_file=None, llm_provider="google")  # type: ignore[call-arg]
+
+        assert config.llm_model_fast == "llama3.2:3b"
+
+    @pytest.mark.parametrize(
+        "example",
+        [".env.example", "services/ai/.env.example"],
+    )
+    def test_no_env_example_re_pins_a_model(self, example: str) -> None:
+        """The hole the settings fix alone left open.
+
+        `_default_models_to_the_provider` fills only what nobody set —
+        correctly, since overriding a deliberate choice would be the
+        worse bug. But both `.env.example` files shipped all three model
+        names UNCOMMENTED, so the documented setup path produced a
+        config where they ARE set.
+
+        Copy the example, change `LLM_PROVIDER` to `google`, and
+        `llama3.2:3b` still goes to Gemini — the exact bug, surviving the
+        fix, via the file everyone starts from. Nothing in the settings
+        module can catch that; only this can.
+        """
+        import pathlib
+        import re
+
+        root = pathlib.Path(__file__).resolve().parents[3]
+        text = (root / example).read_text()
+
+        pinned = [
+            line
+            for line in text.splitlines()
+            if re.match(r"\s*LLM_MODEL_(FAST|CHAT|DEEP)\s*=", line)
+        ]
+
+        assert not pinned, (
+            f"{example} pins {pinned}, so changing only LLM_PROVIDER leaves the "
+            f"previous provider's model names in place. Comment them out."
+        )
+
+    def test_describe_names_the_model_that_will_be_called(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """`describe()` is what a measurement run prints as its heading.
+
+        It printed `fast=llama3.2:3b` for a Google run, which is the
+        report line that would have made the mismatch obvious — and
+        would itself have been wrong.
+        """
+        for var in ("LLM_MODEL_FAST", "LLM_MODEL_CHAT", "LLM_MODEL_DEEP"):
+            monkeypatch.delenv(var, raising=False)
+
+        from app.providers import describe
+        from app.settings import Settings
+
+        line = describe(Settings(_env_file=None, llm_provider="google"))  # type: ignore[call-arg]
+
+        assert "gemini" in line
+        assert "llama" not in line
+
     def test_describe_names_the_provider_actually_configured(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
