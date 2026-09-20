@@ -75,7 +75,12 @@ class IntentClassifier:
         self,
         provider: LLMProvider,
         *,
-        prompt_version: str = "v1",
+        # v2 names the output fields. v1 did not, and llama3.2:3b
+        # answered correctly with the key `intent` instead of `primary`
+        # — a correct classification thrown away by validation, which
+        # scored 0% on the labelled set and looked like a bad model.
+        # v1 is frozen and still loadable; see app/prompts/registry.py.
+        prompt_version: str = "v2",
         use_keywords: bool = True,
     ) -> None:
         self._provider = provider
@@ -102,14 +107,15 @@ class IntentClassifier:
         into no answer, which is a much worse trade at the top of the
         pipeline.
         """
-        stripped = text.strip()
-
-        # Local models add a fence despite being asked not to, and
-        # `json.loads` on ```json\n{...}\n``` fails for a reason that has
-        # nothing to do with the classification.
-        if stripped.startswith("```"):
-            stripped = stripped.strip("`")
-            stripped = stripped.removeprefix("json").strip()
+        # Local models wrap output despite being asked not to, and each
+        # one does it differently: a ```json fence, a plain ``` fence, a
+        # single backtick. Observed from llama3.2:3b, which returned
+        # `{"primary": ...}` with one backtick on each side. Stripping
+        # them all is the adapter's job — a parse failure here reads as
+        # "the model could not classify", which is the wrong diagnosis
+        # and sends the answer to the fallback.
+        stripped = text.strip().strip("`").strip()
+        stripped = stripped.removeprefix("json").strip()
 
         try:
             payload = json.loads(stripped)

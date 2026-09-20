@@ -95,6 +95,20 @@ type Querier interface {
 	FindUserByEmail(ctx context.Context, email *string) (User, error)
 	FindUserByID(ctx context.Context, id pgtype.UUID) (User, error)
 	FindUserByPhone(ctx context.Context, phone *string) (User, error)
+	// The same window, grouped. p50 and p95 latency come from
+	// percentile_disc rather than an average: an average latency hides the
+	// tail, and the tail is what users notice.
+	GetAIUsageByJob(ctx context.Context, arg GetAIUsageByJobParams) ([]GetAIUsageByJobRow, error)
+	// Totals over a window, for the admin usage view.
+	//
+	// COALESCE on every aggregate: SUM over zero rows is NULL, and a
+	// dashboard rendering "null requests, null cost" for a quiet hour is
+	// indistinguishable from a broken query.
+	//
+	// `cost_micros` is summed as BIGINT and returned as BIGINT. No cast to
+	// NUMERIC anywhere — invariant 4, and a NUMERIC that reaches Go through
+	// a float is exactly the bug the rule exists to prevent.
+	GetAIUsageSummary(ctx context.Context, arg GetAIUsageSummaryParams) (GetAIUsageSummaryRow, error)
 	// Scoped by user. A caller asking for someone else's profile gets no
 	// row, which the handler turns into a 404 — never a 403, because a 403
 	// confirms the row exists.
@@ -120,12 +134,26 @@ type Querier interface {
 	// key, so the record that a deletion happened survives the deletion. It
 	// holds IDs and enums only, never PII.
 	HardDeleteUser(ctx context.Context, id pgtype.UUID) error
+	// Every model call, written by Go from the telemetry Python returned.
+	// See docs/specs/PHASE-04-AI-INFRASTRUCTURE.md §8.
+	//
+	// No query here selects message content, because no column holds any.
+	// Called inside the same transaction as the message write (Phase 5), so
+	// a request that cost money cannot be missing from the bill because a
+	// separate logging call failed.
+	InsertAIRequestLog(ctx context.Context, arg InsertAIRequestLogParams) (AiRequestLog, error)
 	// ─── dashas ──────────────────────────────────────────────────────────
 	InsertDasha(ctx context.Context, arg InsertDashaParams) (Dasha, error)
 	// ON CONFLICT DO UPDATE rather than DO NOTHING: DO NOTHING returns no
 	// row, so the caller cannot tell "already linked" from "insert failed"
 	// without a second query.
 	LinkIdentity(ctx context.Context, arg LinkIdentityParams) (AuthIdentity, error)
+	// Newest first, served by ai_logs_user_idx.
+	ListAIRequestLogsForUser(ctx context.Context, arg ListAIRequestLogsForUserParams) ([]AiRequestLog, error)
+	// The admin incident feed. Served by the PARTIAL index, so this stays
+	// fast as the table grows — failures are a small fraction of rows and a
+	// full index on the boolean would be scanned rather than used.
+	ListAISafetyIncidents(ctx context.Context, arg ListAISafetyIncidentsParams) ([]AiRequestLog, error)
 	ListActiveBirthProfiles(ctx context.Context, userID pgtype.UUID) ([]BirthProfile, error)
 	// One row per DEVICE, not per session.
 	//

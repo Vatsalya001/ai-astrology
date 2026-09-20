@@ -19,6 +19,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/hibiken/asynq"
 
+	"github.com/Vatsalya001/ai-astrology/services/api/internal/ailogs"
 	"github.com/Vatsalya001/ai-astrology/services/api/internal/auth"
 	"github.com/Vatsalya001/ai-astrology/services/api/internal/birthprofiles"
 	"github.com/Vatsalya001/ai-astrology/services/api/internal/charts"
@@ -269,6 +270,11 @@ func run() error {
 		// declares, so neither domain imports the other.
 		Transits:     transits.NewHandler(transitReader, chartService, httpapi.AuthErrorWriter),
 		ProfileOwner: profileService,
+
+		// Phase 4. The admin AI views read ai_request_logs and proxy the
+		// playground to ai-service. Mounted behind SUPER_ADMIN in
+		// mountAdmin; see PHASE-04 §10.
+		AILogs: ailogs.NewHandler(ailogs.New(queries), aiClient, httpapi.AuthErrorWriter),
 	})
 
 	srv := &http.Server{

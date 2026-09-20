@@ -34,9 +34,13 @@ at `58fe1f2`. Three §11 security items were carried forward — see below.
 | 4.20 | 200-message labelled intent dataset | ✅ synthetic, all 21 intents, 18 marked ambiguous |
 | 4.15 | Orchestrator, stubbed context builders, telemetry envelope | ✅ crisis bypass asserted on the *provider*, not the text |
 | 4.16 | OpenAPI export → generated Go client | ✅ `task contracts` regenerates; `go build` clean |
-| 4.17–4.19, 4.21 | | not started |
+| 4.17 | `ai_request_logs` migration + persistence from the envelope | ✅ `ON DELETE SET NULL`, BIGINT cost, no content column |
+| 4.18 | Typed AI client with timeout and rate limiting | ✅ concurrency-bounded; a completion is never replayed |
+| 4.19 | Admin config, usage, incidents, playground | ✅ SUPER_ADMIN only, break-tested four ways |
+| 4.21 | | not started |
 
 **414 Python tests** in `services/ai`, `mypy --strict` clean, both import contracts kept.
+Go: `go build`/`go vet` clean, unit + integration suites green.
 
 Owed to the Phase 4 gate and **not closeable by the suite**:
 

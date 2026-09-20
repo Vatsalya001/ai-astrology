@@ -100,6 +100,32 @@ func (ns NullUserRole) Value() (driver.Value, error) {
 	return string(ns.UserRole), nil
 }
 
+type AiRequestLog struct {
+	ID               pgtype.UUID
+	TraceID          string
+	UserID           pgtype.UUID
+	ConversationID   pgtype.UUID
+	JobType          string
+	Intent           *string
+	ProviderID       string
+	Model            string
+	Tier             string
+	PromptVersion    string
+	ContextVersion   string
+	InputTokens      int32
+	OutputTokens     int32
+	CachedTokens     int32
+	CacheWriteTokens int32
+	LatencyMs        int32
+	CostMicros       int64
+	FinishReason     string
+	SafetyFlags      []byte
+	ValidationPassed bool
+	Regenerated      bool
+	ModelCalls       int32
+	CreatedAt        time.Time
+}
+
 type AuditLog struct {
 	ID        pgtype.UUID
 	UserID    pgtype.UUID

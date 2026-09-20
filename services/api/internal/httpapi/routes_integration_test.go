@@ -22,6 +22,7 @@ import (
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/wait"
 
+	"github.com/Vatsalya001/ai-astrology/services/api/internal/ailogs"
 	"github.com/Vatsalya001/ai-astrology/services/api/internal/auth"
 	"github.com/Vatsalya001/ai-astrology/services/api/internal/birthprofiles"
 	"github.com/Vatsalya001/ai-astrology/services/api/internal/charts"
@@ -148,6 +149,12 @@ func newRouterHarness(t *testing.T) (*routerHarness, func()) {
 		Shares: shares.NewHandler(
 			shareService, sharedChartAdapter{chartService}, AuthErrorWriter, nil),
 		ProfileOwner: profileService,
+
+		// Phase 4. Wired here so the admin AI routes are covered by
+		// TestEveryRouteIsAuthenticatedUnlessItIsOnThePublicAllowlist —
+		// a route absent from the harness is a route that test walks
+		// right past.
+		AILogs: ailogs.NewHandler(ailogs.New(queries), ai, AuthErrorWriter),
 	}
 
 	h := &routerHarness{
@@ -189,6 +196,19 @@ func (a placeShim) Get(ctx context.Context, id int32) (birthprofiles.Place, erro
 func (h *routerHarness) token(t *testing.T, userID uuid.UUID) string {
 	t.Helper()
 	token, err := h.issuer.IssueAccessToken(userID, uuid.New(), "user")
+	if err != nil {
+		t.Fatalf("IssueAccessToken: %v", err)
+	}
+	return token
+}
+
+// tokenAs mints a token carrying an arbitrary role.
+//
+// `token` above hardcodes "user", which is right for every other test in
+// this file and useless for the one that checks an admin gate.
+func (h *routerHarness) tokenAs(t *testing.T, userID uuid.UUID, role string) string {
+	t.Helper()
+	token, err := h.issuer.IssueAccessToken(userID, uuid.New(), role)
 	if err != nil {
 		t.Fatalf("IssueAccessToken: %v", err)
 	}

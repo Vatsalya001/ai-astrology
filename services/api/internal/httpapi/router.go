@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/Vatsalya001/ai-astrology/services/api/internal/ailogs"
 	"github.com/Vatsalya001/ai-astrology/services/api/internal/auth"
 	"github.com/Vatsalya001/ai-astrology/services/api/internal/birthprofiles"
 	"github.com/Vatsalya001/ai-astrology/services/api/internal/charts"
@@ -69,6 +70,12 @@ type Deps struct {
 	// Shares mounts the share-link routes, including the one public
 	// route in the astrology subtree.
 	Shares *shares.Handler
+
+	// ─── Phase 4 ────────────────────────────────────────────────
+	// AILogs serves the admin AI views. Nil means they are not mounted,
+	// which is the right default: an admin surface that exists without a
+	// backing service is a 500 waiting behind an auth check.
+	AILogs *ailogs.Handler
 	// ProfileOwner gates the chart and transit subtrees. Required
 	// whenever those are mounted; see mountAstrology.
 	ProfileOwner ProfileOwnership
@@ -190,6 +197,7 @@ func newChiRouter(d Deps) chi.Router {
 		if d.Auth != nil {
 			mountAuth(r, d)
 			mountAstrology(r, d)
+			mountAdmin(r, d)
 		}
 
 		// Phase 5 mounts /ai and /conversations.
@@ -537,3 +545,37 @@ func AuthMiddlewareErrorWriter(w http.ResponseWriter, r *http.Request, status in
 
 // AuthErrorWriter is exported for wiring in main.
 var AuthErrorWriter = authErrorWriter
+
+// mountAdmin mounts the SUPER_ADMIN-only AI views. PHASE-04 §10.
+//
+// ── Why the whole subtree is one group ──
+//
+// `Authenticate` then `RequireRole` are applied to the group rather than
+// to each route. A per-route check is a check someone forgets when they
+// add the sixth endpoint, and the thing being protected here is every
+// user's cost and safety history.
+//
+// ── Why SUPER_ADMIN and not ADMIN ──
+//
+// §10 says SUPER_ADMIN, and the reason is the playground: it spends real
+// money against the production provider on demand. `auth.RequireRole`
+// compares roles exactly with no hierarchy, so naming only SUPER_ADMIN
+// here genuinely excludes ADMIN rather than relying on an ordering that
+// does not exist.
+func mountAdmin(r chi.Router, d Deps) {
+	if d.AILogs == nil || d.AuthIssuer == nil {
+		return
+	}
+
+	authenticate := auth.Authenticate(d.AuthIssuer, AuthMiddlewareErrorWriter)
+
+	r.Route("/admin/ai", func(r chi.Router) {
+		r.Use(authenticate)
+		r.Use(auth.RequireRole(AuthMiddlewareErrorWriter, auth.RoleSuperAdmin))
+
+		r.Get("/config", d.AILogs.GetConfig)
+		r.Get("/usage", d.AILogs.GetUsage)
+		r.Get("/incidents", d.AILogs.GetIncidents)
+		r.Post("/test", d.AILogs.Playground)
+	})
+}
