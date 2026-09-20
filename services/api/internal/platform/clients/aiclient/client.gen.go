@@ -4,6 +4,7 @@
 package aiclient
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -11,7 +12,233 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+
+	"github.com/oapi-codegen/runtime"
 )
+
+// Defines values for Intent.
+const (
+	IntentCareer           Intent = "career"
+	IntentCompatibility    Intent = "compatibility"
+	IntentDailyHoroscope   Intent = "daily_horoscope"
+	IntentDasha            Intent = "dasha"
+	IntentEducation        Intent = "education"
+	IntentEmotionalSupport Intent = "emotional_support"
+	IntentFamily           Intent = "family"
+	IntentFinance          Intent = "finance"
+	IntentGeneralAstrology Intent = "general_astrology"
+	IntentHumanAstrologer  Intent = "human_astrologer"
+	IntentKundli           Intent = "kundli"
+	IntentLegal            Intent = "legal"
+	IntentMarriage         Intent = "marriage"
+	IntentMedical          Intent = "medical"
+	IntentNumerology       Intent = "numerology"
+	IntentOther            Intent = "other"
+	IntentRelationship     Intent = "relationship"
+	IntentRelocation       Intent = "relocation"
+	IntentTarot            Intent = "tarot"
+	IntentTransit          Intent = "transit"
+	IntentTravel           Intent = "travel"
+)
+
+// Valid indicates whether the value is a known member of the Intent enum.
+func (e Intent) Valid() bool {
+	switch e {
+	case IntentCareer:
+		return true
+	case IntentCompatibility:
+		return true
+	case IntentDailyHoroscope:
+		return true
+	case IntentDasha:
+		return true
+	case IntentEducation:
+		return true
+	case IntentEmotionalSupport:
+		return true
+	case IntentFamily:
+		return true
+	case IntentFinance:
+		return true
+	case IntentGeneralAstrology:
+		return true
+	case IntentHumanAstrologer:
+		return true
+	case IntentKundli:
+		return true
+	case IntentLegal:
+		return true
+	case IntentMarriage:
+		return true
+	case IntentMedical:
+		return true
+	case IntentNumerology:
+		return true
+	case IntentOther:
+		return true
+	case IntentRelationship:
+		return true
+	case IntentRelocation:
+		return true
+	case IntentTarot:
+		return true
+	case IntentTransit:
+		return true
+	case IntentTravel:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for JobType.
+const (
+	JobTypeChartInterpretation  JobType = "chart_interpretation"
+	JobTypeChatResponse         JobType = "chat_response"
+	JobTypeCompatibility        JobType = "compatibility"
+	JobTypeConversationSummary  JobType = "conversation_summary"
+	JobTypeDailyHoroscope       JobType = "daily_horoscope"
+	JobTypeIntentClassification JobType = "intent_classification"
+	JobTypeMemoryExtraction     JobType = "memory_extraction"
+	JobTypePremiumReport        JobType = "premium_report"
+	JobTypeSafetyClassification JobType = "safety_classification"
+	JobTypeSuggestedQuestions   JobType = "suggested_questions"
+)
+
+// Valid indicates whether the value is a known member of the JobType enum.
+func (e JobType) Valid() bool {
+	switch e {
+	case JobTypeChartInterpretation:
+		return true
+	case JobTypeChatResponse:
+		return true
+	case JobTypeCompatibility:
+		return true
+	case JobTypeConversationSummary:
+		return true
+	case JobTypeDailyHoroscope:
+		return true
+	case JobTypeIntentClassification:
+		return true
+	case JobTypeMemoryExtraction:
+		return true
+	case JobTypePremiumReport:
+		return true
+	case JobTypeSafetyClassification:
+		return true
+	case JobTypeSuggestedQuestions:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for SafetyCategory.
+const (
+	SafetyCategoryAbuse           SafetyCategory = "abuse"
+	SafetyCategoryCrisis          SafetyCategory = "crisis"
+	SafetyCategoryLegal           SafetyCategory = "legal"
+	SafetyCategoryMedical         SafetyCategory = "medical"
+	SafetyCategoryNone            SafetyCategory = "none"
+	SafetyCategoryPromptInjection SafetyCategory = "prompt_injection"
+)
+
+// Valid indicates whether the value is a known member of the SafetyCategory enum.
+func (e SafetyCategory) Valid() bool {
+	switch e {
+	case SafetyCategoryAbuse:
+		return true
+	case SafetyCategoryCrisis:
+		return true
+	case SafetyCategoryLegal:
+		return true
+	case SafetyCategoryMedical:
+		return true
+	case SafetyCategoryNone:
+		return true
+	case SafetyCategoryPromptInjection:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for TelemetryFinishReason.
+const (
+	Error   TelemetryFinishReason = "error"
+	Length  TelemetryFinishReason = "length"
+	Refusal TelemetryFinishReason = "refusal"
+	Stop    TelemetryFinishReason = "stop"
+)
+
+// Valid indicates whether the value is a known member of the TelemetryFinishReason enum.
+func (e TelemetryFinishReason) Valid() bool {
+	switch e {
+	case Error:
+		return true
+	case Length:
+		return true
+	case Refusal:
+		return true
+	case Stop:
+		return true
+	default:
+		return false
+	}
+}
+
+// AIResponseEnvelopeCompleteResult defines model for AIResponseEnvelope_CompleteResult_.
+type AIResponseEnvelopeCompleteResult struct {
+	Result CompleteResult `json:"result"`
+
+	// Telemetry One row of `ai_request_logs`, assembled by Python.
+	//
+	// Field names match the migration column-for-column on purpose. The Go
+	// side maps this straight through, and a rename on either side that
+	// does not happen on both is caught by the generated client rather
+	// than by a column silently receiving zero.
+	Telemetry Telemetry `json:"telemetry"`
+}
+
+// CompleteRequest What `api-service` sends.
+//
+// `user_id` and `conversation_id` are IDs. No name, no email, no birth
+// details — `.claude/rules/security.md`. The chart comes from
+// `astro-service` via the context builder, keyed by the ID, and never
+// travels through this request body.
+type CompleteRequest struct {
+	ConversationId *string `json:"conversation_id,omitempty"`
+
+	// Job Every distinct thing this product asks a model to do.
+	//
+	// `StrEnum` so a job survives a round trip through JSON, an admin
+	// override and a log line as itself rather than as an integer nobody
+	// can read in a dashboard.
+	Job      *JobType `json:"job,omitempty"`
+	Language *string  `json:"language,omitempty"`
+	Message  string   `json:"message"`
+	UserId   *string  `json:"user_id,omitempty"`
+}
+
+// CompleteResult defines model for CompleteResult.
+type CompleteResult struct {
+	Blocked *bool `json:"blocked,omitempty"`
+
+	// Intent The 21 intents from PHASE-04 §6.
+	//
+	// `StrEnum` so an intent survives a round trip through JSON, a log line
+	// and an admin dashboard as itself, rather than as an integer nobody
+	// can read at 3am.
+	Intent           *Intent         `json:"intent,omitempty"`
+	IsCrisisResponse *bool           `json:"is_crisis_response,omitempty"`
+	SafetyCategory   *SafetyCategory `json:"safety_category,omitempty"`
+	Text             string          `json:"text"`
+}
+
+// HTTPValidationError defines model for HTTPValidationError.
+type HTTPValidationError struct {
+	Detail *[]ValidationError `json:"detail,omitempty"`
+}
 
 // HealthResponse defines model for HealthResponse.
 type HealthResponse struct {
@@ -20,6 +247,147 @@ type HealthResponse struct {
 	Service      string `json:"service"`
 	Status       string `json:"status"`
 	Version      string `json:"version"`
+}
+
+// Intent The 21 intents from PHASE-04 §6.
+//
+// `StrEnum` so an intent survives a round trip through JSON, a log line
+// and an admin dashboard as itself, rather than as an integer nobody
+// can read at 3am.
+type Intent string
+
+// JobType Every distinct thing this product asks a model to do.
+//
+// `StrEnum` so a job survives a round trip through JSON, an admin
+// override and a log line as itself rather than as an integer nobody
+// can read in a dashboard.
+type JobType string
+
+// SafetyCategory defines model for SafetyCategory.
+type SafetyCategory string
+
+// SafetyFlag One finding, without the text that produced it.
+type SafetyFlag struct {
+	Severity string `json:"severity"`
+	Type     string `json:"type"`
+}
+
+// Telemetry One row of `ai_request_logs`, assembled by Python.
+//
+// Field names match the migration column-for-column on purpose. The Go
+// side maps this straight through, and a rename on either side that
+// does not happen on both is caught by the generated client rather
+// than by a column silently receiving zero.
+type Telemetry struct {
+	CacheWriteTokens *int                   `json:"cache_write_tokens,omitempty"`
+	CachedTokens     *int                   `json:"cached_tokens,omitempty"`
+	ContextVersion   *string                `json:"context_version,omitempty"`
+	ConversationId   *string                `json:"conversation_id,omitempty"`
+	CostMicros       *int64                 `json:"cost_micros,omitempty"`
+	FinishReason     *TelemetryFinishReason `json:"finish_reason,omitempty"`
+	InputTokens      *int                   `json:"input_tokens,omitempty"`
+	Intent           *string                `json:"intent,omitempty"`
+	JobType          string                 `json:"job_type"`
+	LatencyMs        *int                   `json:"latency_ms,omitempty"`
+	Model            *string                `json:"model,omitempty"`
+	ModelCalls       *int                   `json:"model_calls,omitempty"`
+	OutputTokens     *int                   `json:"output_tokens,omitempty"`
+	PromptVersion    *string                `json:"prompt_version,omitempty"`
+	ProviderId       *string                `json:"provider_id,omitempty"`
+	Regenerated      *bool                  `json:"regenerated,omitempty"`
+	SafetyFlags      *[]SafetyFlag          `json:"safety_flags,omitempty"`
+	Tier             *string                `json:"tier,omitempty"`
+	TraceId          string                 `json:"trace_id"`
+	UserId           *string                `json:"user_id,omitempty"`
+	ValidationPassed *bool                  `json:"validation_passed,omitempty"`
+}
+
+// TelemetryFinishReason defines model for Telemetry.FinishReason.
+type TelemetryFinishReason string
+
+// ValidationError defines model for ValidationError.
+type ValidationError struct {
+	Ctx   *map[string]interface{}    `json:"ctx,omitempty"`
+	Input interface{}                `json:"input,omitempty"`
+	Loc   []ValidationError_Loc_Item `json:"loc"`
+	Msg   string                     `json:"msg"`
+	Type  string                     `json:"type"`
+}
+
+// ValidationErrorLoc0 defines model for ValidationError.Loc.0.
+type ValidationErrorLoc0 = string
+
+// ValidationErrorLoc1 defines model for ValidationError.Loc.1.
+type ValidationErrorLoc1 = int
+
+// ValidationError_Loc_Item defines model for ValidationError.loc.Item.
+type ValidationError_Loc_Item struct {
+	union json.RawMessage
+}
+
+// CompleteV1CompletePostJSONRequestBody defines body for CompleteV1CompletePost for application/json ContentType.
+type CompleteV1CompletePostJSONRequestBody = CompleteRequest
+
+// AsValidationErrorLoc0 returns the union data inside the ValidationError_Loc_Item as a ValidationErrorLoc0
+func (t ValidationError_Loc_Item) AsValidationErrorLoc0() (ValidationErrorLoc0, error) {
+	var body ValidationErrorLoc0
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromValidationErrorLoc0 overwrites any union data inside the ValidationError_Loc_Item as the provided ValidationErrorLoc0
+func (t *ValidationError_Loc_Item) FromValidationErrorLoc0(v ValidationErrorLoc0) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeValidationErrorLoc0 performs a merge with any union data inside the ValidationError_Loc_Item, using the provided ValidationErrorLoc0
+func (t *ValidationError_Loc_Item) MergeValidationErrorLoc0(v ValidationErrorLoc0) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsValidationErrorLoc1 returns the union data inside the ValidationError_Loc_Item as a ValidationErrorLoc1
+func (t ValidationError_Loc_Item) AsValidationErrorLoc1() (ValidationErrorLoc1, error) {
+	var body ValidationErrorLoc1
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromValidationErrorLoc1 overwrites any union data inside the ValidationError_Loc_Item as the provided ValidationErrorLoc1
+func (t *ValidationError_Loc_Item) FromValidationErrorLoc1(v ValidationErrorLoc1) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeValidationErrorLoc1 performs a merge with any union data inside the ValidationError_Loc_Item, using the provided ValidationErrorLoc1
+func (t *ValidationError_Loc_Item) MergeValidationErrorLoc1(v ValidationErrorLoc1) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+func (t ValidationError_Loc_Item) MarshalJSON() ([]byte, error) {
+	b, err := t.union.MarshalJSON()
+	return b, err
+}
+
+func (t *ValidationError_Loc_Item) UnmarshalJSON(b []byte) error {
+	err := t.union.UnmarshalJSON(b)
+	return err
 }
 
 // RequestEditorFn is the function signature for the RequestEditor callback function
@@ -115,6 +483,36 @@ type ClientInterface interface {
 	//
 	// Corresponds with GET /health (the `HealthHealthGet` operationId).
 	HealthHealthGet(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// CompleteV1CompletePostWithBody Complete
+	//
+	// Run the pipeline and return the result with its telemetry.
+	//
+	// The envelope goes back whole. Go writes `telemetry` to
+	// `ai_request_logs` in the same transaction as the message, which is
+	// what keeps a single writer and a single transaction boundary — and
+	// means a request that cost money can never be missing from the bill
+	// because a separate logging call failed.
+	//
+	// Takes any type of body and a specified content type.
+	//
+	// Corresponds with POST /v1/complete (the `CompleteV1CompletePost` operationId).
+	CompleteV1CompletePostWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// CompleteV1CompletePost Complete
+	//
+	// Run the pipeline and return the result with its telemetry.
+	//
+	// The envelope goes back whole. Go writes `telemetry` to
+	// `ai_request_logs` in the same transaction as the message, which is
+	// what keeps a single writer and a single transaction boundary — and
+	// means a request that cost money can never be missing from the bill
+	// because a separate logging call failed.
+	//
+	// Takes a body of the `application/json` content type.
+	//
+	// Corresponds with POST /v1/complete (the `CompleteV1CompletePost` operationId).
+	CompleteV1CompletePost(ctx context.Context, body CompleteV1CompletePostJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 }
 
 // HealthHealthGet Health
@@ -137,6 +535,56 @@ type ClientInterface interface {
 // Corresponds with GET /health (the `HealthHealthGet` operationId).
 func (c *Client) HealthHealthGet(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewHealthHealthGetRequest(c.Server)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// CompleteV1CompletePostWithBody Complete
+//
+// Run the pipeline and return the result with its telemetry.
+//
+// The envelope goes back whole. Go writes `telemetry` to
+// `ai_request_logs` in the same transaction as the message, which is
+// what keeps a single writer and a single transaction boundary — and
+// means a request that cost money can never be missing from the bill
+// because a separate logging call failed.
+//
+// Takes any type of body and a specified content type.
+//
+// Corresponds with POST /v1/complete (the `CompleteV1CompletePost` operationId).
+func (c *Client) CompleteV1CompletePostWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCompleteV1CompletePostRequestWithBody(c.Server, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// CompleteV1CompletePost Complete
+//
+// Run the pipeline and return the result with its telemetry.
+//
+// The envelope goes back whole. Go writes `telemetry` to
+// `ai_request_logs` in the same transaction as the message, which is
+// what keeps a single writer and a single transaction boundary — and
+// means a request that cost money can never be missing from the bill
+// because a separate logging call failed.
+//
+// Takes a body of the `application/json` content type.
+//
+// Corresponds with POST /v1/complete (the `CompleteV1CompletePost` operationId).
+func (c *Client) CompleteV1CompletePost(ctx context.Context, body CompleteV1CompletePostJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCompleteV1CompletePostRequest(c.Server, body)
 	if err != nil {
 		return nil, err
 	}
@@ -170,6 +618,46 @@ func NewHealthHealthGetRequest(server string) (*http.Request, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	return req, nil
+}
+
+// NewCompleteV1CompletePostRequest calls the generic CompleteV1CompletePost builder with application/json body
+func NewCompleteV1CompletePostRequest(server string, body CompleteV1CompletePostJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewCompleteV1CompletePostRequestWithBody(server, "application/json", bodyReader)
+}
+
+// NewCompleteV1CompletePostRequestWithBody constructs an http.Request for the CompleteV1CompletePost method, with any body, and a specified content type
+func NewCompleteV1CompletePostRequestWithBody(server string, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/complete")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
 
 	return req, nil
 }
@@ -239,6 +727,36 @@ type ClientWithResponsesInterface interface {
 	//
 	// Corresponds with GET /health (the `HealthHealthGet` operationId).
 	HealthHealthGetWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*HealthHealthGetResponse, error)
+
+	// CompleteV1CompletePostWithBodyWithResponse Complete
+	//
+	// Run the pipeline and return the result with its telemetry.
+	//
+	// The envelope goes back whole. Go writes `telemetry` to
+	// `ai_request_logs` in the same transaction as the message, which is
+	// what keeps a single writer and a single transaction boundary — and
+	// means a request that cost money can never be missing from the bill
+	// because a separate logging call failed.
+	//
+	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /v1/complete (the `CompleteV1CompletePost` operationId).
+	CompleteV1CompletePostWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CompleteV1CompletePostResponse, error)
+
+	// CompleteV1CompletePostWithResponse Complete
+	//
+	// Run the pipeline and return the result with its telemetry.
+	//
+	// The envelope goes back whole. Go writes `telemetry` to
+	// `ai_request_logs` in the same transaction as the message, which is
+	// what keeps a single writer and a single transaction boundary — and
+	// means a request that cost money can never be missing from the bill
+	// because a separate logging call failed.
+	//
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /v1/complete (the `CompleteV1CompletePost` operationId).
+	CompleteV1CompletePostWithResponse(ctx context.Context, body CompleteV1CompletePostJSONRequestBody, reqEditors ...RequestEditorFn) (*CompleteV1CompletePostResponse, error)
 }
 
 type HealthHealthGetResponse struct {
@@ -282,6 +800,54 @@ func (r HealthHealthGetResponse) ContentType() string {
 	return ""
 }
 
+type CompleteV1CompletePostResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *AIResponseEnvelopeCompleteResult
+	// JSON422 the response for an HTTP 422 `application/json` response
+	JSON422 *HTTPValidationError
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r CompleteV1CompletePostResponse) GetJSON200() *AIResponseEnvelopeCompleteResult {
+	return r.JSON200
+}
+
+// GetJSON422 returns the response for an HTTP 422 `application/json` response
+func (r CompleteV1CompletePostResponse) GetJSON422() *HTTPValidationError {
+	return r.JSON422
+}
+
+// GetBody returns the raw response body bytes
+func (r CompleteV1CompletePostResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r CompleteV1CompletePostResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r CompleteV1CompletePostResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r CompleteV1CompletePostResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
 // HealthHealthGetWithResponse Health
 //
 // Liveness check.
@@ -310,6 +876,48 @@ func (c *ClientWithResponses) HealthHealthGetWithResponse(ctx context.Context, r
 	return ParseHealthHealthGetResponse(rsp)
 }
 
+// CompleteV1CompletePostWithBodyWithResponse Complete
+//
+// Run the pipeline and return the result with its telemetry.
+//
+// The envelope goes back whole. Go writes `telemetry` to
+// `ai_request_logs` in the same transaction as the message, which is
+// what keeps a single writer and a single transaction boundary — and
+// means a request that cost money can never be missing from the bill
+// because a separate logging call failed.
+//
+// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /v1/complete (the `CompleteV1CompletePost` operationId).
+func (c *ClientWithResponses) CompleteV1CompletePostWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CompleteV1CompletePostResponse, error) {
+	rsp, err := c.CompleteV1CompletePostWithBody(ctx, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCompleteV1CompletePostResponse(rsp)
+}
+
+// CompleteV1CompletePostWithResponse Complete
+//
+// Run the pipeline and return the result with its telemetry.
+//
+// The envelope goes back whole. Go writes `telemetry` to
+// `ai_request_logs` in the same transaction as the message, which is
+// what keeps a single writer and a single transaction boundary — and
+// means a request that cost money can never be missing from the bill
+// because a separate logging call failed.
+//
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /v1/complete (the `CompleteV1CompletePost` operationId).
+func (c *ClientWithResponses) CompleteV1CompletePostWithResponse(ctx context.Context, body CompleteV1CompletePostJSONRequestBody, reqEditors ...RequestEditorFn) (*CompleteV1CompletePostResponse, error) {
+	rsp, err := c.CompleteV1CompletePost(ctx, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCompleteV1CompletePostResponse(rsp)
+}
+
 // ParseHealthHealthGetResponse parses an HTTP response from a HealthHealthGetWithResponse call
 func ParseHealthHealthGetResponse(rsp *http.Response) (*HealthHealthGetResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
@@ -330,6 +938,39 @@ func ParseHealthHealthGetResponse(rsp *http.Response) (*HealthHealthGetResponse,
 			return nil, err
 		}
 		response.JSON200 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseCompleteV1CompletePostResponse parses an HTTP response from a CompleteV1CompletePostWithResponse call
+func ParseCompleteV1CompletePostResponse(rsp *http.Response) (*CompleteV1CompletePostResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &CompleteV1CompletePostResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest AIResponseEnvelopeCompleteResult
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest HTTPValidationError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON422 = &dest
 
 	}
 

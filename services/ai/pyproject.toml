@@ -97,6 +97,26 @@ include_external_packages = true
 [[tool.importlinter.contracts]]
 name = "Vendor SDKs live only in app.providers"
 type = "forbidden"
+# DIRECT imports only, and the distinction is load-bearing.
+#
+# Every module below legitimately imports `app.providers` for its
+# protocol types — CompletionRequest, LLMProvider, SystemBlock. Python
+# executes `app/providers/__init__.py` when you import ANY submodule of
+# it, and that file imports every adapter, so importing the PROTOCOL
+# transitively imports every SDK. With transitive checking on, this
+# contract therefore fails for `app.pricing` the moment it names a
+# `Usage`, which is not a rule anyone would write down.
+#
+# What survives is exactly the rule §2 states: "Nothing outside
+# app/providers/ may import a vendor SDK" — no `from openai import ...`
+# in an orchestrator. That is what keeps a model swap a config change,
+# and it is still enforced here, break-tested in both directions.
+#
+# What is NOT caught: a module reaching a vendor type by way of
+# app.providers. `mypy --strict` covers that, because a vendor type
+# appearing in a signature outside this package is visible in review and
+# in the generated OpenAPI.
+allow_indirect_imports = true
 source_modules = [
     "app.api",
     "app.classification",
@@ -104,6 +124,7 @@ source_modules = [
     "app.main",
     "app.middleware",
     "app.observability",
+    "app.orchestrator",
     "app.pricing",
     "app.prompts",
     "app.routing",
