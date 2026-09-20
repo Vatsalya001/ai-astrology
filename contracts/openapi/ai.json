@@ -1,6 +1,101 @@
 {
   "components": {
     "schemas": {
+      "AIResponseEnvelope_CompleteResult_": {
+        "properties": {
+          "result": {
+            "$ref": "#/components/schemas/CompleteResult"
+          },
+          "telemetry": {
+            "$ref": "#/components/schemas/Telemetry"
+          }
+        },
+        "required": [
+          "result",
+          "telemetry"
+        ],
+        "title": "AIResponseEnvelope[CompleteResult]",
+        "type": "object"
+      },
+      "CompleteRequest": {
+        "description": "What `api-service` sends.\n\n`user_id` and `conversation_id` are IDs. No name, no email, no birth\ndetails \u2014 `.claude/rules/security.md`. The chart comes from\n`astro-service` via the context builder, keyed by the ID, and never\ntravels through this request body.",
+        "properties": {
+          "conversation_id": {
+            "default": "",
+            "title": "Conversation Id",
+            "type": "string"
+          },
+          "job": {
+            "$ref": "#/components/schemas/JobType",
+            "default": "chat_response"
+          },
+          "language": {
+            "default": "en",
+            "title": "Language",
+            "type": "string"
+          },
+          "message": {
+            "maxLength": 4000,
+            "minLength": 1,
+            "title": "Message",
+            "type": "string"
+          },
+          "user_id": {
+            "default": "",
+            "title": "User Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "message"
+        ],
+        "title": "CompleteRequest",
+        "type": "object"
+      },
+      "CompleteResult": {
+        "properties": {
+          "blocked": {
+            "default": false,
+            "title": "Blocked",
+            "type": "boolean"
+          },
+          "intent": {
+            "$ref": "#/components/schemas/Intent",
+            "default": "general_astrology"
+          },
+          "is_crisis_response": {
+            "default": false,
+            "title": "Is Crisis Response",
+            "type": "boolean"
+          },
+          "safety_category": {
+            "$ref": "#/components/schemas/SafetyCategory",
+            "default": "none"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "title": "CompleteResult",
+        "type": "object"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "title": "Detail",
+            "type": "array"
+          }
+        },
+        "title": "HTTPValidationError",
+        "type": "object"
+      },
       "HealthResponse": {
         "properties": {
           "provider": {
@@ -33,6 +128,252 @@
         ],
         "title": "HealthResponse",
         "type": "object"
+      },
+      "Intent": {
+        "description": "The 21 intents from PHASE-04 \u00a76.\n\n`StrEnum` so an intent survives a round trip through JSON, a log line\nand an admin dashboard as itself, rather than as an integer nobody\ncan read at 3am.",
+        "enum": [
+          "general_astrology",
+          "career",
+          "relationship",
+          "marriage",
+          "finance",
+          "education",
+          "family",
+          "travel",
+          "relocation",
+          "daily_horoscope",
+          "kundli",
+          "dasha",
+          "transit",
+          "compatibility",
+          "tarot",
+          "numerology",
+          "human_astrologer",
+          "emotional_support",
+          "medical",
+          "legal",
+          "other"
+        ],
+        "title": "Intent",
+        "type": "string"
+      },
+      "JobType": {
+        "description": "Every distinct thing this product asks a model to do.\n\n`StrEnum` so a job survives a round trip through JSON, an admin\noverride and a log line as itself rather than as an integer nobody\ncan read in a dashboard.",
+        "enum": [
+          "intent_classification",
+          "safety_classification",
+          "memory_extraction",
+          "conversation_summary",
+          "suggested_questions",
+          "daily_horoscope",
+          "chat_response",
+          "chart_interpretation",
+          "premium_report",
+          "compatibility"
+        ],
+        "title": "JobType",
+        "type": "string"
+      },
+      "SafetyCategory": {
+        "enum": [
+          "crisis",
+          "medical",
+          "legal",
+          "prompt_injection",
+          "abuse",
+          "none"
+        ],
+        "title": "SafetyCategory",
+        "type": "string"
+      },
+      "SafetyFlag": {
+        "description": "One finding, without the text that produced it.",
+        "properties": {
+          "severity": {
+            "title": "Severity",
+            "type": "string"
+          },
+          "type": {
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "severity"
+        ],
+        "title": "SafetyFlag",
+        "type": "object"
+      },
+      "Telemetry": {
+        "description": "One row of `ai_request_logs`, assembled by Python.\n\nField names match the migration column-for-column on purpose. The Go\nside maps this straight through, and a rename on either side that\ndoes not happen on both is caught by the generated client rather\nthan by a column silently receiving zero.",
+        "properties": {
+          "cache_write_tokens": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Cache Write Tokens",
+            "type": "integer"
+          },
+          "cached_tokens": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Cached Tokens",
+            "type": "integer"
+          },
+          "context_version": {
+            "default": "",
+            "title": "Context Version",
+            "type": "string"
+          },
+          "conversation_id": {
+            "default": "",
+            "title": "Conversation Id",
+            "type": "string"
+          },
+          "cost_micros": {
+            "default": 0,
+            "format": "int64",
+            "minimum": 0.0,
+            "title": "Cost Micros",
+            "type": "integer"
+          },
+          "finish_reason": {
+            "default": "stop",
+            "enum": [
+              "stop",
+              "length",
+              "refusal",
+              "error"
+            ],
+            "title": "Finish Reason",
+            "type": "string"
+          },
+          "input_tokens": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Input Tokens",
+            "type": "integer"
+          },
+          "intent": {
+            "default": "",
+            "title": "Intent",
+            "type": "string"
+          },
+          "job_type": {
+            "title": "Job Type",
+            "type": "string"
+          },
+          "latency_ms": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Latency Ms",
+            "type": "integer"
+          },
+          "model": {
+            "default": "",
+            "title": "Model",
+            "type": "string"
+          },
+          "model_calls": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Model Calls",
+            "type": "integer"
+          },
+          "output_tokens": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Output Tokens",
+            "type": "integer"
+          },
+          "prompt_version": {
+            "default": "",
+            "title": "Prompt Version",
+            "type": "string"
+          },
+          "provider_id": {
+            "default": "",
+            "title": "Provider Id",
+            "type": "string"
+          },
+          "regenerated": {
+            "default": false,
+            "title": "Regenerated",
+            "type": "boolean"
+          },
+          "safety_flags": {
+            "items": {
+              "$ref": "#/components/schemas/SafetyFlag"
+            },
+            "title": "Safety Flags",
+            "type": "array"
+          },
+          "tier": {
+            "default": "",
+            "title": "Tier",
+            "type": "string"
+          },
+          "trace_id": {
+            "title": "Trace Id",
+            "type": "string"
+          },
+          "user_id": {
+            "default": "",
+            "title": "User Id",
+            "type": "string"
+          },
+          "validation_passed": {
+            "default": true,
+            "title": "Validation Passed",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "trace_id",
+          "job_type"
+        ],
+        "title": "Telemetry",
+        "type": "object"
+      },
+      "ValidationError": {
+        "properties": {
+          "ctx": {
+            "title": "Context",
+            "type": "object"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "title": "Location",
+            "type": "array"
+          },
+          "msg": {
+            "title": "Message",
+            "type": "string"
+          },
+          "type": {
+            "title": "Error Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError",
+        "type": "object"
       }
     }
   },
@@ -62,6 +403,48 @@
         "summary": "Health",
         "tags": [
           "ops"
+        ]
+      }
+    },
+    "/v1/complete": {
+      "post": {
+        "description": "Run the pipeline and return the result with its telemetry.\n\nThe envelope goes back whole. Go writes `telemetry` to\n`ai_request_logs` in the same transaction as the message, which is\nwhat keeps a single writer and a single transaction boundary \u2014 and\nmeans a request that cost money can never be missing from the bill\nbecause a separate logging call failed.",
+        "operationId": "complete_v1_complete_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CompleteRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AIResponseEnvelope_CompleteResult_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Complete",
+        "tags": [
+          "ai"
         ]
       }
     }

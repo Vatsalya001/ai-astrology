@@ -2041,3 +2041,97 @@ not match *"stop taking **your** medication"* — the commonest phrasing of the 
 most dangerous sentence this product could emit.
 
 381 Python tests. `task verify` green.
+
+---
+
+# Phase 4.15, 4.16 — the pipeline, and the one assertion that cannot cheat
+
+## The crisis test asserts on the provider, not the text
+
+`.claude/rules/ai.md`: crisis input *"bypasses astrology entirely"*. The obvious test
+checks the response string. It would pass while the bypass was broken — as long as
+something eventually produced the right words, and *"something eventually"* is
+precisely the failure mode: a model writing a crisis response that mentions Saturn.
+
+So the assertion is `generator.requests == []`. Three separate mocks back the three
+call sites, because one shared provider makes *"did the generator run?"* unanswerable.
+
+Two bypass points, both tested and both break-tested:
+
+- **Keyword**, before anything that can fail or cost money — **zero** model calls,
+  works with every provider down.
+- **Model screener**, for indirect phrasing. *"I don't see the point of anything
+  anymore"* carries no crisis word. This is the path where classification has already
+  run, so it is the one a careless implementation falls through.
+
+## One deviation from the spec's step order, and why
+
+§9 puts classification (step 4) before safety (step 5). Run literally that is two
+sequential `fast`-tier calls on the critical path of every message, and neither one's
+output feeds the other.
+
+Instead: the free offline crisis check first, then **intent and screening
+concurrently**. Same semantics, roughly half the pre-generation latency. The cost is
+one wasted classification when the model screener catches a crisis the keyword pass
+missed — rare, one cheap call — against a few hundred milliseconds on every ordinary
+message in the product.
+
+The module docstring claimed this before the code did. The first implementation was
+sequential; the docstring was the promise and the code was corrected to keep it.
+
+## The stubs return empty, and that is the safe choice
+
+A context stub returning *"Sun in Leo, Moon in Scorpio"* would make the pipeline look
+like it worked — and the `fabricated_chart_fact` validator would cheerfully check the
+model against **invented** facts. Every test would pass and the product would be
+confidently wrong in development in exactly the way it must never be wrong in
+production.
+
+Empty is honest: the validator's empty-index rule fires and a personal placement
+claim is blocked. There is a test asserting exactly that, so the stub's behaviour is
+recorded rather than assumed.
+
+## Telemetry carries no message content
+
+§14: *"`ai_request_logs` stores IDs and token counts — never message content."*
+`safety_flags` is therefore types and severities only — the admin panel sees
+`fabricated_chart_fact / block` rather than the sentence. A real cost, and the right
+trade: this table is retained, replicated, and read by a billing job in Phase 7.
+
+Checked against the **serialised** envelope rather than field by field, so a field
+added later without thinking is caught too. Break-tested by putting the excerpt in.
+
+`cost_micros` declares `format: int64`, so the generated Go client types it `*int64`
+rather than `*int`. Same width on this machine; not on a 32-bit build, and
+`.claude/rules/go.md` is explicit that money is `int64` rather than whatever `int`
+happens to mean.
+
+## The import contract had to be narrowed, and the reason is real
+
+Adding the route broke `Vendor SDKs live only in app.providers`:
+
+```
+app.main -> app.api.complete -> app.providers -> openai
+```
+
+Python executes `app/providers/__init__.py` when you import **any** submodule of it,
+and that file imports every adapter — so importing the *protocol* transitively
+imports every SDK. With transitive checking on, the contract fails for `app.pricing`
+the moment it names a `Usage`. That is not a rule anyone would write down.
+
+`allow_indirect_imports = true` keeps exactly the rule §2 states: no
+`from openai import ...` outside `app/providers/`. Break-tested in both directions —
+a direct vendor import from `app.orchestrator` and from `app.api` each fail the
+contract by name.
+
+**What is no longer caught:** a module reaching a vendor *type* by way of
+`app.providers`. `mypy --strict` covers that, and a vendor type in a signature is
+visible in the generated OpenAPI.
+
+## The generated Go client compiles
+
+`task contracts` → `oapi-codegen` → `go build ./...` clean. Two paths, eleven
+schemas, `CostMicros *int64`.
+
+414 Python tests. Seven deliberate breaks of the orchestrator, seven failures.
+`task verify` green.

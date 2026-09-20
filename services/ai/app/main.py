@@ -10,7 +10,8 @@ This service:
   * talks to a model provider chosen entirely by configuration
   * refuses to start on a non-paid provider in production (app/guards.py)
 
-Phase 4 fills in app/providers/, app/prompts/ and app/safety/.
+Phase 4 filled in app/providers/, app/prompts/, app/classification/,
+app/safety/, app/validation/ and app/orchestrator/.
 Phase 5 adds retrieval. Phase 6 adds the eval harness.
 """
 
@@ -21,7 +22,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from app import middleware, telemetry
-from app.api import health
+from app.api import complete, health
 from app.env_check import assert_no_typos
 from app.guards import run_all_startup_guards
 from app.observability import configure as configure_logging
@@ -77,3 +78,4 @@ app = FastAPI(
 
 middleware.install(app, internal_token=settings.internal_token)
 app.include_router(health.router)
+app.include_router(complete.router)
