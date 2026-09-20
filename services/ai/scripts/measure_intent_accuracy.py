@@ -35,7 +35,7 @@ from collections import Counter
 from pathlib import Path
 
 from app.classification import Intent, IntentClassifier, classify_by_keywords, min_confidence
-from app.providers import ModelMap, OpenAICompatibleProvider
+from app.providers import describe, provider_from_settings
 from app.settings import settings
 
 DATASET = Path(__file__).parent.parent / "tests" / "fixtures" / "intents.jsonl"
@@ -174,16 +174,7 @@ def report_pre_pass(rows: list[dict[str, str]]) -> None:
 async def main() -> int:
     rows = load()
 
-    provider = OpenAICompatibleProvider(
-        base_url=settings.llm_base_url,
-        api_key=settings.llm_api_key,
-        tier=settings.llm_provider_tier,
-        models=ModelMap(
-            fast=settings.llm_model_fast,
-            chat=settings.llm_model_chat,
-            deep=settings.llm_model_deep,
-        ),
-    )
+    provider = provider_from_settings()
 
     if not await provider.health_check():
         print(f"{settings.llm_base_url} is not answering. Start Ollama, or point")
@@ -191,7 +182,7 @@ async def main() -> int:
         print("through this same adapter.")
         return 2
 
-    print(f"model={settings.llm_model_fast}  backend={settings.llm_base_url}")
+    print(f"  {describe()}")
     print(f"{len(rows)} messages. Target for the gate: {TARGET:.0%} primary-intent accuracy.\n")
 
     report_pre_pass(rows)

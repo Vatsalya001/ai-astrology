@@ -49,10 +49,10 @@ from app.providers import (
     LLMProvider,
     MockProvider,
     ModelMap,
-    OpenAICompatibleProvider,
     ProviderRegistry,
     ProviderTier,
     ResilientProvider,
+    provider_from_settings,
 )
 from app.routing import DEFAULT_ROUTING, JobType, ModelRouter, RoutingOverride
 from app.safety import SafetyClassifier
@@ -82,34 +82,12 @@ def _mock(provider_id: str) -> MockProvider:
 def _raw_provider() -> LLMProvider:
     """Whichever backend configuration names.
 
-    A match on a `Literal`, so adding a fifth provider to the setting
-    without adding it here is a `mypy --strict` failure rather than a
-    runtime `else` branch that quietly serves the wrong thing.
+    Delegates to `app/providers/factory.py`, which is also what the
+    measurement scripts use. It was a private copy here and they each
+    hardcoded OpenAICompatibleProvider — so with LLM_PROVIDER=google the
+    service ran on Gemini while every script quietly measured localhost.
     """
-    match settings.llm_provider:
-        case "anthropic":
-            return AnthropicProvider(
-                api_key=settings.llm_api_key,
-                models=_models(),
-                timeout_seconds=settings.effective_llm_timeout_seconds,
-            )
-        case "google":
-            return GoogleProvider(
-                api_key=settings.llm_api_key,
-                models=_models(),
-                tier=settings.llm_provider_tier,
-                timeout_seconds=settings.effective_llm_timeout_seconds,
-            )
-        case "mock":
-            return _mock("mock")
-        case "openai-compatible":
-            return OpenAICompatibleProvider(
-                base_url=settings.llm_base_url,
-                api_key=settings.llm_api_key,
-                tier=settings.llm_provider_tier,
-                models=_models(),
-                timeout_seconds=settings.effective_llm_timeout_seconds,
-            )
+    return provider_from_settings()
 
 
 def _fallback_provider() -> LLMProvider | None:

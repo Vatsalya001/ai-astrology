@@ -269,3 +269,102 @@ class TestFallbackThroughTheRealConstructionPath:
 
         assert envelope.telemetry.provider_id == "mock-fallback"
         assert envelope.telemetry.model_calls >= 1
+
+
+# ─── one factory, or the scripts measure something else ──────────────
+
+
+class TestTheProviderFactory:
+    """The construction lived in two places and they disagreed.
+
+    `app/api/complete.py` matched on `LLM_PROVIDER`; both measurement
+    scripts hardcoded `OpenAICompatibleProvider`. Invisible until it
+    mattered: with `LLM_PROVIDER=google` the service runs on Gemini and
+    `measure_intent_accuracy.py` quietly keeps talking to
+    `http://localhost:11434` — printing a number for one model under a
+    heading naming another.
+
+    A measurement that silently measures something else is worse than no
+    measurement.
+    """
+
+    @pytest.mark.parametrize(
+        ("provider", "expected"),
+        [
+            ("openai-compatible", "OpenAICompatibleProvider"),
+            ("google", "GoogleProvider"),
+            ("anthropic", "AnthropicProvider"),
+            ("mock", "MockProvider"),
+        ],
+    )
+    def test_every_configured_provider_is_built(
+        self, monkeypatch: pytest.MonkeyPatch, provider: str, expected: str
+    ) -> None:
+        from app.providers import provider_from_settings
+        from app.settings import settings
+
+        monkeypatch.setattr(settings, "llm_provider", provider)
+        monkeypatch.setattr(settings, "llm_provider_tier", "local")
+        # Anthropic refuses to construct without one, by design.
+        monkeypatch.setattr(settings, "llm_api_key", "not-a-real-key-for-tests")
+
+        assert type(provider_from_settings()).__name__ == expected
+
+    def test_the_route_and_the_scripts_build_the_same_thing(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The property, not just the existence of a helper.
+
+        A factory that only the scripts used would leave the
+        duplication exactly where it was.
+        """
+        from app.api import complete
+        from app.providers import provider_from_settings
+        from app.settings import settings
+
+        monkeypatch.setattr(settings, "llm_provider", "google")
+        monkeypatch.setattr(settings, "llm_api_key", "not-a-real-key-for-tests")
+
+        assert type(complete._raw_provider()) is type(provider_from_settings())
+
+    def test_the_model_override_reaches_every_tier(self) -> None:
+        """Scripts compare models on one job.
+
+        Pointing only `fast` would leave a script that measures a `chat`
+        job silently running the configured model instead of the one
+        named on the command line.
+        """
+        from app.providers import models_from
+        from app.settings import Settings
+
+        # A name that is NOT any tier's default. The first version used
+        # "qwen2.5:7b", which IS the chat and deep default — so the
+        # assertion held whether or not the override reached those
+        # tiers, and the break that pointed only `fast` left it green.
+        defaults = Settings(_env_file=None)  # type: ignore[call-arg]
+        override = "a-model-no-tier-defaults-to"
+        assert override not in (defaults.llm_model_fast, defaults.llm_model_chat)
+
+        models = models_from(defaults, override)
+
+        assert (models.fast, models.chat, models.deep) == (override,) * 3
+
+    def test_describe_names_the_provider_actually_configured(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Printed by every script before it starts.
+
+        The failure it prevents is reading a number off a report whose
+        heading names one model and whose calls went to another.
+        """
+        from app.providers import describe
+        from app.settings import settings
+
+        monkeypatch.setattr(settings, "llm_provider", "google")
+        monkeypatch.setattr(settings, "llm_model_fast", "gemini-2.5-flash")
+
+        line = describe()
+
+        assert "google" in line
+        assert "gemini-2.5-flash" in line
+        assert "11434" not in line, "it still names the local Ollama endpoint"

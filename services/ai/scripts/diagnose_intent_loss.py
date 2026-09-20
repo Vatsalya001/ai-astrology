@@ -26,7 +26,7 @@ import time
 from collections import Counter
 
 from app.classification import IntentClassifier, classify_by_keywords, min_confidence
-from app.providers import ModelMap, OpenAICompatibleProvider
+from app.providers import describe, provider_from_settings
 from app.settings import settings
 
 DATASET = pathlib.Path(__file__).parent.parent / "tests" / "fixtures" / "intents.jsonl"
@@ -43,14 +43,7 @@ async def main() -> int:
     if limit:
         deferred = deferred[:limit]
 
-    provider = OpenAICompatibleProvider(
-        base_url=settings.llm_base_url,
-        api_key=settings.llm_api_key,
-        tier="local",
-        models=ModelMap(fast=model, chat=model, deep=model),
-        # Generous: the point is to finish, not to measure latency.
-        timeout_seconds=300.0,
-    )
+    provider = provider_from_settings(model_override=model)
     classifier = IntentClassifier(provider, use_keywords=False)
 
     raw_correct = final_correct = 0
@@ -60,8 +53,13 @@ async def main() -> int:
     discarded_confidences: list[float] = []
     examples: list[str] = []
 
+    # Naming what this is ACTUALLY talking to, not what the argument
+    # said. The scripts used to hardcode an OpenAI-compatible provider,
+    # so with LLM_PROVIDER=google they would report a Gemini heading
+    # over numbers measured against localhost:11434.
+    print(f"  {describe(model_override=model)}", flush=True)
     print(
-        f"model={model}  deferred={len(deferred)}  (pre-pass already answered "
+        f"  deferred={len(deferred)}  (pre-pass already answered "
         f"{len(rows) - len(deferred)} correctly)\n",
         flush=True,
     )

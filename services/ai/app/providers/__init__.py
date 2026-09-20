@@ -26,6 +26,7 @@ from app.providers.base import (
     SystemBlock,
     Usage,
 )
+from app.providers.factory import describe, models_from, provider_from_settings
 from app.providers.google_provider import GoogleEmbeddingProvider, GoogleProvider
 from app.providers.mock import MockProvider, request_fingerprint
 from app.providers.ollama_embeddings import OllamaEmbeddingProvider
@@ -62,5 +63,8 @@ __all__ = [
     "Role",
     "SystemBlock",
     "Usage",
+    "describe",
+    "models_from",
+    "provider_from_settings",
     "request_fingerprint",
 ]
