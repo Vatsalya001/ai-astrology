@@ -80,11 +80,22 @@ class IntentClassifier:
         # — a correct classification thrown away by validation, which
         # scored 0% on the labelled set and looked like a bad model.
         # v1 is frozen and still loadable; see app/prompts/registry.py.
-        prompt_version: str = "v2",
+        prompt_version: str | None = None,
         use_keywords: bool = True,
     ) -> None:
         self._provider = provider
-        self._prompt_version = prompt_version
+        # Resolved from settings, never a literal default. A hardcoded
+        # "v2" here silently diverged from `prompt_version_intent` the
+        # moment v3 shipped: the ROUTE passed the setting, so production
+        # ran v3, while `scripts/diagnose_intent_loss.py` constructs this
+        # without a version and therefore measured v2.
+        #
+        # That is the provider-factory bug again in a second place — a
+        # measurement reporting a number for one configuration under a
+        # heading naming another.
+        from app.settings import settings
+
+        self._prompt_version = prompt_version or settings.prompt_version_intent
         self._use_keywords = use_keywords
 
     def _prompt(self) -> PromptBuilder:

@@ -307,3 +307,176 @@ def test_every_persona_produces_a_similar_prefix_length() -> None:
 
     spread = max(lengths.values()) - min(lengths.values())
     assert spread < 200, f"personas differ by ~{spread} tokens: {lengths}"
+
+
+class TestTheOutputTemplateIsAllPlaceholders:
+    """The defect that cost the intent classifier most of its accuracy.
+
+    `intent_classification.v2`'s output template gave `"confidence"` as a
+    concrete **0.0** while every sibling field was a placeholder. A 3B
+    model pattern-completes the nearest template: it substituted
+    `primary` and copied the rest verbatim, so it returned the label it
+    had correctly chosen alongside `"confidence": 0.0`.
+
+    Every one of those was then discarded as low-confidence. Measured
+    over the full labelled set: the model answered correctly 57 times and
+    the product delivered 51, and the discarded confidences were min 0.0,
+    median 0.0, max 0.0 — not a spread, a constant.
+
+    Proven causal rather than inferred: changing that ONE line to a
+    placeholder and nothing else moved llama3.2:3b's reported confidence
+    from `0.0, 0.0, 0.0` to `0.5, 0.0, 0.8` on the same three messages.
+    A 7B model ignores the template and reports ~0.8, which is why this
+    stayed invisible until it was measured on the model that actually
+    serves the `fast` tier.
+
+    A template value that is also a plausible answer is indistinguishable
+    from an instruction to give that answer.
+    """
+
+    def _output_template(self, qualified_version: str) -> str:
+        """The first fenced block after `## Output` — the shape block.
+
+        Deliberately NOT the worked example further down, which SHOULD
+        carry concrete values: an example demonstrates, a template
+        declares, and the bug was a template behaving like an example.
+        """
+        content = load_module("intent_classification", qualified_version).content
+        after = content.split("## Output", 1)[1]
+        return after.split("```")[1]
+
+    def test_the_shipped_version_hands_over_no_concrete_values(self) -> None:
+        from app.settings import settings
+
+        template = self._output_template(settings.prompt_version_intent)
+
+        concrete = []
+        for line in template.splitlines():
+            if ":" not in line:
+                continue
+            value = line.split(":", 1)[1].strip().rstrip(",")
+            # `"entities": {` opens a nested object; its own lines are
+            # checked on the following iterations.
+            if value in ("{", "}", ""):
+                continue
+            if "<" not in value:
+                concrete.append(line.strip())
+
+        assert concrete == [], (
+            f"these template values are concrete rather than placeholders: {concrete}. "
+            f"A small model copies them instead of answering — which is exactly how "
+            f'`"confidence": 0.0` in v2 discarded most of the classifier\'s correct labels.'
+        )
+
+    def test_v2_still_has_the_defect_and_is_left_alone(self) -> None:
+        """The fixed version must be a NEW version, not an edited one.
+
+        If this ever passes, somebody repaired v2 in place. That breaks
+        the immutability guarantee for every response already logged
+        against it — and would make the test above pass for the wrong
+        reason, since it reads whichever version is shipped.
+        """
+        assert '"confidence": 0.0' in self._output_template("v2")
+
+
+class TestThePromptIsNotFittedToTheRegressionSuite:
+    """`tests/fixtures/intents.jsonl` is the measurement, not training data.
+
+    A prompt carrying a labelled message from the set would score on
+    material it had been shown, and the number would not generalise —
+    which is the one way `docs/PHASE-04-GATE.md` says the accuracy item
+    must NOT be closed.
+
+    Not hypothetical: the first draft of v3's confidence scale used
+    *"when will I get married"* as its 0.9 example, which is row 011.
+    """
+
+    def test_no_example_in_the_intent_prompt_appears_in_the_dataset(self) -> None:
+        import json as _json
+        import re
+
+        dataset = Path(__file__).parent / "fixtures" / "intents.jsonl"
+        labelled = [
+            _json.loads(line)["message"].lower().strip().rstrip("?.")
+            for line in dataset.read_text().splitlines()
+            if line.strip()
+        ]
+
+        from app.settings import settings
+
+        content = load_module("intent_classification", settings.prompt_version_intent).content
+        # Italicised quotes are how this file marks an example message.
+        quoted = [
+            " ".join(q.split()).lower().strip().rstrip("?.")
+            for q in re.findall(r'\*"([^"]+)"\*', content)
+        ]
+        assert quoted, "no examples found — the extraction pattern has drifted from the prompt"
+
+        overlapping = [q for q in quoted if any(q == m or q in m for m in labelled)]
+
+        assert overlapping == [], (
+            f"these prompt examples are messages from the labelled set: {overlapping}. "
+            f"Scoring against a set the prompt has been shown measures memorisation."
+        )
+
+
+class TestNoComponentPinsItsOwnPromptVersion:
+    """A literal default is a version configuration cannot reach.
+
+    `IntentClassifier.__init__` defaulted to `"v2"` and
+    `SafetyClassifier.__init__` to `"v1"`. `app/api/complete.py` passes
+    the setting, so the ROUTE moved to v3 the moment the setting did —
+    but `scripts/diagnose_intent_loss.py` constructs the classifier
+    without a version, so it went on measuring v2.
+
+    The full 118-message run was then reported as the as-shipped number
+    for a prompt the service does not use. That is the provider-factory
+    bug in a second place: a measurement quietly measuring something
+    else, which is worse than no measurement because somebody reads it.
+
+    Caught by the numbers refusing to move — an isolated probe had
+    already PROVEN the v3 change causal on the same messages, so "v3
+    changed nothing" and "v3 was never loaded" were distinguishable.
+    """
+
+    def test_the_intent_classifier_follows_the_setting(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from app.classification import IntentClassifier
+        from app.providers import MockProvider
+        from app.settings import settings
+
+        monkeypatch.setattr(settings, "prompt_version_intent", "v1")
+
+        built = IntentClassifier(MockProvider(Path("/nonexistent"), allow_unknown=True))
+
+        assert built._prompt_version == "v1"
+
+    def test_the_safety_classifier_follows_the_setting(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from app.providers import MockProvider
+        from app.safety import SafetyClassifier
+        from app.settings import settings
+
+        monkeypatch.setattr(settings, "prompt_version_safety", "v1")
+
+        built = SafetyClassifier(MockProvider(Path("/nonexistent"), allow_unknown=True))
+
+        assert built._prompt_version == "v1"
+
+    def test_an_explicit_version_still_wins(self) -> None:
+        """Pinning one on purpose must keep working.
+
+        Phase 6's eval harness compares prompt versions against each
+        other; that is impossible if the only reachable version is
+        whatever the process is configured for.
+        """
+        from app.classification import IntentClassifier
+        from app.providers import MockProvider
+
+        built = IntentClassifier(
+            MockProvider(Path("/nonexistent"), allow_unknown=True), prompt_version="v1"
+        )
+
+        assert built._prompt_version == "v1"

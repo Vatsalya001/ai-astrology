@@ -57,10 +57,29 @@ async def main() -> int:
     # said. The scripts used to hardcode an OpenAI-compatible provider,
     # so with LLM_PROVIDER=google they would report a Gemini heading
     # over numbers measured against localhost:11434.
-    print(f"  {describe(model_override=model)}", flush=True)
+    # `prepass_correct`, NOT `len(rows) - len(deferred)`. The latter is
+    # how many the pre-pass ANSWERED, which only equals how many it got
+    # RIGHT while its precision is 100% — and it silently becomes
+    # nonsense under `limit`, where it subtracts the TRUNCATED deferred
+    # count and reports the whole remainder as correct. Run with a limit
+    # of 3 it printed "pre-pass already answered 197 correctly" against
+    # a set of 200.
+    answered_by_prepass = len(rows) - sum(1 for _, hit in prepass if hit is None)
+    # The PROMPT version, read off the constructed classifier rather than
+    # off settings. This script ran a full 118-message measurement
+    # against v2 while the service ran v3, because IntentClassifier's
+    # default was a hardcoded "v2" and this file did not pass one. The
+    # number was going into the gate report as "as shipped".
     print(
-        f"  deferred={len(deferred)}  (pre-pass already answered "
-        f"{len(rows) - len(deferred)} correctly)\n",
+        f"  {describe(model_override=model)}  "
+        f"prompt=intent_classification.{classifier._prompt_version}",
+        flush=True,
+    )
+    print(
+        f"  deferred={len(deferred)}"
+        f"{'  (LIMITED — the totals below are not the gate number)' if limit else ''}\n"
+        f"  pre-pass answered {answered_by_prepass}/{len(rows)}, "
+        f"of which {prepass_correct} correct\n",
         flush=True,
     )
 

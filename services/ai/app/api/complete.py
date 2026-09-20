@@ -239,7 +239,7 @@ def get_orchestrator() -> Orchestrator:
         # router, so one provider serves all three — and all three fail
         # over together.
         classifier=IntentClassifier(provider, prompt_version=settings.prompt_version_intent),
-        screener=SafetyClassifier(provider),
+        screener=SafetyClassifier(provider, prompt_version=settings.prompt_version_safety),
         router=ModelRouter(),
         prompt_version=settings.prompt_version_chat,
     )
