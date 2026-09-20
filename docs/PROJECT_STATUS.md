@@ -2228,3 +2228,58 @@ cost-per-request figure that table exists to produce, invisibly, because the row
 look identical.
 
 `task verify` green. Go unit and integration suites green against real Postgres.
+
+---
+
+# Phase 4.21 — one suite, four adapters
+
+## What parity means, and what it does not
+
+It does **not** mean the adapters produce the same text. They wrap different models;
+identical output would mean the abstraction had flattened the thing it exists to let
+you choose between.
+
+It means everything *around* the text is identical: the response shape, the exception
+type, the `retryable` decision, the streaming contract. The registry's fallback loop
+reads `retryable` and nothing else — so an adapter that disagrees about it doesn't
+merely fail itself, it stops the chain walking to the next provider and turns one
+adapter's mistake into an outage for a configuration that had a working fallback.
+
+Each adapter runs through **its own SDK** against a fake transport, so the parsing is
+real and only the socket is fake. A suite that patched each client's method would
+assert that four adapters call four methods — four tautologies, not parity.
+
+`MockProvider` is in the set deliberately. It is the adapter CI actually runs the
+pipeline on, so an inconsistency between it and the real ones means every integration
+test in this repository exercises a shape production does not have.
+
+## Two guards against the suite quietly testing three of four
+
+- `test_every_adapter_in_the_package_is_covered` compares `ADAPTERS` against
+  `app.providers.__all__`. A new adapter added and not registered leaves every test
+  above passing while never touching it.
+- `test_the_adapters_are_not_secretly_the_same_object` — a version where every
+  builder returned a mock would pass all 82 assertions and prove nothing.
+
+## Five breaks, and the one that didn't fire
+
+| Break | Result |
+|---|---|
+| Google marks every failure permanent | 3 failures — failover broken |
+| Anthropic leaks a credential into its error | 2 failures |
+| Google stops reporting which model answered | 1 failure |
+| Anthropic reverses system block order | 1 failure — the prefix is no longer a prefix |
+| **Mock reports usage on every chunk** | **passed** |
+
+The last one was vacuous: `test_usage_arrives_at_most_once` used the default one-word
+answer, which produces a single chunk on every adapter, so `len(carrying) <= 1` held
+whatever the implementation did. Fixed with a twelve-word answer *and* an assertion
+that more than one chunk arrived — because without that, the test could go vacuous
+again the next time a default changed.
+
+That failure mode matters: Google repeats running totals on every chunk and Anthropic
+splits them across two events. A consumer that summed what it received would be right
+on one provider and wrong on another, multiplying the bill by the chunk count on the
+long answers that are already the expensive ones.
+
+**496 Python tests.** `task verify` green.
