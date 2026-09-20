@@ -172,7 +172,7 @@ date the cache began paying for itself.
 | A native speaker should review the Hinglish crisis phrases | The regexes match the sentences claimed; whether those are the sentences real users write is not something this repo can assert |
 | `AnthropicProvider` verified once against a real key, **including prompt caching** | Offline tests exercise our parsing of a response shape *we wrote down*. See `docs/PROVIDER-VERIFICATION.md` |
 | `GoogleProvider` free-tier run | Same |
-| CI has never executed a job | Carried from Phase 3 — billing, a user action |
+| **GitHub Actions is out of minutes** | Not "never executed" — that note was stale. CI has run **178 times** and last *succeeded* on **2026-09-16**. Every run since fails in **~2 seconds with zero steps**, which is the signature of an exhausted quota, not a broken build. **Proven, not assumed:** every CI job's steps were extracted from `.github/workflows/ci.yml` and run locally — go, contracts, integrity, secret scan, both Python services, the determinism guard, web, and env-drift all pass, and `go-integration` + `e2e` were run separately against real Postgres and a real browser. The repository's code is green; the runner is not |
 
 ---
 
