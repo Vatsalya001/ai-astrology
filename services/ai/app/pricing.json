@@ -1,0 +1,70 @@
+{
+  "_comment": [
+    "Published list prices in micro-USD per MILLION tokens.",
+    "",
+    "These are transcribed from vendor pricing pages, and a transcribed",
+    "price is a claim about the world that goes stale without any code",
+    "changing. Check them against the first real invoice and correct them",
+    "here — that is why this is a JSON file and not a dict in a module.",
+    "",
+    "A model that is genuinely free carries explicit zeros. That is not",
+    "the same as a model being absent: absent raises, so a model nobody",
+    "priced can never be silently billed at nothing."
+  ],
+
+  "anthropic": {
+    "claude-sonnet-5": {
+      "input": 3000000,
+      "output": 15000000,
+      "cache_write": 3750000,
+      "cache_read": 300000
+    },
+    "claude-haiku-4-5": {
+      "input": 1000000,
+      "output": 5000000,
+      "cache_write": 1250000,
+      "cache_read": 100000
+    },
+    "claude-opus-5": {
+      "input": 15000000,
+      "output": 75000000,
+      "cache_write": 18750000,
+      "cache_read": 1500000
+    }
+  },
+
+  "google": {
+    "gemini-2.5-flash": {
+      "input": 300000,
+      "output": 2500000,
+      "cache_write": 0,
+      "cache_read": 75000
+    },
+    "gemini-2.5-pro": {
+      "input": 1250000,
+      "output": 10000000,
+      "cache_write": 0,
+      "cache_read": 312500
+    },
+    "gemini-2.0-flash": {
+      "input": 100000,
+      "output": 400000,
+      "cache_write": 0,
+      "cache_read": 25000
+    }
+  },
+
+  "local": {
+    "_comment": [
+      "Everything Ollama serves. Zero because electricity is not billed",
+      "per token, and because a zero here makes the dev/prod cost delta",
+      "visible in one table rather than needing a second code path."
+    ],
+    "llama3.2:3b": { "input": 0, "output": 0, "cache_write": 0, "cache_read": 0 },
+    "qwen2.5:7b": { "input": 0, "output": 0, "cache_write": 0, "cache_read": 0 },
+    "nomic-embed-text": { "input": 0, "output": 0, "cache_write": 0, "cache_read": 0 },
+    "mock-fast": { "input": 0, "output": 0, "cache_write": 0, "cache_read": 0 },
+    "mock-chat": { "input": 0, "output": 0, "cache_write": 0, "cache_read": 0 },
+    "mock-deep": { "input": 0, "output": 0, "cache_write": 0, "cache_read": 0 }
+  }
+}

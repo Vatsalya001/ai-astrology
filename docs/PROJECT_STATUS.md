@@ -1811,3 +1811,110 @@ The failure mode of a missing prompt module is not a worse answer — it is an *
 one. A silent fallback would send a request with the safety rules absent.
 
 164 Python tests. `task verify` green.
+
+---
+
+# Phase 4.4, 4.5 — the two paid adapters, and what they cost
+
+## The cache breakpoint is the whole reason this adapter exists
+
+`OpenAICompatibleProvider` already speaks to five backends. Anthropic gets its own
+adapter for three things that format cannot express, and the first is worth roughly
+a 10x reduction on the input side of every request:
+
+**A breakpoint caches everything before it**, so it goes after the last *stable*
+block. The two obvious wrong placements both look fine in review:
+
+- **After the last block overall** — the user's chart lands inside the cached
+  prefix, the prefix changes on every request, hit rate is exactly zero.
+- **On every cacheable block** — Anthropic allows four per request; a marker per
+  module exhausts the budget at five and the request is rejected.
+
+A third case is subtler: when nothing is marked cacheable, the adapter places **no**
+breakpoint rather than defaulting to the end. Marking it anyway pays the 1.25x cache
+*write* premium on every request and reads back nothing — strictly worse than not
+caching.
+
+All four are tested, and all four break-tested. The tests are about money rather than
+correctness: get any of them wrong and responses stay perfect while the bill
+multiplies, which is the regression no user reports.
+
+## Three input token classes, and two vendors that disagree about them
+
+Anthropic reports fresh / cache-write / cache-read as **disjoint** counts. Google
+reports `promptTokenCount` **inclusive** of the cached part. Copying either field
+straight across is wrong for the other vendor — and wrong in the expensive
+direction, on the largest part of the prompt.
+
+So `Usage` gained `cache_write_input_tokens` and documents the three as disjoint;
+the Google adapter subtracts. The ratio between read and write is also the cache hit
+rate, which is the number that says whether the biggest cost lever is actually
+engaged. PHASE-04 §15 names "prompt caching silently stops working in prod" as a
+risk; this is the field that makes it visible.
+
+## Money: the unpriced model raises
+
+`app/pricing.py` converts tokens to integer micro-USD from a committed table. A
+model with no entry **raises** rather than costing zero.
+
+Zero is the tempting default and the expensive one: a model added via an admin
+override and never priced runs for months showing nothing on the dashboard, and the
+gap first appears on an invoice nobody can reconcile. The ledger this feeds is
+append-only — a wrong cost is corrected with an opposing entry, never edited — so
+recording it wrong is expensive in a way a missing row is not.
+
+**"Free" and "unpriced" are kept as different facts.** Local models carry explicit
+zeros. Collapsing the two is what makes the zero default dangerous.
+
+### The test that was passing vacuously
+
+`cost_micros` returning an `int` was asserted three ways, and a deliberately
+floating implementation — `round(tokens * (rate / 1_000_000))` — **passed all
+three**, because `round()` returns an int. The assertions could see the cast and not
+the arithmetic.
+
+Replaced with four values chosen where the candidate implementations disagree:
+
+| tokens @ $0.30/MTok | exact | truncated | float + round |
+|---|---|---|---|
+| 3 | 1 | 0 | 1 |
+| 15 | **5** | 4 | **4** |
+| 35 | **11** | 10 | **10** |
+| 1005 | 302 | 301 | 302 |
+
+15 and 35 land on a half-micro, where 0.3's binary representation and Python's
+round-half-to-*even* both push the float answer down. That version of the test fails
+against the float, which the type assertion never could.
+
+Rounding is half-up, not `//`: truncation loses up to a micro on every call and
+always downward, which turns noise into a systematic understatement of the thing
+being tracked.
+
+## Security: the error message is built from the status code alone
+
+`str(google.genai.errors.APIError)` interpolates the whole response body, which
+echoes the request on some paths and can name the credential on others.
+`.claude/rules/security.md` says a key never reaches an error message. Building it
+from the status code makes that true by construction rather than by review —
+break-tested by echoing a fake key through and watching the test fail.
+
+## What the suite cannot prove, and the procedure for it
+
+Everything above is tested offline against `httpx.MockTransport` under each SDK's own
+transport, which exercises our parsing of a response shape **we wrote down**. That
+catches every bug on our side of the wire and none on theirs.
+
+`docs/PROVIDER-VERIFICATION.md` is the other side: one manual run per provider, with
+the exact numbers to read. It **prints rather than asserts**, because every check
+there has a failure mode where the call succeeds and the answer is wrong — a cache
+that silently stopped working returns a perfect response, and so does a prefix that
+was never cacheable. `scripts/verify_provider.py` is deliberately not a pytest module;
+CI must never call a model, and a test file is a thing CI collects by default.
+
+One question that looked like it needed a key turned out not to: `messages.create`
+has **no** `temperature` parameter in anthropic 1.7.0. `mypy --strict` reports the
+attempt, so the adapter's omission is checked at build time. The comment that
+previously asserted a conflict was reasoning, not observation; it now states the
+verifiable fact.
+
+250 Python tests. `task verify` green.

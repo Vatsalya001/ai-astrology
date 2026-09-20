@@ -130,8 +130,29 @@ class Usage(BaseModel):
     """
 
     input_tokens: int = Field(default=0, ge=0)
+    """Fresh input tokens: neither read from cache nor written to it.
+
+    Disjoint from the two cache counters below, matching how Anthropic
+    reports them. Summing all three gives the true input size; using this
+    one alone understates a cached request by the whole prefix, which is
+    the great majority of it in this product.
+    """
+
     output_tokens: int = Field(default=0, ge=0)
+
     cached_input_tokens: int = Field(default=0, ge=0)
+    """Read from the cache, at roughly a tenth of the input price."""
+
+    cache_write_input_tokens: int = Field(default=0, ge=0)
+    """Written to the cache, at roughly 1.25x the input price.
+
+    Tracked separately rather than folded into `input_tokens` because it
+    is priced differently and because the ratio between this and
+    `cached_input_tokens` is the cache hit rate — the number that says
+    whether the biggest cost lever in the service is actually engaged.
+    Providers without explicit caching leave it zero.
+    """
+
     cost_micros: int = Field(default=0, ge=0)
 
 
