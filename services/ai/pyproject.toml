@@ -44,6 +44,7 @@ dev = [
     # reason a model swap is a config change — and a rule nothing checks
     # is a comment.
     "import-linter>=2.1",
+    "pytest-cov>=6.0",
 ]
 
 [tool.ruff]
