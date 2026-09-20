@@ -141,6 +141,57 @@ func TestSlotsAreReleasedAfterAFailure(t *testing.T) {
 	}
 }
 
+// TestInFlightIsSafeDuringACompletion is a race test, and only means
+// anything under `-race`.
+//
+// internal/ailogs GetConfig calls InFlight() on the same *AI that is
+// concurrently serving /v1/complete, so an admin loading the config page
+// while a completion is running is the exact interleaving below. It used
+// to be a data race: the slot channel was created lazily inside
+// sync.Once on the Complete path, and InFlight read the field without
+// taking part in that Once — so there was no happens-before edge between
+// the write and the read.
+//
+// The start barrier is what makes the window reliable. The race lives in
+// the FIRST completion, so the readers have to be running at the moment
+// a cold client initialises itself.
+func TestInFlightIsSafeDuringACompletion(t *testing.T) {
+	release := make(chan struct{})
+	ai := aiStub(t, func(w http.ResponseWriter, r *http.Request) {
+		<-release
+		okEnvelope(w, r)
+	})
+
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+
+	for range maxConcurrentCompletions {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			_, _ = ai.Complete(context.Background(), aiclient.CompleteRequest{Message: "x"})
+		}()
+	}
+	for range maxConcurrentCompletions {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			// The gauge the admin page renders. A racy VALUE is fine —
+			// it is a snapshot for a human. A racy FIELD is not.
+			if n := ai.InFlight(); n < 0 || n > maxConcurrentCompletions {
+				t.Errorf("InFlight() = %d, outside 0..%d", n, maxConcurrentCompletions)
+			}
+		}()
+	}
+
+	close(start)
+	time.Sleep(50 * time.Millisecond)
+	close(release)
+	wg.Wait()
+}
+
 // TestAFailedCompletionIsNotReplayed is the most expensive silent bug
 // available in this file.
 //

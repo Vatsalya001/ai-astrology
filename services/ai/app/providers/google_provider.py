@@ -28,6 +28,7 @@ import time
 from collections.abc import AsyncIterator
 from typing import Any
 
+import httpx
 from google import genai
 from google.genai import errors as genai_errors
 from google.genai import types as genai_types
@@ -43,6 +44,7 @@ from app.providers.base import (
     ProviderTier,
     Usage,
 )
+from app.providers.resilience import UnsafeToReplayError, is_retryable_status
 
 # Every reason Google stops for something other than finishing. Grouped
 # by what the caller must DO, which is the only distinction that matters
@@ -76,13 +78,38 @@ def _classify(err: Exception, provider_id: str) -> ProviderError:
         return ProviderError(
             f"{provider_id} returned {code}",
             provider_id=provider_id,
-            retryable=code == 429 or code >= 500,
+            # The shared table, not a local copy: the registry's fallback
+            # loop reads this flag and nothing else, so an adapter with
+            # its own opinion about 529 breaks failover for the whole
+            # chain. See `resilience.is_retryable_status`.
+            retryable=is_retryable_status(code),
             status_code=code or None,
         )
 
     # Connection failures surface as bare httpx/transport errors here —
-    # the SDK does not wrap them. Retryable for the same reason a dead
-    # Ollama is: nothing about the request is wrong.
+    # the SDK does not wrap them.
+    if isinstance(err, httpx.TimeoutException):
+        if isinstance(err, httpx.ConnectTimeout | httpx.PoolTimeout):
+            # No request left this process, so nothing was generated and
+            # nothing was billed. Safe to send again.
+            return ProviderError(
+                f"{provider_id} unreachable: timed out before the request was sent",
+                provider_id=provider_id,
+                retryable=True,
+            )
+        # A read timeout means the bytes went out and only the answer was
+        # lost. The completion may have run to its last token and been
+        # charged in full. Fails closed for any timeout phase we cannot
+        # name, because the expensive mistake is assuming a call that was
+        # billed did not happen.
+        return UnsafeToReplayError(
+            f"{provider_id} timed out after the request was sent",
+            provider_id=provider_id,
+        )
+
+    # Everything else: connection refused, DNS, TLS. Retryable for the
+    # same reason a dead Ollama is — nothing about the request is wrong,
+    # and it never reached anything that could bill for it.
     return ProviderError(
         f"{provider_id} unreachable: {type(err).__name__}",
         provider_id=provider_id,
@@ -306,7 +333,17 @@ class GoogleProvider:
 
         try:
             async for event in stream:
-                usage = self._usage(getattr(event, "usage_metadata", None)) or usage
+                # Guarded on the METADATA, not on the parsed `Usage`.
+                # `self._usage(None)` returns a zero-filled pydantic model
+                # and a pydantic model is always truthy, so the obvious
+                # `self._usage(...) or usage` never falls back — and a
+                # final frame without `usage_metadata`, which Google omits
+                # on some paths, silently wiped the running total to zero
+                # and recorded a paid generation as free.
+                metadata = getattr(event, "usage_metadata", None)
+                if metadata is not None:
+                    usage = self._usage(metadata)
+
                 text = self._text(event)
                 candidates = getattr(event, "candidates", None) or []
                 if candidates and getattr(candidates[0], "finish_reason", None):

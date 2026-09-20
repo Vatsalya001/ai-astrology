@@ -135,7 +135,11 @@ class ProviderRegistry:
                 # as retryable, because the alternative is that a single
                 # unmapped exception type takes down every request
                 # instead of failing over.
-                failures[provider.id] = f"{type(err).__name__}: {err}"
+                # The type, never the exception. This map is rendered
+                # into NoProviderAvailableError, so it is the catch-all
+                # path by which an SDK body — request echo and all —
+                # could reach a log even with every adapter clean.
+                failures[provider.id] = type(err).__name__
 
         raise NoProviderAvailableError(failures)
 

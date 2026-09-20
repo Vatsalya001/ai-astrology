@@ -1,8 +1,0 @@
-model=qwen2.5:7b  backend=http://localhost:11434/v1
-200 messages. Target for the gate: 85% primary-intent accuracy.
-
-─── keyword pre-pass (no model, also asserted in CI) ───
-  coverage   82/200 = 41.0% of messages skip the model
-  precision  100.0%  (0 wrong)
-
-─── model only (pre-pass off) ───

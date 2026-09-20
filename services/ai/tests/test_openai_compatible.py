@@ -11,6 +11,8 @@ which is where the version-skew bugs actually live.
 
 from __future__ import annotations
 
+import json
+
 import httpx
 import pytest
 
@@ -24,8 +26,15 @@ from app.providers import (
     RequestMetadata,
     SystemBlock,
 )
+from app.providers.resilience import UnsafeToReplayError
 
 MODELS = ModelMap(fast="llama3.2:3b", chat="qwen2.5:7b", deep="qwen2.5:7b")
+
+# A key-shaped string for the fixtures that must not reach an error
+# message. `str(openai.APIStatusError)` is "Error code: 401 - {body}" —
+# the whole response body — and an auth failure is exactly where a
+# provider echoes the credential it rejected.
+LEAKED = "sk-ant-api03-" + "Z" * 24
 
 
 def build(handler: httpx.MockTransport, **kwargs: object) -> OpenAICompatibleProvider:
@@ -75,6 +84,69 @@ def responding(status: int, body: dict | None = None) -> httpx.MockTransport:
     )
 
 
+def raising(error: Exception) -> httpx.MockTransport:
+    def handler(_req: httpx.Request) -> httpx.Response:
+        raise error
+
+    return httpx.MockTransport(handler)
+
+
+def chunk(**overrides: object) -> dict:
+    body: dict = {
+        "id": "1",
+        "object": "chat.completion.chunk",
+        "created": 1,
+        "model": "qwen2.5:7b",
+        "choices": [],
+    }
+    body.update(overrides)
+    return body
+
+
+def sse(events: list[dict], *, capture: dict | None = None) -> httpx.MockTransport:
+    text = "".join(f"data: {json.dumps(e)}\n\n" for e in events) + "data: [DONE]\n\n"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if capture is not None:
+            capture.update(json.loads(request.content))
+        return httpx.Response(200, text=text, headers={"content-type": "text/event-stream"})
+
+    return httpx.MockTransport(handler)
+
+
+def words(*pieces: str, billed: tuple[int, int] | None = None) -> list[dict]:
+    """Content frames, a finish frame, and optionally the usage frame.
+
+    `billed=None` models a backend that ignored `stream_options` — some
+    Ollama and LM Studio builds do — which is the case the adapter has to
+    turn into zeros rather than into nothing.
+
+    The usage frame carries an EMPTY `choices` list, and that is the
+    whole difficulty: an adapter that skips chunks without choices skips
+    the only billing record a streamed call ever produces.
+    """
+    frames = [
+        chunk(choices=[{"index": 0, "delta": {"content": p}, "finish_reason": None}])
+        for p in pieces
+    ]
+    frames.append(chunk(choices=[{"index": 0, "delta": {}, "finish_reason": "stop"}]))
+
+    if billed is not None:
+        prompt, completion = billed
+        frames.append(
+            chunk(
+                choices=[],
+                usage={
+                    "prompt_tokens": prompt,
+                    "completion_tokens": completion,
+                    "total_tokens": prompt + completion,
+                },
+            )
+        )
+
+    return frames
+
+
 # ─── error classification ────────────────────────────────────────────
 
 
@@ -88,7 +160,18 @@ class TestRetryClassification:
     chain.
     """
 
-    @pytest.mark.parametrize("status", [408, 429, 500, 502, 503, 504])
+    @pytest.mark.parametrize(
+        "status",
+        # 501, 520, 522, 524 and 529 are the additions, and they are the
+        # ones that were wrong. This adapter enumerated 5xx code by code
+        # — {500, 502, 503, 504} — so a 529 from an overloaded Anthropic
+        # behind a proxy, or a 520/522/524 from the Cloudflare edge in
+        # front of an OpenRouter-style gateway, was marked PERMANENT
+        # while Anthropic and Google called the identical code transient.
+        # The chain then refused to fail over for an outage that had a
+        # healthy provider one position away.
+        [408, 409, 425, 429, 500, 501, 502, 503, 504, 520, 522, 524, 529],
+    )
     async def test_transient_statuses_are_retryable(self, status: int) -> None:
         provider = build(responding(status))
 
@@ -140,6 +223,106 @@ class TestRetryClassification:
             await provider.complete(a_request())
 
         assert caught.value.status_code == 429
+
+    @pytest.mark.parametrize("status", [400, 401, 403, 500])
+    async def test_the_response_body_never_reaches_the_error_message(self, status: int) -> None:
+        """`.claude/rules/security.md`: a key never reaches an error message.
+
+        This SDK builds `str(APIStatusError)` as "Error code: 401 - "
+        followed by the ENTIRE decoded body, and this adapter used to
+        interpolate that straight into its own message. On an auth
+        failure the body is where a gateway echoes the credential it
+        rejected; on a 400 it echoes the request, which for this product
+        is a user's birth details. Both end up in the registry's failure
+        map and from there in a log line.
+        """
+        provider = build(responding(status, {"error": {"message": f"bad key {LEAKED}"}}))
+
+        with pytest.raises(ProviderError) as caught:
+            await provider.complete(a_request())
+
+        assert LEAKED not in str(caught.value)
+        assert "sk-ant-" not in str(caught.value)
+
+    async def test_the_status_is_still_named_in_the_message(self) -> None:
+        # The negative case for the redaction above: a message stripped
+        # down to nothing is unusable for debugging, and the temptation
+        # would be to put the body back.
+        provider = build(responding(503))
+
+        with pytest.raises(ProviderError) as caught:
+            await provider.complete(a_request())
+
+        assert "503" in str(caught.value)
+        assert "ollama" in str(caught.value)
+
+
+class TestTimeoutsAreNotAllTheSame:
+    """A timeout is a claim about WHERE the request got to.
+
+    `internal/platform/clients/ai_complete.go`: "replaying a completion
+    spends money again and may produce a different answer". A read
+    timeout may be a completion that ran to its last token and was
+    billed in full, with only the response lost — so it must not be sent
+    again. A connect timeout never left the process and costs nothing to
+    repeat. Collapsing the two makes every lost response a double bill.
+    """
+
+    @pytest.mark.parametrize(
+        "error",
+        [httpx.ConnectTimeout("connect"), httpx.PoolTimeout("pool")],
+        ids=["connect", "pool"],
+    )
+    async def test_a_timeout_before_the_request_was_sent_is_replayable(
+        self, error: Exception
+    ) -> None:
+        provider = build(raising(error))
+
+        with pytest.raises(ProviderError) as caught:
+            await provider.complete(a_request())
+
+        assert not isinstance(caught.value, UnsafeToReplayError), (
+            "a connect or pool timeout never reached the provider, so nothing was "
+            "generated and nothing was billed — refusing to retry it turns every "
+            "cold Ollama into a user-visible failure"
+        )
+        assert caught.value.retryable is True
+
+    @pytest.mark.parametrize(
+        "error",
+        [httpx.ReadTimeout("read"), httpx.WriteTimeout("write"), httpx.TimeoutException("?")],
+        ids=["read", "write", "unknown"],
+    )
+    async def test_a_timeout_after_the_request_was_sent_is_not_replayable(
+        self, error: Exception
+    ) -> None:
+        """Including the phase we cannot name — this fails closed.
+
+        The expensive mistake is assuming a call that was billed did not
+        happen, so anything that is not provably pre-send is treated as
+        post-send.
+        """
+        provider = build(raising(error))
+
+        with pytest.raises(UnsafeToReplayError) as caught:
+            await provider.complete(a_request())
+
+        # Still retryable: that flag is the REGISTRY's, and means "try a
+        # different provider", which is one more bill rather than the
+        # same one twice. Only the in-place retry is forbidden.
+        assert caught.value.retryable is True
+
+    async def test_a_refused_connection_is_still_replayable(self) -> None:
+        # The everyday case, and the negative case for the two above: if
+        # `UnsafeToReplayError` swallowed ordinary connection failures,
+        # a laptop with Ollama switched off would stop retrying anything.
+        provider = build(raising(httpx.ConnectError("refused")))
+
+        with pytest.raises(ProviderError) as caught:
+            await provider.complete(a_request())
+
+        assert not isinstance(caught.value, UnsafeToReplayError)
+        assert caught.value.retryable is True
 
 
 # ─── translation ─────────────────────────────────────────────────────
@@ -292,6 +475,131 @@ class TestRequestAssembly:
             await provider.complete(a_request(json_schema={"type": "object"}))
 
         assert caught.value.retryable is False
+
+
+# ─── streaming, and the cost it used to throw away ───────────────────
+
+
+class TestStreamingUsage:
+    """The only adapter that streamed for free.
+
+    This wire format reports no usage on a stream unless the caller opts
+    in, and the adapter did not — so every streamed response landed in
+    `ai_request_logs` with nothing at all. Not zero: NOTHING, which is
+    indistinguishable from a cheap call in a cost dashboard and so
+    invisible until the invoice.
+    """
+
+    async def test_the_usage_opt_in_is_sent(self) -> None:
+        """`stream_options` is the whole fix on the request side.
+
+        Without it the backend sends no usage frame and there is nothing
+        to parse, however careful the parsing is.
+        """
+        seen: dict = {}
+        provider = build(sse(words("a ", "b", billed=(11, 7)), capture=seen))
+
+        [c async for c in provider.stream(a_request())]
+
+        assert seen["stream_options"] == {"include_usage": True}
+
+    async def test_the_opt_in_is_absent_from_a_non_streamed_call(self) -> None:
+        """The negative case, and it is a 400 if we get it wrong.
+
+        The OpenAI API rejects `stream_options` on a request that is not
+        a stream, so putting it in the shared `_kwargs` would break every
+        `complete()` call on a strict backend.
+        """
+        seen: dict[str, object] = {}
+
+        def capture(request: httpx.Request) -> httpx.Response:
+            seen.update(json.loads(request.content))
+            return httpx.Response(200, json=completion())
+
+        await build(httpx.MockTransport(capture)).complete(a_request())
+
+        assert "stream_options" not in seen
+
+    async def test_usage_arrives_on_the_final_chunk(self) -> None:
+        """Read off the frame with an EMPTY `choices` list.
+
+        That frame is why the bug survived review: the loop opened with
+        `if not event.choices: continue`, which reads as defensive and
+        skips precisely the one chunk carrying the bill.
+        """
+        provider = build(sse(words("Saturn ", "waits.", billed=(41, 9))))
+
+        chunks = [c async for c in provider.stream(a_request())]
+
+        assert "".join(c.text for c in chunks) == "Saturn waits."
+        assert [i for i, c in enumerate(chunks) if c.usage is not None] == [len(chunks) - 1]
+        assert chunks[-1].usage is not None
+        assert chunks[-1].usage.input_tokens == 41
+        assert chunks[-1].usage.output_tokens == 9
+
+    async def test_a_backend_that_ignores_the_opt_in_still_reports_zeros(self) -> None:
+        """Zeros, not `None`. Some Ollama and LM Studio builds drop it.
+
+        A consumer reading cost off the last chunk then gets an integer
+        it can sum on every provider. A `None` that only this adapter
+        produces is a branch every caller has to remember, and the one
+        that forgets crashes on a laptop and not in CI.
+        """
+        provider = build(sse(words("Saturn ", "waits.")))
+
+        chunks = [c async for c in provider.stream(a_request())]
+
+        assert chunks[-1].usage is not None, "the shape must not depend on the backend"
+        assert chunks[-1].usage.input_tokens == 0
+        assert chunks[-1].usage.output_tokens == 0
+        assert chunks[-1].usage.cost_micros == 0
+
+    async def test_the_finish_reason_lands_with_the_usage(self) -> None:
+        # Both on the last chunk, as on every other adapter, so a
+        # consumer can close its UI state and record the cost in one
+        # place rather than two that differ per provider.
+        provider = build(sse(words("Saturn ", "waits.", billed=(11, 7))))
+
+        chunks = [c async for c in provider.stream(a_request())]
+
+        assert [i for i, c in enumerate(chunks) if c.finish_reason] == [len(chunks) - 1]
+        assert chunks[-1].finish_reason == "stop"
+
+    async def test_a_refusal_survives_to_the_final_chunk(self) -> None:
+        # `content_filter` is a product outcome with a written response.
+        # Losing it in the stream would show the user an empty bubble.
+        provider = build(
+            sse(
+                [
+                    chunk(choices=[{"index": 0, "delta": {"content": "no"}}]),
+                    chunk(choices=[{"index": 0, "delta": {}, "finish_reason": "content_filter"}]),
+                    chunk(
+                        choices=[],
+                        usage={"prompt_tokens": 11, "completion_tokens": 7, "total_tokens": 18},
+                    ),
+                ]
+            )
+        )
+
+        chunks = [c async for c in provider.stream(a_request())]
+
+        assert chunks[-1].finish_reason == "refusal"
+
+    async def test_a_mid_stream_failure_is_classified_like_any_other(self) -> None:
+        """A stream can die after its first chunk.
+
+        The caller sees one exception type whether the failure happened
+        at connect time or halfway through, or it needs two handlers for
+        one condition.
+        """
+
+        def handler(_req: httpx.Request) -> httpx.Response:
+            raise httpx.ReadTimeout("died mid-stream")
+
+        provider = build(httpx.MockTransport(handler))
+
+        with pytest.raises(ProviderError):
+            [c async for c in provider.stream(a_request())]
 
 
 async def test_health_check_returns_false_rather_than_raising() -> None:

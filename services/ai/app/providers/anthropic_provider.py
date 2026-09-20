@@ -81,8 +81,16 @@ def _classify(err: Exception, provider_id: str) -> ProviderError:
     request marked retryable is sent to every provider in the chain.
     """
     if isinstance(err, anthropic.APIConnectionError | anthropic.APITimeoutError):
+        # The exception TYPE, not the exception. A connection error's
+        # `str()` can carry the request URL and, on some transports, the
+        # headers that went with it — which is where the key lives. The
+        # status branch below already built its message from the code
+        # alone; these two did not, and the parity leak test only drove
+        # the status branch, so they were unguarded.
         return ProviderError(
-            f"{provider_id} unreachable: {err}", provider_id=provider_id, retryable=True
+            f"{provider_id} unreachable: {type(err).__name__}",
+            provider_id=provider_id,
+            retryable=True,
         )
 
     if isinstance(err, anthropic.APIStatusError):
@@ -99,7 +107,9 @@ def _classify(err: Exception, provider_id: str) -> ProviderError:
             status_code=status,
         )
 
-    return ProviderError(f"{provider_id} failed: {err}", provider_id=provider_id, retryable=True)
+    return ProviderError(
+        f"{provider_id} failed: {type(err).__name__}", provider_id=provider_id, retryable=True
+    )
 
 
 def _finish_reason(stop_reason: str | None) -> FinishReason:

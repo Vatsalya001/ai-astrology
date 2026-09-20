@@ -72,6 +72,59 @@ _CRISIS_PHRASES = (
     r"overdose",
     r"jump off",
     r"hang myself",
+    # The same intent in the phrasings the block above misses. Each was
+    # probed against CRISIS_PATTERN before being added here: "take my
+    # own life" does not match "I want to take my life", and "end it
+    # all" does not match "I've decided to end it". A list that reads as
+    # though it covers direct statements of intent, and does not, is
+    # worse than a short one — it is the false confidence that stops
+    # anyone widening it.
+    #
+    # The lookaheads are not hedging. Each names the innocent
+    # continuation the bare phrase would otherwise swallow, and they are
+    # the likeliest sentences in this product's corpus rather than
+    # hypotheticals: people ask an astrologer about life direction and
+    # about breakups more than about anything else.
+    #
+    # Every exclusion ends in `\b`, and that anchor is load-bearing in
+    # the direction that costs a life. Without it the alternation
+    # matches a PREFIX, so `to` swallows "take my life tonight" and
+    # "today", `in` swallows "instead", and `with` swallows "end it
+    # without anyone knowing" — three of the most direct statements this
+    # list exists to catch, silently dropped by an exclusion written for
+    # "take my life in a new direction". `lessons?` for the same reason
+    # in reverse: anchoring `lesson` would stop excluding the plural.
+    r"take my life(?!\s+(?:in|back|to|savings|lessons?)\b)",
+    # "end THINGS with X" is how a breakup is described; "end IT with X"
+    # is how a method is. The exclusion therefore applies to `things`
+    # only. Before this split, `(?!\s+with\b)` suppressed all of
+    #
+    #     "I've decided to end it with pills"
+    #     "I want to end it with a rope"
+    #
+    # — method statements, which are the highest-risk category in the
+    # whole list. The cost of the split is that "I want to end it with
+    # him" now flags. That is the correct error: §7 asks for a list
+    # "biased heavily toward false positives", and an exclusion is the
+    # only kind of edit to this file that can move the bias the WRONG
+    # way. One annoyed user against one missed method statement is not a
+    # close call.
+    r"(?:(?:decided|going|about|want|need) to|wanna) end things\b(?!\s+with\b)",
+    r"(?:(?:decided|going|about|want|need) to|wanna) end it\b",
+    # Same lesson. `(?!\s+(?:in|at|with|for)\b)` was meant to spare "I
+    # don't want to be here in Delhi anymore" and instead swallowed
+    #
+    #     "...here at all anymore"     "...here for another day"
+    #     "...here in this world anymore"
+    #
+    # Narrowed to a short list of words that name a PLACE, so only the
+    # literal relocation complaint is spared. "in this world" is not on
+    # it, and will not be.
+    r"(?:don'?t|do not) want to be here(?!\s+(?:in|at)\s+(?:this\s+|the\s+|my\s+)?"
+    r"(?:city|town|country|office|house|home|job|place|company|room|building|"
+    r"school|college|flat|apartment|hostel|department|team)\b)",
+    r"(?:want|wanted|need) (?:it all|everything|all of it) to (?:stop|end)",
+    r"better off (?:if i (?:was|were) )?gone",
     # Hinglish and Hindi transliteration. Omitting these would make the
     # guard work for the subset of this audience that writes in English
     # and silently fail for the rest — which is not a partial guard, it
@@ -85,6 +138,22 @@ _CRISIS_PHRASES = (
     r"aatmahatya",
     r"apni jaan",
     r"zindagi khatam",
+    # The Hinglish halves of the five English phrases added above. A
+    # widening that lands in English only moves the hole rather than
+    # closing it: the user who writes "mujhe nahi jeena" would be the
+    # one left behind by a list that just learned "I don't want to be
+    # here".
+    #
+    # "jaan de d…" covers dunga / dungi / di — the tense varies, the
+    # meaning does not. "kar d…" likewise: sab khatam kar dunga / kar
+    # dena hai. The "ho jaye" form is kept separate from "ho gaya",
+    # which is the ordinary past tense of something running out.
+    r"jaan de d",
+    r"jaan dena hai",
+    r"nahin? jeena",
+    r"sab (?:kuch )?khatam kar d",
+    r"sab kuch khatam ho jaye",
+    r"mere bina (?:sab|sabhi)",
 )
 
 CRISIS_PATTERN = re.compile("|".join(f"(?:{phrase})" for phrase in _CRISIS_PHRASES), re.IGNORECASE)

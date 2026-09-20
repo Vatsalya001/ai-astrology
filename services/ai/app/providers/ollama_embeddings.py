@@ -76,7 +76,10 @@ class OllamaEmbeddingProvider:
             )
         except httpx.HTTPError as err:
             raise ProviderError(
-                f"{self._id} unreachable: {err}", provider_id=self._id, retryable=True
+                # Type only — see the note in anthropic_provider._classify.
+                f"{self._id} unreachable: {type(err).__name__}",
+                provider_id=self._id,
+                retryable=True,
             ) from err
 
         if response.status_code >= 400:

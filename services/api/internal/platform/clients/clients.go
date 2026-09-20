@@ -17,7 +17,6 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/Vatsalya001/ai-astrology/services/api/internal/platform/clients/aiclient"
@@ -30,17 +29,37 @@ const (
 	headerTraceID       = "X-Trace-Id"
 )
 
-// headerInjector adds the internal token and propagates the trace ID on
-// every outbound request.
+// headerInjector adds the internal token, propagates the trace ID, and
+// records the caller's context on every outbound request.
 //
 // Trace propagation is what makes one user request correlatable across
 // all three services; without it, a failure in Python cannot be tied to
 // the Go request that caused it.
+//
+// The caller-context marker is here for the same reason the headers
+// are: this is the one place every generated client method passes
+// through. Applied per call site it would be forgotten on exactly the
+// method that needed it, and the symptom — a breaker that opens against
+// a healthy service — would be blamed on the service. It is the last
+// point at which the context is still the caller's: http.Client.Timeout
+// replaces it a few frames later. See classify() in breaker.go.
+//
+// Only if absent: a caller that has already marked its own boundary
+// (AI.Complete, which layers a 90s budget on top) knows better than
+// this function does, and overwriting it would relabel our own budget
+// as the caller's patience.
 func headerInjector(token string) func(context.Context, *http.Request) error {
 	return func(ctx context.Context, req *http.Request) error {
 		req.Header.Set(headerInternalToken, token)
 		if id := logging.TraceIDFrom(ctx); id != "" {
 			req.Header.Set(headerTraceID, id)
+		}
+
+		if !hasCallerContext(req.Context()) {
+			// In place because RequestEditorFn hands us the request by
+			// pointer and http.Client.Do reads the context from it; a
+			// returned copy would be dropped on the floor.
+			*req = *req.WithContext(withCallerContext(req.Context()))
 		}
 		return nil
 	}
@@ -121,11 +140,20 @@ type AI struct {
 	// a counting semaphore, because the resource being protected is
 	// concurrent SPEND rather than request rate.
 	//
-	// Lazily created so a zero-value AI (and every existing test that
-	// builds one) still works; `slotsOnce` is what makes that safe
-	// under concurrent first calls.
-	slots     chan struct{}
-	slotsOnce sync.Once
+	// Written ONCE, in newAI, and never again. It used to be created
+	// lazily inside a sync.Once on the Complete path, which was a data
+	// race: InFlight — called by the admin config endpoint, from a
+	// different request goroutine — read the field without taking part
+	// in that Once, so there was no happens-before edge between the
+	// write and the read.
+	//
+	// "It is only a gauge, a stale read is harmless" is not a defence.
+	// A race with no ordering edge is undefined behaviour, not a wrong
+	// number: the reader may see the pointer before the channel it
+	// points at is initialised, and `go test -race` fails the build
+	// either way — which is what the constitution means by running
+	// every Go test under -race.
+	slots chan struct{}
 
 	// Per-call budget for Complete. A field rather than the bare
 	// constant so a test can shrink it — and so it is visibly the same
@@ -166,7 +194,13 @@ func newAI(baseURL, token string, timeout, completion time.Duration) (*AI, error
 	if err != nil {
 		return nil, fmt.Errorf("build ai client: %w", err)
 	}
-	return &AI{api: api, completionTimeout: completion}, nil
+	return &AI{
+		api: api,
+		// Eager, so the field is only ever written here — before the
+		// pointer is published to any other goroutine. See the field.
+		slots:             make(chan struct{}, maxConcurrentCompletions),
+		completionTimeout: completion,
+	}, nil
 }
 
 // Health probes ai-service and reports which model backend it is wired

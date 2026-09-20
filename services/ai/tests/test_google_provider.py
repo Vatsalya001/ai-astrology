@@ -24,6 +24,7 @@ from app.providers import (
     RequestMetadata,
     SystemBlock,
 )
+from app.providers.resilience import UnsafeToReplayError
 
 MODELS = ModelMap(fast="gemini-2.0-flash", chat="gemini-2.5-flash", deep="gemini-2.5-pro")
 
@@ -315,12 +316,67 @@ class TestStreaming:
 
         assert chunks[-1].finish_reason == "refusal"
 
+    async def test_a_final_frame_without_usage_does_not_wipe_the_total(self) -> None:
+        """The `or usage` fallback that never ran.
+
+        The loop read `usage = self._usage(...) or usage`, and
+        `self._usage(None)` returns a zero-filled pydantic model — which
+        is TRUTHY, like every pydantic model. So the fallback was dead
+        code: a last frame with no `usageMetadata`, which Google omits on
+        some paths, overwrote a real count with zeros and recorded a paid
+        generation as free.
+
+        The bug is invisible in the common case because Google usually
+        repeats the totals on every frame. It only bites on the shape
+        this fixture builds — which is why it needs a test rather than a
+        reading.
+        """
+        billed = {"promptTokenCount": 900, "candidatesTokenCount": 120}
+        final_without_usage: dict[str, Any] = {
+            "candidates": [{"content": {"role": "model", "parts": [{"text": "s."}]}}],
+            "modelVersion": "gemini-2.5-flash",
+        }
+        first = response(text="Mar", finish=None, usage=billed)
+        provider = build(sse([first, final_without_usage]))
+
+        chunks = [chunk async for chunk in provider.stream(a_request())]
+
+        assert "".join(c.text for c in chunks) == "Mars."
+        final = chunks[-1]
+        assert final.usage is not None
+        assert final.usage.input_tokens == 900, "a real token count was overwritten with zeros"
+        assert final.usage.output_tokens == 120
+
+    async def test_a_stream_that_never_reports_usage_still_ends_in_zeros(self) -> None:
+        # The negative case for the fix above: keeping the last non-empty
+        # count must not turn "nothing was ever reported" into a crash or
+        # a `None`. Zeros are summable; `None` is a branch every caller
+        # has to remember.
+        frame: dict[str, Any] = {
+            "candidates": [{"content": {"role": "model", "parts": [{"text": "x"}]}}],
+            "modelVersion": "gemini-2.5-flash",
+        }
+        provider = build(sse([frame]))
+
+        chunks = [chunk async for chunk in provider.stream(a_request())]
+
+        assert chunks[-1].usage is not None
+        assert chunks[-1].usage.input_tokens == 0
+        assert chunks[-1].usage.output_tokens == 0
+
 
 # ─── error classification ────────────────────────────────────────────
 
 
 class TestRetryClassification:
-    @pytest.mark.parametrize("status", [429, 500, 503])
+    @pytest.mark.parametrize(
+        "status",
+        # The 5xx range is asserted as a RANGE, not as the three codes
+        # everyone remembers. 529 and the Cloudflare 520/522/524 are the
+        # ones an enumeration drops, and a provider chain that disagrees
+        # about them fails over on some adapters and not others.
+        [408, 409, 425, 429, 500, 501, 502, 503, 504, 520, 522, 524, 529],
+    )
     async def test_transient_statuses_are_retryable(self, status: int) -> None:
         provider = build(serving({"error": {"code": status, "message": "x"}}, status=status))
 
@@ -366,6 +422,60 @@ class TestRetryClassification:
         provider = build(httpx.MockTransport(refuse))
 
         with pytest.raises(ProviderError) as caught:
+            await provider.complete(a_request())
+
+        assert caught.value.retryable is True
+        assert not isinstance(caught.value, UnsafeToReplayError)
+
+
+def raising(error: Exception) -> httpx.MockTransport:
+    def handler(_req: httpx.Request) -> httpx.Response:
+        raise error
+
+    return httpx.MockTransport(handler)
+
+
+class TestTimeoutsAreNotAllTheSame:
+    """Where the request got to decides whether it may be sent again.
+
+    The SDK does not wrap transport errors, so these arrive as bare
+    `httpx` exceptions — and `httpx` names the phase in the type, which
+    is the only place that information exists.
+    """
+
+    @pytest.mark.parametrize(
+        "error",
+        [httpx.ConnectTimeout("connect"), httpx.PoolTimeout("pool")],
+        ids=["connect", "pool"],
+    )
+    async def test_a_timeout_before_the_request_was_sent_is_replayable(
+        self, error: Exception
+    ) -> None:
+        provider = build(raising(error))
+
+        with pytest.raises(ProviderError) as caught:
+            await provider.complete(a_request())
+
+        assert not isinstance(caught.value, UnsafeToReplayError)
+        assert caught.value.retryable is True
+
+    @pytest.mark.parametrize(
+        "error",
+        [httpx.ReadTimeout("read"), httpx.WriteTimeout("write"), httpx.TimeoutException("?")],
+        ids=["read", "write", "unknown"],
+    )
+    async def test_a_timeout_after_the_request_was_sent_is_not_replayable(
+        self, error: Exception
+    ) -> None:
+        """The generation may have completed and been billed in full.
+
+        Gemini's free tier makes this look cheap; the same adapter is
+        registered against a paid key in other configurations, and the
+        rule cannot depend on which one is in the env file.
+        """
+        provider = build(raising(error))
+
+        with pytest.raises(UnsafeToReplayError) as caught:
             await provider.complete(a_request())
 
         assert caught.value.retryable is True

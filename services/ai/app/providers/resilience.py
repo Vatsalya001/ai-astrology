@@ -38,11 +38,95 @@ from app.providers.base import (
     ProviderTier,
 )
 
+# ─── the one retry table ─────────────────────────────────────────────
+#
+# Every adapter classifies a status code, and the registry's fallback
+# loop reads the resulting `retryable` and NOTHING else. Three adapters
+# keeping three private tables is therefore three chances to disagree
+# about the same outage — and they did: the OpenAI adapter listed 5xx
+# code by code and so marked a 529 (Anthropic "overloaded") and a
+# Cloudflare 520/522/524 from an OpenRouter-style proxy permanent, which
+# stops the chain walking to a provider that was up the whole time.
+#
+# It lives beside the retry policy rather than in `base.py` because it IS
+# the policy: `base.py` defines what a failure looks like, this decides
+# what to do about one.
+
+_RETRYABLE_CLIENT_STATUS = frozenset(
+    {
+        # The server gave up waiting for the request, not the other way
+        # round. Nothing about the request is wrong.
+        408,
+        # Transient resource conflict. These APIs use it for state that
+        # settles on its own.
+        409,
+        # "Too Early" — replay protection on an early-data request. The
+        # server is asking for the same request later, literally.
+        425,
+        # Rate limited. The canonical retryable failure.
+        429,
+    }
+)
+
+
+def is_retryable_status(status: int) -> bool:
+    """Should the chain try again, here or at the next provider?
+
+    Every 5xx, plus the four client codes above. The 5xx clause is a
+    RANGE rather than an enumeration on purpose: the enumeration is what
+    broke, because the interesting codes are the ones nobody thinks of —
+    529 from an overloaded Anthropic, 520/522/524 from a Cloudflare edge
+    in front of a proxy. A range cannot omit next year's.
+
+    501 "Not Implemented" sits inside that range and is deliberately left
+    there, even though it is semantically permanent. `retryable` does not
+    mean "send the same bytes to the same box again"; it means "let the
+    chain try someone else", and a backend that has not implemented an
+    endpoint or a parameter is precisely the case where the NEXT provider
+    has. Excluding it would dead-end the request at the one provider that
+    structurally cannot serve it. The price of including it is bounded at
+    `max_attempts` wasted calls; the price of excluding it is an outage
+    with a working fallback sitting idle.
+    """
+    return status >= 500 or status in _RETRYABLE_CLIENT_STATUS
+
 
 class BreakerState(StrEnum):
     CLOSED = "closed"
     OPEN = "open"
     HALF_OPEN = "half_open"
+
+
+class UnsafeToReplayError(ProviderError):
+    """The request reached the provider; only the answer was lost.
+
+    A read timeout is not a failed call — it is a call with an UNKNOWN
+    outcome. The completion may have run to its last token and been
+    billed in full, with the response dropped on the way back. Sending it
+    again buys a second bill for an answer already paid for, and
+    `internal/platform/clients/ai_complete.go` refuses to replay a
+    completion for exactly this reason ("replaying a completion spends
+    money again and may produce a different answer").
+
+    Still `retryable=True`, and the distinction matters: that flag
+    belongs to the REGISTRY and means "let the chain try someone else",
+    which is a different provider and a different, single bill. What this
+    type forbids is the narrower thing — `ResilientProvider` sending an
+    identical request straight back to the provider that may have just
+    taken our money.
+
+    A connect or pool timeout is NOT this: no request left the process,
+    so nothing could have been billed. Adapters raise a plain
+    `ProviderError` there and it is retried normally.
+    """
+
+    def __init__(self, message: str, *, provider_id: str, status_code: int | None = None) -> None:
+        super().__init__(
+            message,
+            provider_id=provider_id,
+            retryable=True,
+            status_code=status_code,
+        )
 
 
 class CircuitOpenError(ProviderError):
@@ -156,6 +240,16 @@ class ResilientProvider:
         for attempt in range(self._max_attempts):
             try:
                 response = await self._inner.complete(req)
+            except UnsafeToReplayError:
+                # Counted toward the breaker — a provider that stopped
+                # answering is unhealthy whether or not we may call it
+                # again — but never re-sent from here. The request may
+                # already have been generated and billed in full; see the
+                # class docstring. The registry may still fail over to a
+                # DIFFERENT provider, which is one more bill rather than
+                # the same one twice.
+                self._record_failure()
+                raise
             except ProviderError as err:
                 if not err.retryable:
                     # A permanent failure says nothing about the

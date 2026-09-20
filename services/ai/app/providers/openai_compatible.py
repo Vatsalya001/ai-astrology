@@ -18,6 +18,7 @@ import time
 from collections.abc import AsyncIterator
 from typing import Any
 
+import httpx
 import openai
 from openai import AsyncOpenAI
 
@@ -32,6 +33,7 @@ from app.providers.base import (
     ProviderTier,
     Usage,
 )
+from app.providers.resilience import UnsafeToReplayError, is_retryable_status
 
 # ─── error classification ────────────────────────────────────────────
 #
@@ -40,36 +42,80 @@ from app.providers.base import (
 # is expensive in both directions: a retryable error marked permanent
 # turns a blip into an outage, and a permanent error marked retryable
 # sends the same malformed request to every provider in the chain.
+#
+# The table itself lives in `resilience.py` so all the adapters share one
+# — this file used to keep a private 5xx enumeration that omitted 501,
+# 520, 522, 524 and 529, and marked every one of them permanent while
+# Anthropic and Google called the same code retryable.
 
-_RETRYABLE_STATUS = frozenset({408, 409, 425, 429, 500, 502, 503, 504})
+
+def _timeout_reached_the_provider(err: Exception) -> bool:
+    """Did the request get far enough that it may have been billed?
+
+    `httpx` names the phase in the exception type and the OpenAI SDK
+    keeps the original on `__cause__`. A connect or pool timeout means no
+    request ever left this process, so nothing could have been generated
+    or charged. Anything else — a read timeout above all — means the
+    bytes went out and only the answer was lost.
+
+    Unknown causes fail CLOSED, i.e. "it may have been billed". The
+    expensive mistake here is assuming a call did not happen.
+    """
+    return not isinstance(err.__cause__, httpx.ConnectTimeout | httpx.PoolTimeout)
 
 
 def _classify(err: openai.APIError, provider_id: str) -> ProviderError:
     status = getattr(err, "status_code", None)
 
-    if isinstance(err, openai.APIConnectionError | openai.APITimeoutError):
-        # The backend is not answering. Nothing about the request is
-        # wrong, so another provider is very likely to succeed — this is
-        # precisely the case fallback exists for. Ollama not running on a
-        # developer's laptop arrives here.
+    # Before the broader APIConnectionError branch: APITimeoutError is a
+    # SUBCLASS of it, so testing the parent first would swallow every
+    # timeout and retry the billable ones.
+    if isinstance(err, openai.APITimeoutError):
+        if _timeout_reached_the_provider(err):
+            return UnsafeToReplayError(
+                f"{provider_id} timed out after the request was sent",
+                provider_id=provider_id,
+            )
         return ProviderError(
-            f"{provider_id} unreachable: {err}",
+            f"{provider_id} unreachable: timed out before the request was sent",
+            provider_id=provider_id,
+            retryable=True,
+        )
+
+    if isinstance(err, openai.APIConnectionError):
+        # The backend is not answering and never accepted the request.
+        # Nothing about it is wrong, so another provider is very likely
+        # to succeed — precisely the case fallback exists for. Ollama not
+        # running on a developer's laptop arrives here.
+        return ProviderError(
+            f"{provider_id} unreachable: {type(err).__name__}",
             provider_id=provider_id,
             retryable=True,
         )
 
     if isinstance(status, int):
+        # `{err}` is deliberately NOT interpolated. `str(APIStatusError)`
+        # is built as "Error code: 401 - {body}" — the WHOLE response
+        # body, which on an auth failure is where a provider echoes the
+        # key it rejected. `.claude/rules/security.md`: a credential never
+        # reaches an error message. Building from the status code alone
+        # makes that true by construction rather than by review.
         return ProviderError(
-            f"{provider_id} returned {status}: {err}",
+            f"{provider_id} returned {status}",
             provider_id=provider_id,
-            retryable=status in _RETRYABLE_STATUS,
+            retryable=is_retryable_status(status),
             status_code=status,
         )
 
     # Unknown shape. Treated as retryable on the same reasoning the
     # registry uses: an unmapped error should degrade one provider rather
-    # than fail the request outright.
-    return ProviderError(f"{provider_id} failed: {err}", provider_id=provider_id, retryable=True)
+    # than fail the request outright. The type name, not the message —
+    # the message is where a body ends up.
+    return ProviderError(
+        f"{provider_id} failed: {type(err).__name__}",
+        provider_id=provider_id,
+        retryable=True,
+    )
 
 
 def _finish_reason(raw: str | None) -> FinishReason:
@@ -231,29 +277,67 @@ class OpenAICompatibleProvider:
         )
 
     async def stream(self, req: CompletionRequest) -> AsyncIterator[CompletionChunk]:
+        """One final chunk carrying the finish reason and the usage.
+
+        Both of those were missing. This wire format sends no usage on a
+        stream unless asked, so every streamed response was recorded as
+        free — silently, because an absent cost looks exactly like a
+        cheap one in a telemetry row, and this is the only adapter it
+        happened on.
+        """
         try:
-            stream = await self._client.chat.completions.create(**self._kwargs(req), stream=True)
+            stream = await self._client.chat.completions.create(
+                **self._kwargs(req),
+                stream=True,
+                # The opt-in that makes a streamed call billable at all.
+                # Only legal alongside `stream=True` — sending it on a
+                # non-streamed request is a 400 — which is why it is here
+                # rather than in `_kwargs`.
+                stream_options={"include_usage": True},
+            )
         except openai.APIError as err:
             raise _classify(err, self._id) from err
 
+        usage: Usage | None = None
+        finish: FinishReason | None = None
+
         try:
             async for event in stream:
+                # Read BEFORE the `choices` guard below. The usage-bearing
+                # frame arrives with an empty `choices` list, so the
+                # obvious `if not event.choices: continue` skips exactly
+                # the chunk this exists to read.
+                reported = getattr(event, "usage", None)
+                if reported is not None:
+                    usage = self._usage(reported)
+
                 if not event.choices:
                     continue
-                delta = event.choices[0].delta
-                yield CompletionChunk(
-                    text=delta.content or "",
-                    finish_reason=(
-                        _finish_reason(event.choices[0].finish_reason)
-                        if event.choices[0].finish_reason
-                        else None
-                    ),
-                )
+
+                choice = event.choices[0]
+                if choice.finish_reason:
+                    # Held back rather than forwarded here, so the reason
+                    # and the usage land on the SAME final chunk that
+                    # every other adapter puts them on. A consumer that
+                    # stops reading at the first finish_reason would
+                    # otherwise never see the cost.
+                    finish = _finish_reason(choice.finish_reason)
+
+                text = choice.delta.content or "" if choice.delta else ""
+                if text:
+                    yield CompletionChunk(text=text)
         except openai.APIError as err:
             # A stream can fail after its first chunk. Classified the
             # same way so a caller sees one error type whether the
             # failure happened at connect time or halfway through.
             raise _classify(err, self._id) from err
+
+        # Zeros rather than nothing when the backend ignored
+        # `stream_options` — some Ollama and LM Studio builds do. A
+        # consumer reading cost off the last chunk then gets a number it
+        # can add up on every provider, instead of a `None` that only
+        # this one produces.
+        yield CompletionChunk(text="", finish_reason=finish or "stop", usage=usage or Usage())
 
     async def health_check(self) -> bool:
         """Never raises. A provider that is down is a `False`.

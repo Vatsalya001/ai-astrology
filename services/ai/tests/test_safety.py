@@ -93,6 +93,201 @@ class TestCrisisKeywords:
         """
         assert detect_crisis(message).category is SafetyCategory.NONE
 
+    @pytest.mark.parametrize(
+        "message",
+        [
+            # English. Every line here was probed against the list as
+            # first written and came back NONE: "take my own life" does
+            # not match "take my life", "end it all" does not match "end
+            # it", and "better off dead"/"better off without me" leave
+            # "better off gone" uncovered.
+            "I want to take my life",
+            "I am going to end things",
+            "I've decided to end it",
+            "i wanna end it tonight",
+            "I don't want to be here anymore",
+            "I want it all to stop",
+            "i just want everything to stop",
+            "I'd be better off gone",
+            "everyone would be better off if I was gone",
+            # The Hinglish half of the same six. Widening in English
+            # only would move the hole rather than close it.
+            "main aaj jaan de dunga",
+            "mujhe ab jaan dena hai",
+            "mujhe nahi jeena",
+            "ab nahin jeena hai",
+            "sab khatam kar dunga",
+            "bas ab sab kuch khatam ho jaye",
+            "mere bina sab khush rahenge",
+            # A time, a substitution, and a secret — the three words that
+            # merely BEGIN with an excluded token. An unanchored `to`
+            # inside the lookahead reads "tonight" and "today" as the
+            # innocent "take my life to a new place"; `in` reads
+            # "instead"; `with` reads "without" as "end it with my
+            # boyfriend". Each of these is a direct statement of intent,
+            # and each was silently dropped until the exclusions were
+            # anchored with `\b`.
+            "I'm going to take my life tonight",
+            "I will take my life today",
+            "i will take my life instead",
+            "I want to end it without anyone knowing",
+        ],
+    )
+    def test_a_direct_statement_of_intent_is_caught(self, message: str) -> None:
+        """The gap a "biased toward false positives" list must not have.
+
+        A list that misses direct statements is worse than a short one:
+        it reads as though intent is covered, which is exactly what
+        stops anyone widening it. These are the phrasings the model
+        classifier would have to catch alone — and it is the pass that
+        stops working when a provider is down.
+        """
+        assert detect_crisis(message).category is SafetyCategory.CRISIS
+
+    @pytest.mark.parametrize(
+        "message",
+        [
+            # One innocent neighbour per widened phrase. These are not
+            # hypotheticals — an astrologer is asked about life
+            # direction and about breakups more than about anything
+            # else, so these are among the likeliest sentences in the
+            # corpus, and each is the reason its phrase carries a
+            # lookahead instead of being bare.
+            "I want to take my life in a new direction",
+            "I want to take my life back from this job",
+            "when will i take my life savings out of the bank",
+            "should i end things with my boyfriend",
+            "I don't want to be here in this city",
+            "i don't want to be here at this job",
+            "I want the noise to stop",
+            "ghar ka khana sab khatam ho gaya",
+            "mere bina mat jao",
+            # The other direction of the same `\b` anchor. Anchoring an
+            # exclusion narrows it, so `lesson\b` would stop excluding
+            # the plural and start flagging this — a widening fix that
+            # quietly buys back a false positive is still a regression.
+            "i want to take my life lessons more seriously",
+        ],
+    )
+    def test_the_innocent_neighbour_of_each_new_phrase_stays_quiet(self, message: str) -> None:
+        """Without these, the widening above is unfalsifiable.
+
+        A list containing bare "take my life" and bare "end things"
+        passes every positive case here and flags a relocation question
+        and a breakup question — which tells someone asking about their
+        boyfriend that this product thinks they are in danger.
+        """
+        assert detect_crisis(message).category is SafetyCategory.NONE
+
+    def test_no_phrase_is_word_level(self) -> None:
+        """The property the module docstring promises and nothing checked.
+
+        "Phrase-level, not word-level" is the whole reason this list is
+        usable, but it lived only in a comment: a bare `die` or `\\bkill\\b`
+        could be appended tomorrow and every existing test would stay
+        green until "I'm dying to know" reached a real user.
+
+        Single words are allowed only from a reviewed set that has no
+        innocent reading, and the second assertion stops that set being
+        used as the loophole — allowlisting "die" is not an option.
+        """
+        unambiguous = {"suicide", "suicidal", "overdose", "khudkushi", "aatmahatya"}
+        ambiguous = {"die", "dead", "kill", "life", "live", "end", "gone", "stop", "harm", "jaan"}
+
+        assert unambiguous.isdisjoint(ambiguous), "an ambiguous word cannot be allowlisted"
+
+        for phrase in crisis_module._CRISIS_PHRASES:
+            # `\b`, `\s` and friends are regex syntax, not words — strip
+            # them first or `\bdie\b` counts as three "words" and slips
+            # through the length check below.
+            words = re.findall(r"[a-z]+", re.sub(r"\\.", " ", phrase))
+            if len(words) > 1:
+                continue
+            assert phrase in unambiguous, f"{phrase!r} is word-level; make it a phrase"
+
+    @pytest.mark.parametrize(
+        "message",
+        [
+            "my laptop is dead again",
+            "the meeting ended at six",
+            "he has gone to pune for work",
+            "there is no harm in asking",
+            "I am living in Pune now",
+            "tell me about my life path",
+            "my astrologer said she would recommend it",
+            "meri jaan tum kaise ho",
+            "machhar marne ke liye spray chahiye",
+            "jeena isi ka naam hai",
+        ],
+    )
+    def test_the_ambiguous_words_stay_harmless_in_ordinary_sentences(self, message: str) -> None:
+        """The behavioural half of the test above.
+
+        Structure alone cannot prove much: `die(?!\\s+of)` is two tokens
+        and still word-level. Each sentence here carries a stem the list
+        is built from — die/dead, kill, life, live, end, gone, harm,
+        jaan, marna, jeena — in its ordinary meaning. "recommend it"
+        contains "end it", which is why "end it" is never bare.
+        """
+        assert detect_crisis(message).category is SafetyCategory.NONE
+
+    @pytest.mark.parametrize(
+        "message",
+        [
+            # Method statements. The highest-risk category there is, and
+            # every one of these was MISSED while `(?!\s+with\b)`
+            # applied to "end it" as well as "end things".
+            "I've decided to end it with pills",
+            "I want to end it with a rope",
+            "I'm going to end it with my father's gun",
+            "I want to end it",
+            # Swallowed by `(?!\s+(?:in|at|with|for)\b)`, which was
+            # aimed at "in Delhi" and caught these instead.
+            "I don't want to be here in this world anymore",
+            "I don't want to be here at all anymore",
+            "I don't want to be here for another day",
+            # Swallowed by an UNANCHORED `to` in the take-my-life
+            # exclusion: `to` matched the first two letters of "tonight".
+            "I'm going to take my life tonight",
+            "I will take my life today",
+            "i will take my life instead",
+        ],
+    )
+    def test_an_exclusion_never_swallows_a_real_statement(self, message: str) -> None:
+        """Every one of these was missed by a lookahead added to spare an
+        innocent neighbour.
+
+        An exclusion is the only kind of edit to this file that can move
+        the bias the WRONG way — §7 asks for a list "biased heavily
+        toward false positives", and every phrase ADDED moves it the
+        right way while every exclusion moves it back. So each exclusion
+        gets a case here as well as in the innocent-neighbour table
+        below, and the two tables are what keep the trade visible.
+        """
+        assert detect_crisis(message).category is SafetyCategory.CRISIS
+
+    @pytest.mark.parametrize(
+        "message",
+        [
+            "should i end things with my boyfriend",
+            "i want to end things with my job",
+            "I don't want to be here in this city anymore",
+            "I don't want to be here at the office anymore",
+            "when will i take my life savings out of the bank",
+            "i want to take my life lessons more seriously",
+            "I want to take my life in a new direction",
+        ],
+    )
+    def test_the_exclusions_still_spare_what_they_were_added_for(self, message: str) -> None:
+        """The other half.
+
+        Without this, "delete every exclusion" would satisfy the table
+        above — and a product that answers "should I end things with my
+        boyfriend" with a helpline is not a safe product, it is a broken
+        one.
+        """
+        assert detect_crisis(message).category is SafetyCategory.NONE
+
     def test_the_matched_phrase_is_recorded_but_not_the_message(self) -> None:
         """`.claude/rules/security.md`: log IDs, not objects.
 

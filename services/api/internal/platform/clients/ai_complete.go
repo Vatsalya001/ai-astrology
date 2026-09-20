@@ -74,7 +74,14 @@ func (a *AI) Complete(
 	if budget <= 0 {
 		budget = completionTimeout
 	}
-	ctx, cancel := context.WithTimeout(ctx, budget)
+
+	// Mark the boundary BEFORE the budget, never after. Below this line
+	// every deadline is ours, and the breaker has to be able to tell the
+	// two apart: an ai-service that hangs through the full 90s is an
+	// outage worth opening the circuit for, while a user who closed the
+	// tab is not. Both reach the breaker as context.DeadlineExceeded.
+	// See classify() in breaker.go.
+	ctx, cancel := context.WithTimeout(withCallerContext(ctx), budget)
 	defer cancel()
 
 	// Deliberately NOT marked idempotent. Unlike a chart computation,
@@ -120,11 +127,13 @@ func aiStatusFailure(status int) error {
 // queue eventually times out having achieved nothing, and the user has
 // been staring at a spinner the whole time. A fast 429 lets the UI say
 // "we're busy, try again" while it is still true.
+//
+// The channel itself is built in newAI, not here. Creating it lazily on
+// this path raced InFlight, which reads the same field from the admin
+// endpoint's goroutine. A zero-value AI — which no constructor produces
+// — sends on a nil channel, which is never ready, so it refuses every
+// completion rather than making an unbounded number of them.
 func (a *AI) acquire() (func(), bool) {
-	a.slotsOnce.Do(func() {
-		a.slots = make(chan struct{}, maxConcurrentCompletions)
-	})
-
 	select {
 	case a.slots <- struct{}{}:
 		var once sync.Once
@@ -144,11 +153,12 @@ func MaxConcurrentCompletions() int { return maxConcurrentCompletions }
 // InFlight reports how many completions are running.
 //
 // Exposed for the admin config view and for tests. `len` on a buffered
-// channel is a racy snapshot and that is fine here — it is a gauge for a
-// human, never a value anything branches on.
+// channel is a racy VALUE and that is fine here — it is a gauge for a
+// human, never something anything branches on. The FIELD is a different
+// matter: it is written once in newAI and never again, which is what
+// makes this safe to call from the admin request goroutine while
+// Complete runs. `len` of a nil channel is 0, so a zero-value AI reads
+// as idle rather than panicking.
 func (a *AI) InFlight() int {
-	if a.slots == nil {
-		return 0
-	}
 	return len(a.slots)
 }

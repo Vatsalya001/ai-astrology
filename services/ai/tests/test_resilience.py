@@ -13,6 +13,7 @@ from app.providers import (
     CompletionChunk,
     CompletionRequest,
     CompletionResponse,
+    LLMProvider,
     Message,
     ProviderError,
     ProviderTier,
@@ -20,6 +21,7 @@ from app.providers import (
     ResilientProvider,
     Usage,
 )
+from app.providers.resilience import UnsafeToReplayError, is_retryable_status
 
 
 class Clock:
@@ -86,6 +88,47 @@ class Flaky:
         return True
 
 
+class Timing:
+    """A provider whose calls time out, at a phase the test chooses.
+
+    Separate from `Flaky` because the thing under test is not how MANY
+    times it fails but WHICH exception type it raises: one of these says
+    "nothing was billed", the other says "it may have been".
+    """
+
+    def __init__(self, *, after_the_request_was_sent: bool) -> None:
+        self._sent = after_the_request_was_sent
+        self.calls = 0
+
+    @property
+    def id(self) -> str:
+        return "slow"
+
+    @property
+    def tier(self) -> ProviderTier:
+        return "paid"
+
+    @property
+    def capabilities(self) -> Capabilities:
+        return Capabilities()
+
+    async def complete(self, req: CompletionRequest) -> CompletionResponse:
+        self.calls += 1
+        if self._sent:
+            raise UnsafeToReplayError("timed out after the request was sent", provider_id="slow")
+        raise ProviderError(
+            "timed out before the request was sent", provider_id="slow", retryable=True
+        )
+
+    async def stream(self, req: CompletionRequest) -> AsyncIterator[CompletionChunk]:
+        self.calls += 1
+        raise UnsafeToReplayError("timed out after the request was sent", provider_id="slow")
+        yield CompletionChunk(text="")  # pragma: no cover — unreachable, satisfies the generator
+
+    async def health_check(self) -> bool:
+        return True
+
+
 def a_request() -> CompletionRequest:
     return CompletionRequest(
         messages=[Message(role="user", content="hi")],
@@ -94,7 +137,7 @@ def a_request() -> CompletionRequest:
     )
 
 
-def wrap(inner: Flaky, clock: Clock, **kwargs: object) -> ResilientProvider:
+def wrap(inner: LLMProvider, clock: Clock, **kwargs: object) -> ResilientProvider:
     return ResilientProvider(
         inner,
         now=clock.now,
@@ -160,6 +203,106 @@ class TestRetry:
             await wrap(Flaky(failures=99), clock, max_attempts=3).complete(a_request())
 
         assert len(clock.slept) == 2
+
+
+class TestATimeoutIsNotAFreeRetry:
+    """A completion that timed out may already have been paid for.
+
+    This is the one retryable failure that is NOT safe to replay. The
+    request may have run to its last token and been billed in full, with
+    only the response lost on the way back — so sending it again buys a
+    second answer to a question already answered, at full price, and the
+    user sees one of them.
+
+    `internal/platform/clients/ai_complete.go` refuses to replay a
+    completion for exactly this reason: "replaying a completion spends
+    money again and may produce a different answer". The Python side
+    retried three times.
+
+    The phase is what separates the two cases, and only the adapter can
+    see it: a connect timeout never opened a socket, a read timeout
+    means the bytes went out.
+    """
+
+    async def test_a_timeout_after_the_request_was_sent_is_not_retried(self) -> None:
+        clock = Clock()
+        inner = Timing(after_the_request_was_sent=True)
+
+        with pytest.raises(UnsafeToReplayError):
+            await wrap(inner, clock, max_attempts=3).complete(a_request())
+
+        assert inner.calls == 1, (
+            f"the request was sent {inner.calls} times after a read timeout; each one "
+            f"is a completion that may already have been generated and billed"
+        )
+        assert clock.slept == [], "backoff was paid for a retry that must not happen"
+
+    async def test_a_timeout_before_the_request_was_sent_is_retried(self) -> None:
+        """The negative case, and without it the fix is indistinguishable
+        from "never retry a timeout" — which would make a cold Ollama a
+        user-visible failure on the first request of every morning."""
+        clock = Clock()
+        inner = Timing(after_the_request_was_sent=False)
+
+        with pytest.raises(ProviderError) as caught:
+            await wrap(inner, clock, max_attempts=3).complete(a_request())
+
+        assert not isinstance(caught.value, UnsafeToReplayError)
+        assert inner.calls == 3, "a connect timeout costs nothing to repeat and must be"
+
+    async def test_an_unreplayable_timeout_still_counts_toward_the_breaker(self) -> None:
+        """A provider that stopped answering is unhealthy either way.
+
+        Skipping the breaker here would mean the one failure mode that
+        pays full price for nothing is also the one the circuit never
+        learns about, so every subsequent request pays the full timeout
+        too.
+        """
+        clock = Clock()
+        provider = wrap(
+            Timing(after_the_request_was_sent=True), clock, max_attempts=1, failure_threshold=2
+        )
+
+        for _ in range(2):
+            with pytest.raises(UnsafeToReplayError):
+                await provider.complete(a_request())
+
+        assert provider.state is BreakerState.OPEN
+
+    async def test_it_stays_retryable_so_the_chain_can_try_someone_else(self) -> None:
+        # Not retried HERE is not the same as not retryable. A different
+        # provider is a different, single bill — and the alternative is
+        # showing the user an error while a healthy fallback sits idle.
+        clock = Clock()
+
+        with pytest.raises(ProviderError) as caught:
+            await wrap(Timing(after_the_request_was_sent=True), clock).complete(a_request())
+
+        assert caught.value.retryable is True
+
+
+class TestTheSharedRetryTable:
+    """One table, because the registry reads its verdict and nothing else.
+
+    Adapters used to keep private copies and drifted: an enumerated 5xx
+    list in the OpenAI adapter marked 529 and the Cloudflare 520/522/524
+    permanent while Anthropic and Google called them transient, so the
+    chain refused to fail over for an outage it had a fallback for.
+    """
+
+    @pytest.mark.parametrize("status", [500, 501, 502, 503, 504, 520, 522, 524, 529, 599])
+    def test_every_5xx_is_retryable(self, status: int) -> None:
+        assert is_retryable_status(status) is True
+
+    @pytest.mark.parametrize("status", [408, 409, 425, 429])
+    def test_the_four_transient_client_codes_are_retryable(self, status: int) -> None:
+        assert is_retryable_status(status) is True
+
+    @pytest.mark.parametrize("status", [400, 401, 403, 404, 410, 422])
+    def test_a_permanent_client_error_is_not(self, status: int) -> None:
+        # The expensive direction: a malformed request marked retryable
+        # is sent to every provider in the chain.
+        assert is_retryable_status(status) is False
 
 
 class TestTheBreaker:
