@@ -274,7 +274,18 @@ func run() error {
 		// Phase 4. The admin AI views read ai_request_logs and proxy the
 		// playground to ai-service. Mounted behind SUPER_ADMIN in
 		// mountAdmin; see PHASE-04 §10.
-		AILogs: ailogs.NewHandler(ailogs.New(queries), aiClient, httpapi.AuthErrorWriter),
+		// §14: SUPER_ADMIN only, AUDIT-LOGGED IN GO. The role half was
+		// enforced at the router from the start; this is the other half,
+		// without which the endpoint that spends real money against the
+		// production provider left no record of who ran it.
+		AILogs: ailogs.NewHandler(ailogs.New(queries), aiClient, httpapi.AuthErrorWriter).
+			// The same salted hash the auth trail uses, from the same
+			// helper. `.claude/rules/security.md`: raw IPs are never
+			// persisted, and two hashing schemes in one audit table
+			// would make the rows incomparable.
+			WithAudit(recorder, func(r *http.Request) []byte {
+				return auth.HashIP(auth.ClientIP(r, trustProxy), cfg.IPHashSalt)
+			}),
 	})
 
 	srv := &http.Server{

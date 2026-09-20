@@ -577,5 +577,11 @@ func mountAdmin(r chi.Router, d Deps) {
 		r.Get("/usage", d.AILogs.GetUsage)
 		r.Get("/incidents", d.AILogs.GetIncidents)
 		r.Post("/test", d.AILogs.Playground)
+
+		// §17's "overridable from admin without deploy". Inside the same
+		// group, so it inherits the SUPER_ADMIN guard rather than
+		// carrying its own — the whole reason the guard is on the group.
+		r.Get("/routing", d.AILogs.GetRouting)
+		r.Patch("/routing", d.AILogs.PatchRouting)
 	})
 }

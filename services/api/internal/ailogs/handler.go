@@ -1,9 +1,14 @@
 package ailogs
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"time"
+
+	"github.com/google/uuid"
+
+	"github.com/Vatsalya001/ai-astrology/services/api/internal/auth"
 
 	"github.com/Vatsalya001/ai-astrology/services/api/internal/platform/clients"
 	"github.com/Vatsalya001/ai-astrology/services/api/internal/platform/clients/aiclient"
@@ -19,6 +24,22 @@ type Handler struct {
 	ai       *clients.AI
 	writeErr HTTPErrorWriter
 	now      func() time.Time
+
+	// Audit is nil only in tests that do not assert on the trail.
+	// §14 pairs SUPER_ADMIN with "audit-logged in Go", and only the
+	// first half was enforced — so the endpoint that spends real money
+	// against the production provider left no record of who ran it.
+	audit AuditRecorder
+	ipOf  func(*http.Request) []byte
+}
+
+// AuditRecorder is the slice of platform/audit this package uses.
+//
+// Declared by the CONSUMER, per .claude/rules/go.md, so a test double
+// is one method and this package does not depend on the recorder's
+// other surface.
+type AuditRecorder interface {
+	Record(ctx context.Context, userID *uuid.UUID, action string, metadata map[string]any, ipHash []byte)
 }
 
 // HTTPErrorWriter is httpapi.WriteError, injected so this package does
@@ -27,6 +48,40 @@ type HTTPErrorWriter func(w http.ResponseWriter, r *http.Request, status int, co
 
 func NewHandler(svc *Service, ai *clients.AI, writeErr HTTPErrorWriter) *Handler {
 	return &Handler{svc: svc, ai: ai, writeErr: writeErr, now: time.Now}
+}
+
+// WithAudit wires the trail. Separate from the constructor so the
+// existing call sites and tests keep working, and so a handler built
+// without one is obviously un-audited rather than silently so.
+func (h *Handler) WithAudit(recorder AuditRecorder, ipOf func(*http.Request) []byte) *Handler {
+	h.audit = recorder
+	h.ipOf = ipOf
+	return h
+}
+
+// record writes one admin action.
+//
+// Every caller passes IDs, enums and counts. Never a message, never a
+// model answer — an audit row outlives everything else in the system
+// and is read by people who never saw this file. `audit.Record` has its
+// own allowlist as a second line; this is the first.
+func (h *Handler) record(r *http.Request, action string, metadata map[string]any) {
+	if h.audit == nil {
+		return
+	}
+
+	var userID *uuid.UUID
+	if principal, ok := auth.PrincipalFrom(r.Context()); ok {
+		id := principal.UserID
+		userID = &id
+	}
+
+	var ipHash []byte
+	if h.ipOf != nil {
+		ipHash = h.ipOf(r)
+	}
+
+	h.audit.Record(r.Context(), userID, action, metadata, ipHash)
 }
 
 // WithClock replaces the clock, so a test can ask about a fixed window.
@@ -65,6 +120,8 @@ func (h *Handler) GetConfig(w http.ResponseWriter, r *http.Request) {
 			"ai-service is not reachable.", err)
 		return
 	}
+
+	h.record(r, "admin.ai.config_read", map[string]any{"outcome": "ok"})
 
 	provider, tier := splitDetail(detail)
 	writeJSON(w, http.StatusOK, ConfigResponse{
@@ -106,6 +163,13 @@ func (h *Handler) GetUsage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	h.record(r, "admin.ai.usage_read", map[string]any{
+		// The WINDOW, not the rows. How much history somebody pulled is
+		// the auditable fact; what was in it is already in the table
+		// they read.
+		"window_days": int(to.Sub(from).Hours() / 24),
+	})
+
 	writeJSON(w, http.StatusOK, UsageResponse{
 		From: from, To: to, Summary: summary, ByJob: byJob,
 	})
@@ -129,6 +193,8 @@ func (h *Handler) GetIncidents(w http.ResponseWriter, r *http.Request) {
 			"Could not read incidents.", err)
 		return
 	}
+
+	h.record(r, "admin.ai.incidents_read", map[string]any{"limit": int(limit)})
 
 	writeJSON(w, http.StatusOK, IncidentsResponse{
 		Incidents: incidents, Limit: limit, Offset: offset,
@@ -172,8 +238,23 @@ func (h *Handler) Playground(w http.ResponseWriter, r *http.Request) {
 		req.Job = &job
 	}
 
+	// Recorded BEFORE the call, not after. This is the one admin action
+	// that spends money, and a run that times out or crashes the process
+	// is exactly the one an auditor needs to find — an after-the-fact
+	// write would miss it.
+	//
+	// `message_chars` is a LENGTH. The prompt itself never goes in: an
+	// audit row outlives everything else in the system, and an operator
+	// pasting a real user's question into the playground must not make
+	// that question permanent.
+	h.record(r, "admin.ai.playground_run", map[string]any{
+		"job":           jobLabel(body.Job),
+		"message_chars": len(body.Message),
+	})
+
 	envelope, err := h.ai.Complete(r.Context(), req)
 	if err != nil {
+		h.record(r, "admin.ai.playground_failed", map[string]any{"outcome": "error"})
 		h.writeErr(w, r, aiStatus(err), "ai_failed", "The completion failed.", err)
 		return
 	}
@@ -186,4 +267,71 @@ func (h *Handler) Playground(w http.ResponseWriter, r *http.Request) {
 		Result:    envelope.Result,
 		Telemetry: envelope.Telemetry,
 	})
+}
+
+// ─── GET / PATCH /api/v1/admin/ai/routing ────────────────────────────
+//
+// §17: "Model router maps all 10 job types; overridable from admin
+// without deploy." The mapping shipped; the override did not.
+// `ModelRouter` took overrides only in its CONSTRUCTOR — which means a
+// deploy — and the `PATCH /admin/ai/config` §10 lists never existed. The
+// whole mechanism was a constructor argument that only tests passed.
+
+func (h *Handler) GetRouting(w http.ResponseWriter, r *http.Request) {
+	table, err := h.ai.Routing(r.Context())
+	if err != nil {
+		h.writeErr(w, r, aiStatus(err), "ai_unavailable", "Could not read routing.", err)
+		return
+	}
+
+	h.record(r, "admin.ai.routing_read", map[string]any{"outcome": "ok"})
+	writeJSON(w, http.StatusOK, table)
+}
+
+// PatchRouting changes a job's tier at runtime.
+//
+// The most consequential admin action after the playground: routing
+// `premium_report` to `fast` makes a paid product cheap and bad, and
+// routing `intent_classification` to `deep` makes a cheap product
+// expensive. So the audit row carries the COUNT of jobs changed and
+// whether it was a reset — enough to find the change, without copying a
+// table that is already readable through GET.
+func (h *Handler) PatchRouting(w http.ResponseWriter, r *http.Request) {
+	var body aiclient.RoutingPatch
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 8<<10)).Decode(&body); err != nil {
+		h.writeErr(w, r, http.StatusBadRequest, "invalid_body", "Could not read the request.", err)
+		return
+	}
+
+	changed := 0
+	if body.Overrides != nil {
+		changed = len(*body.Overrides)
+	}
+	reset := body.Reset != nil && *body.Reset
+
+	if changed == 0 && !reset {
+		// Refused rather than treated as a no-op. A PATCH that changes
+		// nothing and returns 200 is indistinguishable from one that
+		// was silently dropped, and this is a control somebody reaches
+		// for during an incident.
+		h.writeErr(w, r, http.StatusBadRequest, "invalid_body",
+			"Send at least one override, or reset=true.", nil)
+		return
+	}
+
+	// Before the call, like the playground: a change that crashed
+	// mid-flight is exactly the one an auditor needs to find.
+	h.record(r, "admin.ai.routing_changed", map[string]any{
+		"overrides": changed,
+		"reset":     reset,
+	})
+
+	table, err := h.ai.PatchRouting(r.Context(), body)
+	if err != nil {
+		h.record(r, "admin.ai.routing_change_failed", map[string]any{"outcome": "error"})
+		h.writeErr(w, r, aiStatus(err), "ai_failed", "Could not change routing.", err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, table)
 }

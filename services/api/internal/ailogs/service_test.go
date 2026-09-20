@@ -5,9 +5,13 @@ import (
 	"encoding/json"
 	"errors"
 	"math"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/google/uuid"
 
 	"github.com/jackc/pgx/v5/pgtype"
 
@@ -357,4 +361,141 @@ func TestMalformedFlagsDoNotBreakTheFeed(t *testing.T) {
 	if len(incidents) != 1 || len(incidents[0].SafetyFlags) != 0 {
 		t.Errorf("want one incident with no flags, got %+v", incidents)
 	}
+}
+
+// ─── §14's other half ────────────────────────────────────────────────
+//
+// "Admin AI routes SUPER_ADMIN only, audit-logged in Go." The role half
+// was enforced at the router from the start. The audit half was absent,
+// so the endpoint that spends real money against the production
+// provider left no record of who ran it.
+
+type recordedEvent struct {
+	userID   *uuid.UUID
+	action   string
+	metadata map[string]any
+	ipHash   []byte
+}
+
+type fakeAudit struct{ events []recordedEvent }
+
+func (f *fakeAudit) Record(
+	_ context.Context, userID *uuid.UUID, action string, metadata map[string]any, ipHash []byte,
+) {
+	f.events = append(f.events, recordedEvent{userID, action, metadata, ipHash})
+}
+
+func auditedHandler(t *testing.T) (*Handler, *fakeAudit) {
+	t.Helper()
+	trail := &fakeAudit{}
+	h := NewHandler(New(&fakeQuerier{}), nil, func(
+		http.ResponseWriter, *http.Request, int, string, string, error,
+	) {
+	}).WithAudit(trail, func(*http.Request) []byte { return []byte("hashed-ip") })
+	return h, trail
+}
+
+// anonymousRequest carries no Principal.
+//
+// `auth` exports no way to put one into a context, and adding one for a
+// test would be a way to forge authentication — a worse thing to own
+// than a slightly narrower unit test. WHO performed the action is
+// asserted in internal/httpapi/admin_ai_integration_test.go, where a
+// real token goes through the real middleware.
+func anonymousRequest(t *testing.T, method, target, body string) *http.Request {
+	t.Helper()
+	return httptest.NewRequest(method, target, strings.NewReader(body))
+}
+
+func TestAnAdminReadIsAudited(t *testing.T) {
+	h, trail := auditedHandler(t)
+
+	h.GetIncidents(httptest.NewRecorder(), anonymousRequest(t, http.MethodGet, "/incidents", ""))
+
+	if len(trail.events) != 1 {
+		t.Fatalf("want 1 audit event, got %d", len(trail.events))
+	}
+	event := trail.events[0]
+	if event.action != "admin.ai.incidents_read" {
+		t.Errorf("action = %q", event.action)
+	}
+	// userID is nil here by construction — see anonymousRequest. The
+	// identity half is asserted through the real middleware in
+	// internal/httpapi/admin_ai_integration_test.go.
+	if string(event.ipHash) != "hashed-ip" {
+		t.Errorf("ip hash = %q", event.ipHash)
+	}
+}
+
+// TestThePlaygroundRecordsBeforeItSpends is the ordering that matters.
+//
+// The playground is the one admin action that costs money. A run that
+// times out, or crashes the process, is exactly the one an auditor
+// needs to find — and an after-the-fact write misses it.
+func TestThePlaygroundRecordsBeforeItSpends(t *testing.T) {
+	h, trail := auditedHandler(t)
+
+	// h.ai is nil, so Complete panics or errors AFTER the record call.
+	// Either way the event must already be there.
+	func() {
+		defer func() { _ = recover() }()
+		h.Playground(
+			httptest.NewRecorder(),
+			anonymousRequest(t, http.MethodPost, "/test", `{"message":"hello there"}`),
+		)
+	}()
+
+	if len(trail.events) == 0 {
+		t.Fatal("the playground spent money with nothing recorded")
+	}
+	if trail.events[0].action != "admin.ai.playground_run" {
+		t.Errorf("first event = %q, want the run to be recorded first", trail.events[0].action)
+	}
+}
+
+// TestTheAuditTrailCarriesNoPrompt is the rule the whole package follows.
+//
+// An audit row outlives everything else in the system and is read by
+// people who never saw this code. An operator pasting a real user's
+// question into the playground must not make that question permanent.
+func TestTheAuditTrailCarriesNoPrompt(t *testing.T) {
+	h, trail := auditedHandler(t)
+	const prompt = "will my marriage to my cousin survive this year"
+
+	func() {
+		defer func() { _ = recover() }()
+		h.Playground(
+			httptest.NewRecorder(),
+			anonymousRequest(t, http.MethodPost, "/test",
+				`{"message":"`+prompt+`","job":"chat_response"}`),
+		)
+	}()
+
+	if len(trail.events) == 0 {
+		t.Fatal("nothing recorded")
+	}
+	encoded, err := json.Marshal(trail.events[0].metadata)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if strings.Contains(string(encoded), "marriage") || strings.Contains(string(encoded), prompt) {
+		t.Errorf("the prompt reached the audit trail: %s", encoded)
+	}
+	// The LENGTH is the auditable fact, and it must actually be there —
+	// otherwise "carries no prompt" is satisfied by recording nothing.
+	if _, ok := trail.events[0].metadata["message_chars"]; !ok {
+		t.Error("message_chars missing; the row records nothing about the run")
+	}
+}
+
+func TestAnUnauditedHandlerDoesNotPanic(t *testing.T) {
+	// WithAudit is optional, and a handler built without one must still
+	// serve — a nil recorder turning every admin read into a 500 would
+	// be a worse failure than a missing trail.
+	h := NewHandler(New(&fakeQuerier{}), nil, func(
+		http.ResponseWriter, *http.Request, int, string, string, error,
+	) {
+	})
+
+	h.GetIncidents(httptest.NewRecorder(), anonymousRequest(t, http.MethodGet, "/incidents", ""))
 }

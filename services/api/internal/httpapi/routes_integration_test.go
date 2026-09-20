@@ -28,6 +28,7 @@ import (
 	"github.com/Vatsalya001/ai-astrology/services/api/internal/charts"
 	"github.com/Vatsalya001/ai-astrology/services/api/internal/config"
 	"github.com/Vatsalya001/ai-astrology/services/api/internal/places"
+	"github.com/Vatsalya001/ai-astrology/services/api/internal/platform/audit"
 	"github.com/Vatsalya001/ai-astrology/services/api/internal/platform/clients"
 	"github.com/Vatsalya001/ai-astrology/services/api/internal/platform/db"
 	"github.com/Vatsalya001/ai-astrology/services/api/internal/platform/db/dbgen"
@@ -154,7 +155,10 @@ func newRouterHarness(t *testing.T) (*routerHarness, func()) {
 		// TestEveryRouteIsAuthenticatedUnlessItIsOnThePublicAllowlist —
 		// a route absent from the harness is a route that test walks
 		// right past.
-		AILogs: ailogs.NewHandler(ailogs.New(queries), ai, AuthErrorWriter),
+		AILogs: ailogs.NewHandler(ailogs.New(queries), ai, AuthErrorWriter).
+			WithAudit(audit.NewRecorder(queries, nil), func(r *http.Request) []byte {
+				return auth.HashIP(auth.ClientIP(r, false), testSalt)
+			}),
 	}
 
 	h := &routerHarness{

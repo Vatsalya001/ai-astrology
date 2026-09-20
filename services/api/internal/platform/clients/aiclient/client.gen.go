@@ -133,6 +133,27 @@ func (e JobType) Valid() bool {
 	}
 }
 
+// Defines values for RoutingOverrideTier.
+const (
+	Chat RoutingOverrideTier = "chat"
+	Deep RoutingOverrideTier = "deep"
+	Fast RoutingOverrideTier = "fast"
+)
+
+// Valid indicates whether the value is a known member of the RoutingOverrideTier enum.
+func (e RoutingOverrideTier) Valid() bool {
+	switch e {
+	case Chat:
+		return true
+	case Deep:
+		return true
+	case Fast:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for SafetyCategory.
 const (
 	SafetyCategoryAbuse           SafetyCategory = "abuse"
@@ -264,6 +285,51 @@ type Intent string
 // can read in a dashboard.
 type JobType string
 
+// RoutingOverride One admin change, validated before it reaches the router.
+//
+// A Pydantic model rather than a raw dict so an override arriving from
+// the Go admin panel with a typo'd job name fails at the boundary with
+// a readable message, rather than silently adding a key nothing reads.
+type RoutingOverride struct {
+	// Job Every distinct thing this product asks a model to do.
+	//
+	// `StrEnum` so a job survives a round trip through JSON, an admin
+	// override and a log line as itself rather than as an integer nobody
+	// can read in a dashboard.
+	Job JobType `json:"job"`
+
+	// Reason Why. Shown in the admin UI next to the override, because a mapping that differs from the default without a stated reason is indistinguishable from a mistake six months later.
+	Reason *string             `json:"reason,omitempty"`
+	Tier   RoutingOverrideTier `json:"tier"`
+}
+
+// RoutingOverrideTier defines model for RoutingOverride.Tier.
+type RoutingOverrideTier string
+
+// RoutingPatch One or more overrides, validated at the boundary.
+//
+// A Pydantic model rather than a raw dict so an override arriving from
+// the Go admin panel with a typo'd job name fails HERE with a readable
+// message, rather than silently adding a key nothing reads.
+type RoutingPatch struct {
+	Overrides *[]RoutingOverride `json:"overrides,omitempty"`
+
+	// Reset Discard every override and return to DEFAULT_ROUTING. The other half of a runtime override: without it, the only way back from a bad change at 3am is the deploy the override existed to avoid.
+	Reset *bool `json:"reset,omitempty"`
+}
+
+// RoutingResponse The table as it stands, and what differs from the default.
+//
+// `overridden` rather than only `table`, because the question an
+// operator has is "what did somebody change", not "what are all ten
+// mappings". §4: a mapping that differs from the default without a
+// stated reason is indistinguishable from a mistake six months later.
+type RoutingResponse struct {
+	Defaults   map[string]string `json:"defaults"`
+	Overridden map[string]string `json:"overridden"`
+	Table      map[string]string `json:"table"`
+}
+
 // SafetyCategory defines model for SafetyCategory.
 type SafetyCategory string
 
@@ -328,6 +394,9 @@ type ValidationError_Loc_Item struct {
 
 // CompleteV1CompletePostJSONRequestBody defines body for CompleteV1CompletePost for application/json ContentType.
 type CompleteV1CompletePostJSONRequestBody = CompleteRequest
+
+// PatchRoutingV1RoutingPatchJSONRequestBody defines body for PatchRoutingV1RoutingPatch for application/json ContentType.
+type PatchRoutingV1RoutingPatchJSONRequestBody = RoutingPatch
 
 // AsValidationErrorLoc0 returns the union data inside the ValidationError_Loc_Item as a ValidationErrorLoc0
 func (t ValidationError_Loc_Item) AsValidationErrorLoc0() (ValidationErrorLoc0, error) {
@@ -514,6 +583,49 @@ type ClientInterface interface {
 	//
 	// Corresponds with POST /v1/complete (the `CompleteV1CompletePost` operationId).
 	CompleteV1CompletePost(ctx context.Context, body CompleteV1CompletePostJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// GetRoutingV1RoutingGet Get Routing
+	//
+	// Corresponds with GET /v1/routing (the `GetRoutingV1RoutingGet` operationId).
+	GetRoutingV1RoutingGet(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// PatchRoutingV1RoutingPatchWithBody Patch Routing
+	//
+	// §17: "Model router ... overridable from admin without deploy".
+	//
+	// The gate item said "without a deploy" and `ModelRouter` took
+	// overrides only in its constructor — which means a deploy — and the
+	// `PATCH /admin/ai/config` in §10 did not exist. The whole mechanism
+	// was a constructor argument that only tests ever passed.
+	//
+	// Applied over the defaults one job at a time. There is deliberately
+	// no "replace the whole table" operation: an operator changing one
+	// mapping must not be able to unroute the other nine by sending a
+	// short object.
+	//
+	// Takes any type of body and a specified content type.
+	//
+	// Corresponds with PATCH /v1/routing (the `PatchRoutingV1RoutingPatch` operationId).
+	PatchRoutingV1RoutingPatchWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// PatchRoutingV1RoutingPatch Patch Routing
+	//
+	// §17: "Model router ... overridable from admin without deploy".
+	//
+	// The gate item said "without a deploy" and `ModelRouter` took
+	// overrides only in its constructor — which means a deploy — and the
+	// `PATCH /admin/ai/config` in §10 did not exist. The whole mechanism
+	// was a constructor argument that only tests ever passed.
+	//
+	// Applied over the defaults one job at a time. There is deliberately
+	// no "replace the whole table" operation: an operator changing one
+	// mapping must not be able to unroute the other nine by sending a
+	// short object.
+	//
+	// Takes a body of the `application/json` content type.
+	//
+	// Corresponds with PATCH /v1/routing (the `PatchRoutingV1RoutingPatch` operationId).
+	PatchRoutingV1RoutingPatch(ctx context.Context, body PatchRoutingV1RoutingPatchJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 }
 
 // HealthHealthGet Health
@@ -596,6 +708,79 @@ func (c *Client) CompleteV1CompletePost(ctx context.Context, body CompleteV1Comp
 	return c.Client.Do(req)
 }
 
+// GetRoutingV1RoutingGet Get Routing
+//
+// Corresponds with GET /v1/routing (the `GetRoutingV1RoutingGet` operationId).
+func (c *Client) GetRoutingV1RoutingGet(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetRoutingV1RoutingGetRequest(c.Server)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// PatchRoutingV1RoutingPatchWithBody Patch Routing
+//
+// §17: "Model router ... overridable from admin without deploy".
+//
+// The gate item said "without a deploy" and `ModelRouter` took
+// overrides only in its constructor — which means a deploy — and the
+// `PATCH /admin/ai/config` in §10 did not exist. The whole mechanism
+// was a constructor argument that only tests ever passed.
+//
+// Applied over the defaults one job at a time. There is deliberately
+// no "replace the whole table" operation: an operator changing one
+// mapping must not be able to unroute the other nine by sending a
+// short object.
+//
+// Takes any type of body and a specified content type.
+//
+// Corresponds with PATCH /v1/routing (the `PatchRoutingV1RoutingPatch` operationId).
+func (c *Client) PatchRoutingV1RoutingPatchWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewPatchRoutingV1RoutingPatchRequestWithBody(c.Server, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// PatchRoutingV1RoutingPatch Patch Routing
+//
+// §17: "Model router ... overridable from admin without deploy".
+//
+// The gate item said "without a deploy" and `ModelRouter` took
+// overrides only in its constructor — which means a deploy — and the
+// `PATCH /admin/ai/config` in §10 did not exist. The whole mechanism
+// was a constructor argument that only tests ever passed.
+//
+// Applied over the defaults one job at a time. There is deliberately
+// no "replace the whole table" operation: an operator changing one
+// mapping must not be able to unroute the other nine by sending a
+// short object.
+//
+// Takes a body of the `application/json` content type.
+//
+// Corresponds with PATCH /v1/routing (the `PatchRoutingV1RoutingPatch` operationId).
+func (c *Client) PatchRoutingV1RoutingPatch(ctx context.Context, body PatchRoutingV1RoutingPatchJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewPatchRoutingV1RoutingPatchRequest(c.Server, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
 // NewHealthHealthGetRequest constructs an http.Request for the HealthHealthGet method
 func NewHealthHealthGetRequest(server string) (*http.Request, error) {
 	var err error
@@ -654,6 +839,73 @@ func NewCompleteV1CompletePostRequestWithBody(server string, contentType string,
 	}
 
 	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
+// NewGetRoutingV1RoutingGetRequest constructs an http.Request for the GetRoutingV1RoutingGet method
+func NewGetRoutingV1RoutingGetRequest(server string) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/routing")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewPatchRoutingV1RoutingPatchRequest calls the generic PatchRoutingV1RoutingPatch builder with application/json body
+func NewPatchRoutingV1RoutingPatchRequest(server string, body PatchRoutingV1RoutingPatchJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewPatchRoutingV1RoutingPatchRequestWithBody(server, "application/json", bodyReader)
+}
+
+// NewPatchRoutingV1RoutingPatchRequestWithBody constructs an http.Request for the PatchRoutingV1RoutingPatch method, with any body, and a specified content type
+func NewPatchRoutingV1RoutingPatchRequestWithBody(server string, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/routing")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPatch, queryURL.String(), body)
 	if err != nil {
 		return nil, err
 	}
@@ -758,6 +1010,51 @@ type ClientWithResponsesInterface interface {
 	//
 	// Corresponds with POST /v1/complete (the `CompleteV1CompletePost` operationId).
 	CompleteV1CompletePostWithResponse(ctx context.Context, body CompleteV1CompletePostJSONRequestBody, reqEditors ...RequestEditorFn) (*CompleteV1CompletePostResponse, error)
+
+	// GetRoutingV1RoutingGetWithResponse Get Routing
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /v1/routing (the `GetRoutingV1RoutingGet` operationId).
+	GetRoutingV1RoutingGetWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*GetRoutingV1RoutingGetResponse, error)
+
+	// PatchRoutingV1RoutingPatchWithBodyWithResponse Patch Routing
+	//
+	// §17: "Model router ... overridable from admin without deploy".
+	//
+	// The gate item said "without a deploy" and `ModelRouter` took
+	// overrides only in its constructor — which means a deploy — and the
+	// `PATCH /admin/ai/config` in §10 did not exist. The whole mechanism
+	// was a constructor argument that only tests ever passed.
+	//
+	// Applied over the defaults one job at a time. There is deliberately
+	// no "replace the whole table" operation: an operator changing one
+	// mapping must not be able to unroute the other nine by sending a
+	// short object.
+	//
+	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with PATCH /v1/routing (the `PatchRoutingV1RoutingPatch` operationId).
+	PatchRoutingV1RoutingPatchWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PatchRoutingV1RoutingPatchResponse, error)
+
+	// PatchRoutingV1RoutingPatchWithResponse Patch Routing
+	//
+	// §17: "Model router ... overridable from admin without deploy".
+	//
+	// The gate item said "without a deploy" and `ModelRouter` took
+	// overrides only in its constructor — which means a deploy — and the
+	// `PATCH /admin/ai/config` in §10 did not exist. The whole mechanism
+	// was a constructor argument that only tests ever passed.
+	//
+	// Applied over the defaults one job at a time. There is deliberately
+	// no "replace the whole table" operation: an operator changing one
+	// mapping must not be able to unroute the other nine by sending a
+	// short object.
+	//
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with PATCH /v1/routing (the `PatchRoutingV1RoutingPatch` operationId).
+	PatchRoutingV1RoutingPatchWithResponse(ctx context.Context, body PatchRoutingV1RoutingPatchJSONRequestBody, reqEditors ...RequestEditorFn) (*PatchRoutingV1RoutingPatchResponse, error)
 }
 
 type HealthHealthGetResponse struct {
@@ -849,6 +1146,95 @@ func (r CompleteV1CompletePostResponse) ContentType() string {
 	return ""
 }
 
+type GetRoutingV1RoutingGetResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *RoutingResponse
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r GetRoutingV1RoutingGetResponse) GetJSON200() *RoutingResponse {
+	return r.JSON200
+}
+
+// GetBody returns the raw response body bytes
+func (r GetRoutingV1RoutingGetResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r GetRoutingV1RoutingGetResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetRoutingV1RoutingGetResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r GetRoutingV1RoutingGetResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type PatchRoutingV1RoutingPatchResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *RoutingResponse
+	// JSON422 the response for an HTTP 422 `application/json` response
+	JSON422 *HTTPValidationError
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r PatchRoutingV1RoutingPatchResponse) GetJSON200() *RoutingResponse {
+	return r.JSON200
+}
+
+// GetJSON422 returns the response for an HTTP 422 `application/json` response
+func (r PatchRoutingV1RoutingPatchResponse) GetJSON422() *HTTPValidationError {
+	return r.JSON422
+}
+
+// GetBody returns the raw response body bytes
+func (r PatchRoutingV1RoutingPatchResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r PatchRoutingV1RoutingPatchResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r PatchRoutingV1RoutingPatchResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r PatchRoutingV1RoutingPatchResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
 // HealthHealthGetWithResponse Health
 //
 // Liveness check.
@@ -919,6 +1305,69 @@ func (c *ClientWithResponses) CompleteV1CompletePostWithResponse(ctx context.Con
 	return ParseCompleteV1CompletePostResponse(rsp)
 }
 
+// GetRoutingV1RoutingGetWithResponse Get Routing
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /v1/routing (the `GetRoutingV1RoutingGet` operationId).
+func (c *ClientWithResponses) GetRoutingV1RoutingGetWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*GetRoutingV1RoutingGetResponse, error) {
+	rsp, err := c.GetRoutingV1RoutingGet(ctx, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetRoutingV1RoutingGetResponse(rsp)
+}
+
+// PatchRoutingV1RoutingPatchWithBodyWithResponse Patch Routing
+//
+// §17: "Model router ... overridable from admin without deploy".
+//
+// The gate item said "without a deploy" and `ModelRouter` took
+// overrides only in its constructor — which means a deploy — and the
+// `PATCH /admin/ai/config` in §10 did not exist. The whole mechanism
+// was a constructor argument that only tests ever passed.
+//
+// Applied over the defaults one job at a time. There is deliberately
+// no "replace the whole table" operation: an operator changing one
+// mapping must not be able to unroute the other nine by sending a
+// short object.
+//
+// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with PATCH /v1/routing (the `PatchRoutingV1RoutingPatch` operationId).
+func (c *ClientWithResponses) PatchRoutingV1RoutingPatchWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PatchRoutingV1RoutingPatchResponse, error) {
+	rsp, err := c.PatchRoutingV1RoutingPatchWithBody(ctx, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParsePatchRoutingV1RoutingPatchResponse(rsp)
+}
+
+// PatchRoutingV1RoutingPatchWithResponse Patch Routing
+//
+// §17: "Model router ... overridable from admin without deploy".
+//
+// The gate item said "without a deploy" and `ModelRouter` took
+// overrides only in its constructor — which means a deploy — and the
+// `PATCH /admin/ai/config` in §10 did not exist. The whole mechanism
+// was a constructor argument that only tests ever passed.
+//
+// Applied over the defaults one job at a time. There is deliberately
+// no "replace the whole table" operation: an operator changing one
+// mapping must not be able to unroute the other nine by sending a
+// short object.
+//
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with PATCH /v1/routing (the `PatchRoutingV1RoutingPatch` operationId).
+func (c *ClientWithResponses) PatchRoutingV1RoutingPatchWithResponse(ctx context.Context, body PatchRoutingV1RoutingPatchJSONRequestBody, reqEditors ...RequestEditorFn) (*PatchRoutingV1RoutingPatchResponse, error) {
+	rsp, err := c.PatchRoutingV1RoutingPatch(ctx, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParsePatchRoutingV1RoutingPatchResponse(rsp)
+}
+
 // ParseHealthHealthGetResponse parses an HTTP response from a HealthHealthGetWithResponse call
 func ParseHealthHealthGetResponse(rsp *http.Response) (*HealthHealthGetResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
@@ -961,6 +1410,65 @@ func ParseCompleteV1CompletePostResponse(rsp *http.Response) (*CompleteV1Complet
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
 		var dest AIResponseEnvelopeCompleteResult
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest HTTPValidationError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON422 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseGetRoutingV1RoutingGetResponse parses an HTTP response from a GetRoutingV1RoutingGetWithResponse call
+func ParseGetRoutingV1RoutingGetResponse(rsp *http.Response) (*GetRoutingV1RoutingGetResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetRoutingV1RoutingGetResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest RoutingResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParsePatchRoutingV1RoutingPatchResponse parses an HTTP response from a PatchRoutingV1RoutingPatchWithResponse call
+func ParsePatchRoutingV1RoutingPatchResponse(rsp *http.Response) (*PatchRoutingV1RoutingPatchResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &PatchRoutingV1RoutingPatchResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest RoutingResponse
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}

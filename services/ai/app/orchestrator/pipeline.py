@@ -171,6 +171,18 @@ class Orchestrator:
         self._knowledge = knowledge_context or NoKnowledgeContext()
         self._prompt_version = prompt_version
 
+    @property
+    def router(self) -> ModelRouter:
+        """The live router, so the admin PATCH mutates what serves.
+
+        Deliberately the object and not a copy — `table` already hands
+        out a copy for display. An admin override that mutated a copy
+        would return 200 and change nothing, which is the worst possible
+        outcome for a control an operator reaches for during an
+        incident.
+        """
+        return self._router
+
     # ─── the crisis branch ───────────────────────────────────────────
 
     def _crisis_envelope(

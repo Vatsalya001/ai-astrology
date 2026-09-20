@@ -99,6 +99,51 @@ class ModelRouter:
                 f"taking the most expensive produces a bill."
             ) from None
 
+    def apply(self, overrides: list[RoutingOverride]) -> dict[JobType, ModelTier]:
+        """Change routing at runtime. §17: "overridable from admin
+        without deploy".
+
+        The gate item said "without a deploy" and the class only took
+        overrides in its CONSTRUCTOR — which means a deploy. The admin
+        endpoint listed in §10 as `PATCH /admin/ai/config` did not exist
+        either, so the whole mechanism was a constructor argument that
+        only tests passed.
+
+        Applied OVER the defaults, one job at a time, never replacing
+        the table: an operator changing one mapping at 3am cannot
+        accidentally unroute the other nine. The absence of a
+        "replace the whole table" method is the design.
+
+        Returns the resulting table so the caller can echo exactly what
+        took effect rather than what it asked for.
+        """
+        for override in overrides:
+            self._routing[override.job] = override.tier
+        return self.table
+
+    def reset(self) -> dict[JobType, ModelTier]:
+        """Back to DEFAULT_ROUTING.
+
+        The other half of a runtime override. Without it the only way
+        back from a bad 3am change is the deploy the override existed to
+        avoid.
+        """
+        self._routing = dict(DEFAULT_ROUTING)
+        return self.table
+
+    @property
+    def overridden(self) -> dict[JobType, ModelTier]:
+        """Only the jobs that differ from the default.
+
+        What an operator actually wants to see: "what did somebody
+        change", not "what are all ten mappings". A mapping that differs
+        without a stated reason is indistinguishable from a mistake six
+        months later — which is why `RoutingOverride` carries one.
+        """
+        return {
+            job: tier for job, tier in self._routing.items() if DEFAULT_ROUTING.get(job) != tier
+        }
+
     @property
     def table(self) -> dict[JobType, ModelTier]:
         """A copy, for the admin endpoint to display.

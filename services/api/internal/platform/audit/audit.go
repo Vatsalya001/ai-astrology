@@ -34,6 +34,24 @@ var allowedKeys = map[string]bool{
 	"count":       true,
 	"outcome":     true,
 	"grace_hours": true,
+
+	// Phase 4 — the AI admin surface. §14: "Admin AI routes SUPER_ADMIN
+	// only, audit-logged in Go." The role half was enforced at the
+	// router and the audit half was simply absent, so the endpoint that
+	// spends real money against the production provider left no record
+	// of who ran it.
+	//
+	// Every one of these is an ID, an enum or a count. `job` and `tier`
+	// are closed sets; `message_chars` is a LENGTH rather than the
+	// message, because an audit row outlives everything else in the
+	// system and a question about somebody's marriage must not be in it.
+	"job":           true,
+	"tier":          true,
+	"overrides":     true, // count of jobs changed, never their values
+	"reset":         true,
+	"message_chars": true,
+	"window_days":   true,
+	"limit":         true,
 }
 
 // Recorder writes audit rows.

@@ -162,3 +162,36 @@ func MaxConcurrentCompletions() int { return maxConcurrentCompletions }
 func (a *AI) InFlight() int {
 	return len(a.slots)
 }
+
+// ─── routing, changeable without a deploy ────────────────────────────
+
+// Routing reads the live job -> tier table from ai-service.
+func (a *AI) Routing(ctx context.Context) (*aiclient.RoutingResponse, error) {
+	resp, err := a.api.GetRoutingV1RoutingGetWithResponse(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("%w: routing: %v", ErrAIUnavailable, err)
+	}
+	if resp.JSON200 == nil {
+		return nil, aiStatusFailure(resp.StatusCode())
+	}
+	return resp.JSON200, nil
+}
+
+// PatchRouting applies overrides and returns the table that took effect.
+//
+// Deliberately NOT behind the completion semaphore: this spends no
+// tokens, and queueing a control an operator reaches for during an
+// incident behind eight in-flight completions is exactly backwards.
+func (a *AI) PatchRouting(
+	ctx context.Context,
+	body aiclient.RoutingPatch,
+) (*aiclient.RoutingResponse, error) {
+	resp, err := a.api.PatchRoutingV1RoutingPatchWithResponse(ctx, body)
+	if err != nil {
+		return nil, fmt.Errorf("%w: patch routing: %v", ErrAIUnavailable, err)
+	}
+	if resp.JSON200 == nil {
+		return nil, aiStatusFailure(resp.StatusCode())
+	}
+	return resp.JSON200, nil
+}

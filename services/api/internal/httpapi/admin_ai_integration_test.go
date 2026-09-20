@@ -9,6 +9,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
+
 	"github.com/Vatsalya001/ai-astrology/services/api/internal/auth"
 	"github.com/Vatsalya001/ai-astrology/services/api/internal/platform/db/dbgen"
 )
@@ -35,6 +38,8 @@ var adminRoutes = []struct {
 	{http.MethodGet, "/api/v1/admin/ai/usage"},
 	{http.MethodGet, "/api/v1/admin/ai/incidents"},
 	{http.MethodPost, "/api/v1/admin/ai/test"},
+	{http.MethodGet, "/api/v1/admin/ai/routing"},
+	{http.MethodPatch, "/api/v1/admin/ai/routing"},
 }
 
 func TestAdminAIRoutesRefuseEveryRoleBelowSuperAdmin(t *testing.T) {
@@ -257,6 +262,120 @@ func TestAdminUsageAndIncidentsReturnRealRows(t *testing.T) {
 		// anywhere in the response.
 		if strings.Contains(rec.Body.String(), "excerpt") {
 			t.Errorf("an incident carried an excerpt: %s", rec.Body.String())
+		}
+	})
+}
+
+// TestAnAdminActionIsAuditedWithTheActorsIdentity is §14's other half,
+// through the real middleware.
+//
+// The unit tests in internal/ailogs assert the action, the metadata and
+// the IP hash against a request carrying no Principal, because `auth`
+// exports no way to inject one — and adding a way to forge a principal
+// would be a worse thing to own than a narrower unit test. This is
+// where WHO is asserted: a real SUPER_ADMIN token, through
+// auth.Authenticate, ending in a real audit_logs row.
+func TestAnAdminActionIsAuditedWithTheActorsIdentity(t *testing.T) {
+	h, cleanup := newRouterHarness(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	token := h.tokenAs(t, h.alice, auth.RoleSuperAdmin)
+
+	before := countAuditRows(ctx, t, h, "admin.ai.incidents_read")
+
+	rec := h.do(t, http.MethodGet, "/api/v1/admin/ai/incidents", token, "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("want 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	if after := countAuditRows(ctx, t, h, "admin.ai.incidents_read"); after != before+1 {
+		t.Fatalf("audit rows for the action went %d -> %d; want one more", before, after)
+	}
+
+	var userID pgtype.UUID
+	var metadata []byte
+	err := h.pool.QueryRow(ctx, `
+		SELECT user_id, metadata FROM audit_logs
+		WHERE action = 'admin.ai.incidents_read'
+		ORDER BY created_at DESC LIMIT 1`).Scan(&userID, &metadata)
+	if err != nil {
+		t.Fatalf("read audit row: %v", err)
+	}
+
+	if !userID.Valid {
+		t.Error("the audit row has no user; the trail cannot say who read it")
+	} else if uuid.UUID(userID.Bytes) != h.alice {
+		t.Errorf("audit row names %v, want %v", uuid.UUID(userID.Bytes), h.alice)
+	}
+
+	// The allowlist in platform/audit is the second line of defence.
+	// This asserts the first: nothing the handler passes is content.
+	for _, forbidden := range []string{"message", "prompt", "answer", "question"} {
+		if strings.Contains(strings.ToLower(string(metadata)), forbidden) {
+			t.Errorf("audit metadata carries a %q field: %s", forbidden, metadata)
+		}
+	}
+}
+
+func countAuditRows(ctx context.Context, t *testing.T, h *routerHarness, action string) int {
+	t.Helper()
+	var n int
+	if err := h.pool.QueryRow(ctx,
+		`SELECT COUNT(*) FROM audit_logs WHERE action = $1`, action).Scan(&n); err != nil {
+		t.Fatalf("count audit rows: %v", err)
+	}
+	return n
+}
+
+// TestRoutingCanBeChangedWithoutADeploy is §17's gate item, end to end.
+//
+// "Model router maps all 10 job types; overridable from admin without
+// deploy." The mapping shipped and the override did not: ModelRouter
+// took overrides only in its CONSTRUCTOR — which means a deploy — and
+// the PATCH §10 lists never existed.
+//
+// ai-service is a dead stub in this harness, so the assertion is that
+// the request is ACCEPTED and reaches the client (503, not 404/405) —
+// the wiring, which is what was missing. The behaviour itself is
+// asserted in services/ai/tests.
+func TestTheRoutingPatchIsMountedAndGuarded(t *testing.T) {
+	h, cleanup := newRouterHarness(t)
+	defer cleanup()
+
+	token := h.tokenAs(t, h.alice, auth.RoleSuperAdmin)
+
+	t.Run("an empty patch is refused", func(t *testing.T) {
+		// A PATCH that changes nothing and returns 200 is
+		// indistinguishable from one that was silently dropped, and this
+		// is a control somebody reaches for during an incident.
+		rec := h.do(t, http.MethodPatch, "/api/v1/admin/ai/routing", token, `{}`)
+
+		if rec.Code != http.StatusBadRequest {
+			t.Errorf("an empty patch returned %d, want 400", rec.Code)
+		}
+	})
+
+	t.Run("a real patch reaches ai-service", func(t *testing.T) {
+		rec := h.do(t, http.MethodPatch, "/api/v1/admin/ai/routing", token,
+			`{"overrides":[{"job":"chat_response","tier":"fast","reason":"cost spike"}]}`)
+
+		if rec.Code == http.StatusNotFound || rec.Code == http.StatusMethodNotAllowed {
+			t.Fatalf("the route is not mounted: %d", rec.Code)
+		}
+		if rec.Code == http.StatusForbidden || rec.Code == http.StatusUnauthorized {
+			t.Fatalf("super_admin was refused: %d", rec.Code)
+		}
+	})
+
+	t.Run("a non-super-admin cannot change routing", func(t *testing.T) {
+		user := h.tokenAs(t, h.alice, auth.RoleAdmin)
+
+		rec := h.do(t, http.MethodPatch, "/api/v1/admin/ai/routing", user,
+			`{"overrides":[{"job":"premium_report","tier":"fast","reason":"x"}]}`)
+
+		if rec.Code != http.StatusForbidden {
+			t.Errorf("an admin changed routing: %d", rec.Code)
 		}
 	})
 }

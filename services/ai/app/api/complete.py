@@ -30,6 +30,7 @@ from functools import lru_cache
 from pathlib import Path
 
 from fastapi import APIRouter, Request
+from pydantic import BaseModel, Field
 
 from app.classification import IntentClassifier
 from app.orchestrator import (
@@ -53,7 +54,7 @@ from app.providers import (
     ProviderTier,
     ResilientProvider,
 )
-from app.routing import ModelRouter
+from app.routing import DEFAULT_ROUTING, JobType, ModelRouter, RoutingOverride
 from app.safety import SafetyClassifier
 from app.settings import settings
 
@@ -299,3 +300,77 @@ async def complete(body: CompleteRequest, request: Request) -> AIResponseEnvelop
     )
 
     return envelope
+
+
+# ─── routing, changeable without a deploy ────────────────────────────
+
+
+class RoutingResponse(BaseModel):
+    """The table as it stands, and what differs from the default.
+
+    `overridden` rather than only `table`, because the question an
+    operator has is "what did somebody change", not "what are all ten
+    mappings". §4: a mapping that differs from the default without a
+    stated reason is indistinguishable from a mistake six months later.
+    """
+
+    table: dict[JobType, str]
+    overridden: dict[JobType, str]
+    defaults: dict[JobType, str]
+
+
+class RoutingPatch(BaseModel):
+    """One or more overrides, validated at the boundary.
+
+    A Pydantic model rather than a raw dict so an override arriving from
+    the Go admin panel with a typo'd job name fails HERE with a readable
+    message, rather than silently adding a key nothing reads.
+    """
+
+    overrides: list[RoutingOverride] = Field(default_factory=list)
+    reset: bool = Field(
+        default=False,
+        description="Discard every override and return to DEFAULT_ROUTING. The other "
+        "half of a runtime override: without it, the only way back from a bad change "
+        "at 3am is the deploy the override existed to avoid.",
+    )
+
+
+def _routing_response(router: ModelRouter) -> RoutingResponse:
+    return RoutingResponse(
+        table={job: tier for job, tier in router.table.items()},
+        overridden={job: tier for job, tier in router.overridden.items()},
+        defaults={job: tier for job, tier in DEFAULT_ROUTING.items()},
+    )
+
+
+@router.get("/routing", response_model=RoutingResponse)
+async def get_routing() -> RoutingResponse:
+    return _routing_response(get_orchestrator().router)
+
+
+@router.patch("/routing", response_model=RoutingResponse)
+async def patch_routing(body: RoutingPatch) -> RoutingResponse:
+    """§17: "Model router ... overridable from admin without deploy".
+
+    The gate item said "without a deploy" and `ModelRouter` took
+    overrides only in its constructor — which means a deploy — and the
+    `PATCH /admin/ai/config` in §10 did not exist. The whole mechanism
+    was a constructor argument that only tests ever passed.
+
+    Applied over the defaults one job at a time. There is deliberately
+    no "replace the whole table" operation: an operator changing one
+    mapping must not be able to unroute the other nine by sending a
+    short object.
+    """
+    model_router = get_orchestrator().router
+
+    if body.reset:
+        model_router.reset()
+
+    model_router.apply(body.overrides)
+
+    # Echo what TOOK EFFECT, read back from the router, rather than what
+    # was asked for. They differ if anything was rejected, and an
+    # endpoint that echoes the request cannot show that.
+    return _routing_response(model_router)

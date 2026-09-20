@@ -127,3 +127,15 @@ func writeJSON(w http.ResponseWriter, status int, body any) {
 	// already visible in access logs.
 	_ = json.NewEncoder(w).Encode(body)
 }
+
+// jobLabel renders a job for the audit trail.
+//
+// "default" rather than "" for an absent job: an empty string in an
+// audit row reads as data loss, and the absence genuinely means the
+// service's own default was used.
+func jobLabel(job string) string {
+	if job == "" {
+		return "default"
+	}
+	return job
+}

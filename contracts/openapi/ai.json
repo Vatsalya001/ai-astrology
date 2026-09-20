@@ -179,6 +179,97 @@
         "title": "JobType",
         "type": "string"
       },
+      "RoutingOverride": {
+        "description": "One admin change, validated before it reaches the router.\n\nA Pydantic model rather than a raw dict so an override arriving from\nthe Go admin panel with a typo'd job name fails at the boundary with\na readable message, rather than silently adding a key nothing reads.",
+        "properties": {
+          "job": {
+            "$ref": "#/components/schemas/JobType"
+          },
+          "reason": {
+            "default": "",
+            "description": "Why. Shown in the admin UI next to the override, because a mapping that differs from the default without a stated reason is indistinguishable from a mistake six months later.",
+            "title": "Reason",
+            "type": "string"
+          },
+          "tier": {
+            "enum": [
+              "fast",
+              "chat",
+              "deep"
+            ],
+            "title": "Tier",
+            "type": "string"
+          }
+        },
+        "required": [
+          "job",
+          "tier"
+        ],
+        "title": "RoutingOverride",
+        "type": "object"
+      },
+      "RoutingPatch": {
+        "description": "One or more overrides, validated at the boundary.\n\nA Pydantic model rather than a raw dict so an override arriving from\nthe Go admin panel with a typo'd job name fails HERE with a readable\nmessage, rather than silently adding a key nothing reads.",
+        "properties": {
+          "overrides": {
+            "items": {
+              "$ref": "#/components/schemas/RoutingOverride"
+            },
+            "title": "Overrides",
+            "type": "array"
+          },
+          "reset": {
+            "default": false,
+            "description": "Discard every override and return to DEFAULT_ROUTING. The other half of a runtime override: without it, the only way back from a bad change at 3am is the deploy the override existed to avoid.",
+            "title": "Reset",
+            "type": "boolean"
+          }
+        },
+        "title": "RoutingPatch",
+        "type": "object"
+      },
+      "RoutingResponse": {
+        "description": "The table as it stands, and what differs from the default.\n\n`overridden` rather than only `table`, because the question an\noperator has is \"what did somebody change\", not \"what are all ten\nmappings\". \u00a74: a mapping that differs from the default without a\nstated reason is indistinguishable from a mistake six months later.",
+        "properties": {
+          "defaults": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "propertyNames": {
+              "$ref": "#/components/schemas/JobType"
+            },
+            "title": "Defaults",
+            "type": "object"
+          },
+          "overridden": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "propertyNames": {
+              "$ref": "#/components/schemas/JobType"
+            },
+            "title": "Overridden",
+            "type": "object"
+          },
+          "table": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "propertyNames": {
+              "$ref": "#/components/schemas/JobType"
+            },
+            "title": "Table",
+            "type": "object"
+          }
+        },
+        "required": [
+          "table",
+          "overridden",
+          "defaults"
+        ],
+        "title": "RoutingResponse",
+        "type": "object"
+      },
       "SafetyCategory": {
         "enum": [
           "crisis",
@@ -448,6 +539,67 @@
           }
         },
         "summary": "Complete",
+        "tags": [
+          "ai"
+        ]
+      }
+    },
+    "/v1/routing": {
+      "get": {
+        "operationId": "get_routing_v1_routing_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RoutingResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Routing",
+        "tags": [
+          "ai"
+        ]
+      },
+      "patch": {
+        "description": "\u00a717: \"Model router ... overridable from admin without deploy\".\n\nThe gate item said \"without a deploy\" and `ModelRouter` took\noverrides only in its constructor \u2014 which means a deploy \u2014 and the\n`PATCH /admin/ai/config` in \u00a710 did not exist. The whole mechanism\nwas a constructor argument that only tests ever passed.\n\nApplied over the defaults one job at a time. There is deliberately\nno \"replace the whole table\" operation: an operator changing one\nmapping must not be able to unroute the other nine by sending a\nshort object.",
+        "operationId": "patch_routing_v1_routing_patch",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RoutingPatch"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RoutingResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Patch Routing",
         "tags": [
           "ai"
         ]
