@@ -68,10 +68,27 @@ SAFETY_REVIEWED_INTENTS = frozenset(
     }
 )
 
+
 # Below this the classifier is guessing, and a narrow guess is worse than
 # a broad one: it retrieves the wrong chart facts confidently. PHASE-04
 # §6 sets the number.
-MIN_CONFIDENCE = 0.6
+def min_confidence() -> float:
+    """The live threshold. Read per call, never captured at import.
+
+    A module-level constant would freeze whatever the environment said
+    when the first import happened, which makes the setting untestable
+    and an admin change a restart. This is on the hot path but it is a
+    dict lookup on a cached settings object.
+    """
+    from app.settings import settings
+
+    return settings.intent_min_confidence
+
+
+# Kept as a name because scripts and tests print it, and because a
+# reader wants a number in the docstring above. It is the DEFAULT, not
+# necessarily what is running — call `min_confidence()` for that.
+MIN_CONFIDENCE = 0.4
 
 
 class Entities(BaseModel):
@@ -153,4 +170,4 @@ class IntentResult(BaseModel):
 
     @property
     def is_confident(self) -> bool:
-        return self.confidence >= MIN_CONFIDENCE
+        return self.confidence >= min_confidence()

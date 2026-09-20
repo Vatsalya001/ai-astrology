@@ -11,6 +11,7 @@ from app.classification.intents import (
     Entities,
     Intent,
     IntentResult,
+    min_confidence,
 )
 from app.classification.keywords import RULES, classify_by_keywords, coverage
 
@@ -25,4 +26,5 @@ __all__ = [
     "IntentResult",
     "classify_by_keywords",
     "coverage",
+    "min_confidence",
 ]

@@ -61,6 +61,30 @@ class Settings(BaseSettings):
     # own defaults (60s, 120s) and `ResilientProvider` carries its own
     # budgets; a default that configuration cannot reach is a knob that
     # lies, so app/api/complete.py passes every one of these in.
+    intent_min_confidence: float = Field(default=0.4, ge=0.0, le=1.0)
+    """Below this, a classification is discarded for broad context.
+
+    §6 specifies 0.6. This ships 0.4, deliberately, and the deviation is
+    recorded here rather than buried in a constant.
+
+    WHY IT MOVED. The threshold is applied to a SELF-REPORTED number,
+    and small local models do not calibrate one. Measured on 30 deferred
+    messages, llama3.2:1b answered correctly 12 times and the product
+    delivered 2 — ten right answers thrown away by 0.6.
+
+    WHY IT IS A SETTING. Because 0.4 is tuned to a weak local model and
+    production runs Claude, whose calibration is different and unmeasured.
+    A constant would make re-tuning a deploy; this makes it
+    `INTENT_MIN_CONFIDENCE=0.6` in an env file. Phase 6's eval harness is
+    where the production value gets chosen on evidence, and this is the
+    knob it will turn.
+
+    The safety property §6 actually asks for is BROAD CONTEXT when
+    unsure, not a discarded label — see app/orchestrator/context.py.
+    Lowering this does not weaken that; it only changes how often the
+    label is kept.
+    """
+
     llm_timeout_seconds: float = Field(default=60.0, gt=0)
     """Per-provider HTTP budget. §11's documented default is 60.
 

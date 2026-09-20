@@ -34,7 +34,7 @@ import json
 from collections import Counter
 from pathlib import Path
 
-from app.classification import MIN_CONFIDENCE, Intent, IntentClassifier, classify_by_keywords
+from app.classification import Intent, IntentClassifier, classify_by_keywords, min_confidence
 from app.providers import ModelMap, OpenAICompatibleProvider
 from app.settings import settings
 
@@ -134,7 +134,7 @@ def _report_losses(
     if threshold:
         print(
             f"  -> {threshold} CORRECT answers were discarded as low-confidence. "
-            f"MIN_CONFIDENCE is {MIN_CONFIDENCE}."
+            f"INTENT_MIN_CONFIDENCE is {min_confidence()}."
         )
     if parsing:
         print(f"  -> {parsing} replies did not parse at all")

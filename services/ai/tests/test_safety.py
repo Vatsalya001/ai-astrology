@@ -331,24 +331,67 @@ class TestTheStaticResponse:
 
         assert load_crisis_response("en") == path.read_text().strip()
 
-    def test_it_carries_a_helpline_number(self) -> None:
-        """The riskiest line in this repository.
+    def test_it_carries_a_route_to_trained_help(self) -> None:
+        """The property that replaced "carries a phone number".
 
-        A wrong number costs someone in crisis the one attempt they were
-        willing to make. This test proves a number is PRESENT; it cannot
-        prove the number is right, and nothing automated can. A human
-        must dial each one before this ships — recorded as an open item
-        in docs/PROJECT_STATUS.md, not as done.
+        Three Indian helplines used to be listed here. They were
+        TRANSCRIBED, not dialled — and a transcribed number is a claim
+        about the world that goes stale without anything in this
+        repository changing.
+
+        A wrong helpline number is worse than no number: it costs
+        someone in crisis the one attempt they were willing to make, and
+        they do not try again. The old test proved a *number* was
+        present, never that it *connects*, which is the only thing that
+        matters and the one thing no test can do.
+
+        `findahelpline.com` is maintained by people whose job that is,
+        covers every country rather than one, and cannot go stale here.
         """
-        text = load_crisis_response("en")
+        for language in ("en", "hi"):
+            text = load_crisis_response(language)
+            assert "findahelpline.com" in text, f"{language} offers no route to help"
 
-        digits = re.findall(r"\d[\d\s\-+]{4,}", text)
-        assert digits, "the crisis response contains no phone number at all"
+    @pytest.mark.parametrize("language", ["en", "hi"])
+    def test_no_unverified_phone_number_creeps_back(self, language: str) -> None:
+        """The guard that replaces the removed numbers.
 
-    def test_it_names_more_than_one_service(self) -> None:
-        # One number that happens to be busy is one number.
-        text = load_crisis_response("en").lower()
-        assert sum(name in text for name in ("tele-manas", "aasra", "vandrevala")) >= 2
+        Local numbers ARE a better answer than a directory lookup for
+        someone in distress, so they should come back — once a human has
+        dialled them. This fails if one is added without a `verified:`
+        marker recorded alongside it, so the good version of this change
+        is easy and the careless one is not.
+
+        See `app/safety/responses/README.md` for the procedure.
+        """
+        path = crisis_module.RESPONSES_DIR / f"crisis.{language}.md"
+        text = path.read_text()
+
+        # A run of digits long enough to be a phone number. "24x7" and a
+        # year do not reach it.
+        numbers = re.findall(r"\+?\d[\d\s\-]{6,}", text)
+
+        if numbers and "verified:" not in text.lower():
+            pytest.fail(
+                f"crisis.{language}.md contains what looks like a phone number "
+                f"({numbers[0].strip()!r}) with no verification date. A transcribed "
+                f"helpline number that nobody dialled is worse than none: it costs "
+                f"someone in crisis their one attempt. Dial it, then record "
+                f"`verified: YYYY-MM-DD` in the file."
+            )
+
+    def test_the_removal_is_documented_where_someone_would_look(self) -> None:
+        """A README beside the files, not a commit message.
+
+        Somebody will eventually wonder why an Indian astrology product
+        points Indian users at an international directory. The answer
+        needs to be next to the files, or the numbers come back
+        un-dialled.
+        """
+        readme = crisis_module.RESPONSES_DIR / "README.md"
+
+        assert readme.exists()
+        assert "dialled" in readme.read_text()
 
     def test_it_makes_no_prediction(self) -> None:
         """An astrological reading is never the right answer here.

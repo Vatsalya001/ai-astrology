@@ -25,7 +25,7 @@ import sys
 import time
 from collections import Counter
 
-from app.classification import MIN_CONFIDENCE, IntentClassifier, classify_by_keywords
+from app.classification import IntentClassifier, classify_by_keywords, min_confidence
 from app.providers import ModelMap, OpenAICompatibleProvider
 from app.settings import settings
 
@@ -130,7 +130,7 @@ async def main() -> int:
     )
     print(
         f"  CORRECT answers discarded by the threshold: {lost_to_threshold}"
-        f"  (MIN_CONFIDENCE = {MIN_CONFIDENCE})"
+        f"  (MIN_CONFIDENCE = {min_confidence()})"
     )
     print(f"  source breakdown: {dict(sources)}")
     if discarded_confidences:

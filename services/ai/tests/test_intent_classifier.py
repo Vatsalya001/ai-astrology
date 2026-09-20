@@ -15,8 +15,15 @@ from typing import Any
 
 import pytest
 
-from app.classification import INTENT_SCHEMA, Intent, IntentClassifier
+from app.classification import INTENT_SCHEMA, Intent, IntentClassifier, min_confidence
 from app.providers import CompletionRequest, MockProvider, request_fingerprint
+
+# Relative to the live threshold, not a literal. `INTENT_MIN_CONFIDENCE`
+# is a setting now, and a test hardcoding 0.55 silently stops testing
+# "below the threshold" the moment the threshold moves past it — which
+# is exactly what happened when it went from 0.6 to 0.4.
+BELOW = round(min_confidence() - 0.05, 2)
+ABOVE = round(min_confidence() + 0.05, 2)
 
 
 def a_provider(tmp_path: Path, **kwargs: Any) -> MockProvider:
@@ -232,7 +239,7 @@ class TestTheFallback:
         not.
         """
         classifier = IntentClassifier(
-            answering(tmp_path, {"primary": "medical", "confidence": 0.55})
+            answering(tmp_path, {"primary": "medical", "confidence": BELOW})
         )
 
         result = await classifier.classify("something about my health maybe")
@@ -243,7 +250,7 @@ class TestTheFallback:
         # The negative case: a fallback that fired at every confidence
         # would pass the test above and classify nothing.
         classifier = IntentClassifier(
-            answering(tmp_path, {"primary": "medical", "confidence": 0.6})
+            answering(tmp_path, {"primary": "medical", "confidence": min_confidence()})
         )
 
         result = await classifier.classify("something about my health maybe")
@@ -371,14 +378,14 @@ class TestTheDiscardedAnswerIsRecorded:
 
     async def test_a_discarded_answer_is_kept(self, tmp_path: Path) -> None:
         classifier = IntentClassifier(
-            answering(tmp_path, {"primary": "career", "confidence": 0.55})
+            answering(tmp_path, {"primary": "career", "confidence": BELOW})
         )
 
         result = await classifier.classify("something ambiguous")
 
         assert result.primary is Intent.GENERAL_ASTROLOGY, "the policy must still apply"
         assert result.fallback_from is Intent.CAREER
-        assert result.fallback_confidence == 0.55
+        assert result.fallback_confidence == BELOW
 
     async def test_a_confident_answer_records_no_discard(self, tmp_path: Path) -> None:
         # The negative case: a field set on every result would make the
@@ -411,7 +418,7 @@ class TestTheDiscardedAnswerIsRecorded:
         input would mean the measurement changed the thing it measures.
         """
         classifier = IntentClassifier(
-            answering(tmp_path, {"primary": "medical", "confidence": 0.55})
+            answering(tmp_path, {"primary": "medical", "confidence": BELOW})
         )
 
         result = await classifier.classify("something about my health maybe")
@@ -419,3 +426,75 @@ class TestTheDiscardedAnswerIsRecorded:
         assert result.primary is Intent.GENERAL_ASTROLOGY
         assert result.confidence == 0.0
         assert result.requires_safety_review is True
+
+
+# ─── the threshold is configuration, not a constant ──────────────────
+
+
+class TestTheThresholdIsASetting:
+    """§6 specifies 0.6; this ships 0.4, and the deviation is a setting.
+
+    The number is applied to a SELF-REPORTED confidence, and small local
+    models do not calibrate one — measured, llama3.2:1b had ten correct
+    answers discarded by 0.6 out of twelve it got right.
+
+    0.4 is tuned to a weak local model and production runs Claude, whose
+    calibration is different and unmeasured. A constant would make
+    re-tuning a deploy; a setting makes it `INTENT_MIN_CONFIDENCE=0.6`
+    in an env file, which is what Phase 6's eval harness will turn.
+    """
+
+    def test_the_shipped_default_is_the_documented_one(self) -> None:
+        from app.settings import Settings
+
+        assert Settings(_env_file=None).intent_min_confidence == 0.4  # type: ignore[call-arg]
+
+    async def test_raising_it_discards_more(self, tmp_path: Path) -> None:
+        """The setting must actually reach the decision.
+
+        A setting nothing reads is worse than a constant: it reads as
+        configurable and is not, so an operator changes it during an
+        incident and nothing happens.
+        """
+        from app.settings import settings
+
+        answer = {"primary": "career", "confidence": 0.5}
+
+        original = settings.intent_min_confidence
+        try:
+            settings.intent_min_confidence = 0.3
+            kept = await IntentClassifier(answering(tmp_path, answer)).classify("q")
+
+            settings.intent_min_confidence = 0.7
+            dropped = await IntentClassifier(answering(tmp_path, answer)).classify("q")
+        finally:
+            settings.intent_min_confidence = original
+
+        assert kept.primary is Intent.CAREER, "0.5 should survive a 0.3 threshold"
+        assert dropped.primary is Intent.GENERAL_ASTROLOGY, "0.5 should not survive 0.7"
+        assert dropped.fallback_from is Intent.CAREER
+
+    async def test_it_is_read_per_call_not_captured_at_import(self, tmp_path: Path) -> None:
+        """A module-level constant would freeze whatever the environment
+        said when the first import happened.
+
+        That makes the setting untestable and an admin change a restart
+        — and the test above would pass anyway if the value were read
+        once at class construction.
+        """
+        from app.settings import settings
+
+        classifier = IntentClassifier(answering(tmp_path, {"primary": "career", "confidence": 0.5}))
+
+        original = settings.intent_min_confidence
+        try:
+            settings.intent_min_confidence = 0.3
+            first = await classifier.classify("q")
+            # Same classifier object, threshold changed underneath it.
+            settings.intent_min_confidence = 0.7
+            second = await classifier.classify("q")
+        finally:
+            settings.intent_min_confidence = original
+
+        assert first.primary is Intent.CAREER
+        assert second.primary is Intent.GENERAL_ASTROLOGY
