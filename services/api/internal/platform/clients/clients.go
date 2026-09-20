@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Vatsalya001/ai-astrology/services/api/internal/platform/clients/aiclient"
@@ -115,6 +116,16 @@ func (a *Astro) Health(ctx context.Context) error {
 
 type AI struct {
 	api *aiclient.ClientWithResponses
+
+	// Bounds concurrent model calls per process. See ai_complete.go —
+	// a counting semaphore, because the resource being protected is
+	// concurrent SPEND rather than request rate.
+	//
+	// Lazily created so a zero-value AI (and every existing test that
+	// builds one) still works; `slotsOnce` is what makes that safe
+	// under concurrent first calls.
+	slots     chan struct{}
+	slotsOnce sync.Once
 }
 
 func NewAI(baseURL, token string, timeout time.Duration) (*AI, error) {

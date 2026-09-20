@@ -2135,3 +2135,96 @@ schemas, `CostMicros *int64`.
 
 414 Python tests. Seven deliberate breaks of the orchestrator, seven failures.
 `task verify` green.
+
+---
+
+# Phase 4.17, 4.18, 4.19 — Go writes what Python cannot
+
+## The constraint became the design
+
+`ai-service` connects as `astro_ro` and cannot write. §8 turns that into the
+architecture: Python returns telemetry in the response envelope, Go persists it, and
+from Phase 5 that INSERT runs in the same transaction as the message. A request that
+cost money therefore cannot be missing from the bill because a separate logging call
+failed.
+
+## `ON DELETE SET NULL`, not CASCADE
+
+CASCADE is the reflex and it is wrong here. Phase 7 reconciles invoices that were
+already issued, and a row that vanished cannot be reconciled against anything.
+Nulling the ID removes the link to the person and leaves the money — which is what
+"delete my account" should mean for a billing record, and is only safe because the
+row carries no content.
+
+Proved against real Postgres: insert a log for a user, delete the user, assert the
+cost survives and `user_id` is NULL.
+
+## Three tests about money, one of which was measuring itself
+
+`cost_micros` is `BIGINT`. The test stores 2^53 + 1 — a value no float64 holds — and
+asserts it round-trips. Break-tested by changing the column to `DOUBLE PRECISION`:
+it comes back as 2^53, one less than written.
+
+The first version added a second assertion meant to "detect the collapse":
+`float64(row.CostMicros) == float64(beyondFloat64-1)`. **It failed against a working
+BIGINT**, because the conversion happens in the *test* rather than in the column —
+casting any int64 of 2^53+1 to float64 rounds it down regardless. An assertion
+measuring the test instead of the subject, found by running it.
+
+Token counts **clamp** rather than wrap on the narrowing to `INTEGER`. A plain
+`int32(x)` above 2^31 wraps, frequently negative, which then fails the column's
+`>= 0` CHECK and rejects the whole row — losing a real cost record over an
+implausible token count. Cost is deliberately *not* clamped: it is BIGINT and needs
+no narrowing, and clamping money would silently discard a charge.
+
+## The most expensive silent bug in the client had no test
+
+Break-testing found it. Adding `ctx = MarkIdempotent(ctx)` to `Complete` — one line,
+exactly what someone copying the astro client would write — left the **entire suite
+green** while turning every 5xx into three paid model calls.
+
+A chart computation is safe to replay: `astro-service` has no database, so there is
+no write to duplicate. A completion is not. `TestAFailedCompletionIsNotReplayed`
+exists because nothing caught that, and it probes with a 503 — a status the retry
+transport *would* retry, so it can tell the two cases apart.
+
+## Rate limiting bounds spend, not throughput
+
+§14 lists rate limiting on the internal completion path and says why: *"a runaway
+loop is a real cost event"*. The provider's own 429 arrives **after** the money is
+spent.
+
+A counting semaphore rather than a token bucket, because the resource is concurrent
+*spend*. Ten requests a second finishing in 200ms cost far less than two running for
+a minute each, and a rate limiter cannot tell them apart. Non-blocking rather than
+queueing: a caller waiting behind a full queue eventually times out having achieved
+nothing, while the user watched a spinner.
+
+Three tests, all break-tested: the bound holds under 2× load, slots are released on
+success, and slots are released **on failure** — the leak that matters, because an
+outage would otherwise permanently reduce capacity after recovery.
+
+## SUPER_ADMIN, and the guard is on the group
+
+`auth.RequireRole` compares roles exactly with no hierarchy, so naming only
+SUPER_ADMIN genuinely excludes ADMIN. The line is drawn there because the playground
+spends real money against the production provider on demand.
+
+Four break tests, four failures:
+
+| Break | Caught by |
+|---|---|
+| Drop `RequireRole` | every role reached every route |
+| Admit ADMIN too | the role matrix |
+| Mount one route outside the group | that route alone, on every role *and* unauthenticated |
+| Remove the 90-day window cap | a forty-year window was accepted |
+
+The playground has **no `user_id` field**. §14: *"Playground cannot be pointed at
+real user data."* It runs with no chart context, so the validator's empty-index rule
+treats any personal placement in the answer as a fabrication — it cannot even
+accidentally produce a reading about a real person. Its runs are also deliberately
+**not** recorded in `ai_request_logs`: an operator experimenting would corrupt the
+cost-per-request figure that table exists to produce, invisibly, because the rows
+look identical.
+
+`task verify` green. Go unit and integration suites green against real Postgres.
