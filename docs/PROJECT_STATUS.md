@@ -2283,3 +2283,98 @@ on one provider and wrong on another, multiplying the bill by the chunk count on
 long answers that are already the expensive ones.
 
 **496 Python tests.** `task verify` green.
+
+---
+
+# Phase 4 gate — one item not met, and 39 defects in my own work
+
+`docs/PHASE-04-GATE.md` is the full report. Two things belong here.
+
+## The gate item that fails
+
+> §17: *"Intent classifier ≥85% on 200 labelled messages, keyword pre-pass working."*
+
+| | |
+|---|---|
+| Keyword pre-pass | **100% precision at 41% coverage**, asserted in CI |
+| `llama3.2:3b`, model only | **40.0%** |
+| `qwen2.5:7b`, model only | **60.5%** |
+| Target | **85%** |
+
+A free local model does not reach 85% on a 21-way classification. §15 predicted
+exactly this — *"free local models behave differently from Claude, so dev quality
+misleads"* — and this is that prediction coming true with a number attached.
+
+Two candidate explanations were ruled out first, because both would have been *my*
+bug rather than the model's:
+
+- **The prompt never named its output fields.** `llama3.2:3b` answered
+  `{"intent": "career"}` — correct, and thrown away by validation. Fixed as `v2`,
+  with a worked example. v1 stays frozen and loadable; that is what the immutability
+  guarantee is for.
+- **The parser only stripped triple fences.** Local models wrap in single backticks
+  and prose too.
+
+What would close it is a run against the paid provider — production is Claude — not
+tuning the prompt against these 200 messages. They are the regression suite; a number
+produced by fitting to them would not generalise, and that is what Phase 6's eval
+harness is for.
+
+## 39 confirmed defects, in code I had just declared green
+
+A nine-dimension adversarial review — 156 agents, every finding put to three
+independent skeptics with distinct lenses — over a phase whose `task verify` was
+already passing.
+
+The three that mattered most were all the same shape: **a guarantee that held
+everywhere except the one path where it mattered.**
+
+1. **A crisis message could reach astrology generation.** I hardened the intent
+   classifier's JSON parser after observing `llama3.2:3b` wrap output in a single
+   backtick — and did not apply the same fix to the safety classifier. So the
+   *recoverable* path (a bad intent falls back to broad context) got the robust
+   parser, and the *unrecoverable* one did not. A model-detected crisis wrapped in a
+   backtick became `none`, the bypass never fired, and telemetry recorded
+   `safety_category: none` — indistinguishable from a safe message.
+
+   Fixed at the root: one parser, both callers. The test asserts the two handle
+   identical wrappers **identically**, because the *difference* was the bug.
+
+2. **True general statements were blocked as fabrications.** *"Saturn rules
+   discipline, and your 10th house is career"* — a wildcard proximity window matched
+   straight across the clause boundary and extracted a placement the sentence never
+   made. Four of five realistic general sentences tripped it. The validator had made
+   the product unable to **explain** astrology in order to stop it **inventing**
+   astrology.
+
+3. **Every completion was capped at 10s under a comment claiming 90.**
+   `http.Client.Timeout` bounds the whole call and a context deadline can only make a
+   request finish *sooner*. The 90s context was dead code, and the failure would have
+   appeared only on the deep tier — the most expensive request in the product.
+
+## The lesson, again, in a new place
+
+Six of the 39 were **vacuous tests**: assertions that passed whatever the
+implementation did.
+
+- `cost_micros` returning an `int` was asserted three ways, and a deliberately
+  *floating* implementation passed all three — `round()` returns an int, so the
+  assertions saw the cast and not the arithmetic.
+- A BIGINT round-trip test added a second assertion meant to detect float collapse
+  that **failed against a working BIGINT**, because the conversion happened in the
+  test rather than in the column.
+- `test_usage_arrives_at_most_once` used a one-word fixture, so `len(carrying) <= 1`
+  held trivially — satisfied by *zero*.
+- The credential-leak guard grepped for four strings its fixtures did not contain.
+- My own test for the prompt-injection fix **did not catch its own break**, because
+  the fixture used a violation whose excerpt is just the matched claim.
+
+Every one was found by breaking the thing the test claimed to protect and watching
+whether it failed. That remains the only method that works.
+
+And the verifiers caught three defects in the *fixers'* work, two in the safety path
+— negative lookaheads that matched a prefix rather than a word, so `to` swallowed
+*"take my life **to**night"*. An exclusion is the only kind of edit to a crisis list
+that moves the bias the wrong way, and three of them did.
+
+**836 Python tests. `task verify` green.**

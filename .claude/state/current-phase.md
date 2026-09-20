@@ -39,8 +39,18 @@ at `58fe1f2`. Three §11 security items were carried forward — see below.
 | 4.19 | Admin config, usage, incidents, playground | ✅ SUPER_ADMIN only, break-tested four ways |
 | 4.21 | Provider parity suite | ✅ one suite, four adapters, each through its own SDK |
 
-**496 Python tests** in `services/ai`, `mypy --strict` clean, both import contracts kept.
+**836 Python tests** in `services/ai`, `mypy --strict` clean, both import contracts kept.
 Go: `go build`/`go vet` clean, unit + integration suites green.
+
+**Phase 4 gate: one item NOT met** — intent-classifier accuracy. The keyword
+pre-pass is 100% precise at 41% coverage (CI-asserted), but a free local model
+reaches only 40% (`llama3.2:3b`) / 60.5% (`qwen2.5:7b`) against the spec's ≥85%.
+§15 predicted this. Full report: `docs/PHASE-04-GATE.md`.
+
+A nine-dimension adversarial review found **39 confirmed defects in this phase's own
+code**, all fixed and break-tested — including a crisis message that could reach
+astrology generation, true general statements blocked as fabrications, and every
+completion capped at 10s under a comment claiming 90.
 
 Owed to the Phase 4 gate and **not closeable by the suite**:
 
