@@ -176,3 +176,154 @@ class TestFormat:
         formatted = JSONFormatter("ai").format(record)
         assert "\n" not in formatted
         json.loads(formatted)
+
+
+# ─── §14: the key must be absent from every Sentry payload ───────────
+
+
+class TestTheSentryScrubber:
+    """`_scrub_event` was untested and covered only the REQUEST.
+
+    It strips sensitive headers, the query string, the body and cookies
+    — everything Sentry collects from the request. It did not touch the
+    place a provider key actually leaks: an exception MESSAGE.
+
+    Every adapter builds its own error from a status code so the key
+    cannot reach it, but each one does `raise _classify(err) from err`,
+    and Sentry serialises the whole `__cause__` chain. The vendor SDK's
+    own exception is in that chain, and an auth failure can name the
+    credential that failed.
+    """
+
+    KEY = "sk-ant-api03-" + "Z" * 32
+
+    def _event_with_key_in_an_exception(self) -> dict:
+        return {
+            "exception": {
+                "values": [
+                    {
+                        "type": "AuthenticationError",
+                        "value": f"401 invalid x-api-key: {self.KEY}",
+                        "stacktrace": {"frames": [{"vars": {"api_key": self.KEY}}]},
+                    }
+                ]
+            },
+            "breadcrumbs": {"values": [{"message": f"calling anthropic with {self.KEY}"}]},
+            "extra": {"provider_config": {"key": self.KEY}},
+            "request": {"headers": {"X-Internal-Token": "tok", "Accept": "application/json"}},
+        }
+
+    def test_the_key_is_scrubbed_from_an_exception_message(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from app import telemetry
+        from app.settings import settings
+
+        monkeypatch.setattr(settings, "llm_api_key", self.KEY)
+
+        scrubbed = telemetry._scrub_event(self._event_with_key_in_an_exception(), {})
+
+        assert scrubbed is not None
+        serialised = json.dumps(scrubbed)
+        assert self.KEY not in serialised, "the provider key survived into the Sentry payload"
+        assert "[REDACTED]" in serialised
+
+    def test_it_reaches_breadcrumbs_extra_and_stack_vars(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Named separately because each is a different nesting shape.
+
+        A scrubber that walked only `exception` would pass the test
+        above and leave the key in three other places Sentry renders.
+        """
+        from app import telemetry
+        from app.settings import settings
+
+        monkeypatch.setattr(settings, "llm_api_key", self.KEY)
+
+        scrubbed = telemetry._scrub_event(self._event_with_key_in_an_exception(), {})
+        assert scrubbed is not None
+
+        assert self.KEY not in json.dumps(scrubbed.get("breadcrumbs"))
+        assert self.KEY not in json.dumps(scrubbed.get("extra"))
+        assert self.KEY not in json.dumps(scrubbed.get("exception"))
+
+    def test_the_internal_token_is_scrubbed_too(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from app import telemetry
+        from app.settings import settings
+
+        token = "internal-token-that-is-long-enough"
+        monkeypatch.setattr(settings, "internal_token", token)
+
+        scrubbed = telemetry._scrub_event({"extra": {"note": f"sent {token}"}}, {})
+
+        assert scrubbed is not None
+        assert token not in json.dumps(scrubbed)
+
+    def test_ordinary_content_is_left_alone(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """The negative case.
+
+        A scrubber that redacted everything would pass every test above
+        and make error reporting useless — which is worse than the leak,
+        because nobody would notice it stopped working.
+        """
+        from app import telemetry
+        from app.settings import settings
+
+        monkeypatch.setattr(settings, "llm_api_key", self.KEY)
+
+        event = {"exception": {"values": [{"value": "connection refused to localhost:11434"}]}}
+        scrubbed = telemetry._scrub_event(event, {})
+
+        assert scrubbed is not None
+        assert "connection refused to localhost:11434" in json.dumps(scrubbed)
+
+    def test_a_short_secret_is_not_used_for_redaction(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A two-character "secret" would match inside ordinary words.
+
+        The dev default for a key is often "" or a placeholder, and
+        redacting on one would turn every event into redaction soup —
+        a scrubber nobody can read is a scrubber that gets disabled.
+        """
+        from app import telemetry
+        from app.settings import settings
+
+        monkeypatch.setattr(settings, "llm_api_key", "ab")
+
+        scrubbed = telemetry._scrub_event({"extra": {"note": "a fabulous absolute"}}, {})
+
+        assert scrubbed is not None
+        assert "fabulous" in json.dumps(scrubbed)
+
+    def test_a_genuinely_cyclic_structure_does_not_recurse_forever(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Error reporting must not become the outage.
+
+        The first version of this test built a 60-deep TREE and called
+        it cyclic. Python handles 60 frames without complaint, so it
+        passed with the depth bound removed — a test named for a hazard
+        it did not construct.
+
+        A dict containing itself is the real thing: without the bound
+        `_redact_secrets` follows the cycle until the interpreter stops
+        it, inside a `before_send` hook, while the process is already
+        handling an error.
+        """
+        from app import telemetry
+        from app.settings import settings
+
+        monkeypatch.setattr(settings, "llm_api_key", self.KEY)
+
+        cycle: dict = {"note": f"key is {self.KEY}"}
+        cycle["self"] = cycle
+        event = {"extra": cycle}
+
+        scrubbed = telemetry._scrub_event(event, {})
+
+        assert scrubbed is not None
+        # The top level is still scrubbed — the bound limits how deep it
+        # follows the cycle, it does not skip the work.
+        assert self.KEY not in str(scrubbed["extra"]["note"])

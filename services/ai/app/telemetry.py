@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 if TYPE_CHECKING:
     from fastapi import FastAPI
@@ -44,6 +44,68 @@ _SENSITIVE_HEADERS = frozenset(
 )
 
 
+# Below this length a "secret" is too short to redact safely: a
+# two-character value would match inside ordinary words and turn every
+# event into redaction soup. Real keys are far longer; a placeholder
+# like "" or "x" is not worth protecting.
+_MIN_REDACTABLE_SECRET = 12
+
+# Bound on recursion. A cyclic or pathological structure must not turn
+# error reporting into a hang — the same reasoning as the depth cap in
+# app/observability.py.
+_MAX_SCRUB_DEPTH = 12
+
+
+def _secret_values() -> tuple[str, ...]:
+    """The configured secrets, as VALUES to hunt for.
+
+    `_SENSITIVE_HEADERS` scrubs by header NAME, which covers what Sentry
+    collects from the request. It does not cover where a provider key
+    actually leaks: inside an exception MESSAGE.
+
+    The adapters build their own errors from a status code so the key
+    cannot reach them — but every one of them does `raise _classify(err)
+    from err`, and Sentry serialises the whole `__cause__` chain. The
+    SDK's own exception is in that chain, and an auth failure from a
+    vendor can name the credential that failed.
+
+    So the last line of defence is a value scan. It costs one string
+    walk per reported event, which only happens when something already
+    went wrong.
+    """
+    from app.settings import settings
+
+    return tuple(
+        value
+        for value in (settings.llm_api_key, settings.internal_token)
+        if value and len(value) >= _MIN_REDACTABLE_SECRET
+    )
+
+
+def _redact_secrets(value: object, secrets: tuple[str, ...], depth: int = 0) -> object:
+    """Replace any occurrence of a known secret, anywhere in the event.
+
+    Walks rather than pattern-matches: a regex for "things that look
+    like an API key" fails on the vendor whose format it does not know,
+    and this service talks to four vendors. The configured value is the
+    one thing that is certainly a secret.
+    """
+    if depth > _MAX_SCRUB_DEPTH:
+        return value
+
+    if isinstance(value, str):
+        for secret in secrets:
+            value = value.replace(secret, "[REDACTED]")
+        return value
+    if isinstance(value, dict):
+        return {k: _redact_secrets(v, secrets, depth + 1) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_redact_secrets(v, secrets, depth + 1) for v in value]
+    if isinstance(value, tuple):
+        return tuple(_redact_secrets(v, secrets, depth + 1) for v in value)
+    return value
+
+
 def _scrub_event(event: Event, _hint: Hint) -> Event | None:
     """Strip credentials and PII before an event leaves the process."""
     request = event.get("request")
@@ -66,6 +128,16 @@ def _scrub_event(event: Event, _hint: Hint) -> Event | None:
     if isinstance(user, dict):
         user_id = user.get("id")
         event["user"] = {"id": user_id} if user_id else {}
+
+    # Last, and over everything: exception messages, breadcrumbs, extra,
+    # contexts. §14 asks for the key to be absent from every Sentry
+    # payload, and the structural scrubbing above only covers what
+    # Sentry collected from the REQUEST.
+    secrets = _secret_values()
+    if secrets:
+        scrubbed = _redact_secrets(dict(event), secrets)
+        if isinstance(scrubbed, dict):
+            return cast("Event", scrubbed)
 
     return event
 
