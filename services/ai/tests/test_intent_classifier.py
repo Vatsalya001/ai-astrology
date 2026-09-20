@@ -14,8 +14,9 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from pydantic import ValidationError
 
-from app.classification import INTENT_SCHEMA, Intent, IntentClassifier, min_confidence
+from app.classification import INTENT_SCHEMA, Intent, IntentClassifier, IntentResult, min_confidence
 from app.providers import CompletionRequest, MockProvider, request_fingerprint
 
 # Relative to the live threshold, not a literal. `INTENT_MIN_CONFIDENCE`
@@ -498,3 +499,92 @@ class TestTheThresholdIsASetting:
 
         assert first.primary is Intent.CAREER
         assert second.primary is Intent.GENERAL_ASTROLOGY
+
+
+class TestAnAbsentEntityDoesNotDiscardTheAnswer:
+    """`null` and `""` mean the same thing for an optional extraction.
+
+    `Entities` fields are `str`, so a model answering `"timeframe":
+    null` failed validation and `_parse` returned None — discarding a
+    `primary` the model may have got exactly right.
+
+    Measured, not imagined. `intent_classification.v3` described each
+    entity as "<the period the message states, or \"\">" and llama3.2:3b
+    answered the description with `null`: unparseable replies went from
+    18 to **66 of 118**, and as-shipped accuracy FELL from 67.0% to
+    59.5% on a change that was otherwise an improvement.
+
+    v4 asks for `""` explicitly, but the coercion stays regardless. A
+    classifier that loses its answer over the spelling of "nothing" is
+    brittle against every model and every future prompt version, and no
+    prompt wording makes that acceptable.
+    """
+
+    @pytest.mark.parametrize("field", ["timeframe", "person", "topic"])
+    def test_a_null_entity_becomes_empty_rather_than_failing(self, field: str) -> None:
+        entities = {"timeframe": "", "person": "", "topic": ""} | {field: None}
+
+        result = IntentResult.model_validate(
+            {
+                "primary": "finance",
+                "confidence": 0.8,
+                "requires_safety_review": False,
+                "entities": entities,
+                "source": "model",
+            }
+        )
+
+        assert getattr(result.entities, field) == ""
+        # The point of the coercion: the CLASSIFICATION survives.
+        assert result.primary is Intent.FINANCE
+        assert result.confidence == 0.8
+
+    def test_all_three_null_at_once(self) -> None:
+        # What llama3.2:3b actually returned under v3.
+        result = IntentResult.model_validate(
+            {
+                "primary": "general_astrology",
+                "secondary": None,
+                "confidence": 0.9,
+                "requires_safety_review": False,
+                "entities": {"timeframe": None, "person": None, "topic": None},
+                "source": "model",
+            }
+        )
+
+        assert result.entities.timeframe == ""
+        assert result.primary is Intent.GENERAL_ASTROLOGY
+
+    def test_a_real_value_is_untouched(self) -> None:
+        """The negative case: coercing everything to "" would pass every
+        test above and silently delete every extraction the model made."""
+        result = IntentResult.model_validate(
+            {
+                "primary": "marriage",
+                "confidence": 0.9,
+                "requires_safety_review": False,
+                "entities": {"timeframe": "next year", "person": "my daughter", "topic": "timing"},
+                "source": "model",
+            }
+        )
+
+        assert result.entities.timeframe == "next year"
+        assert result.entities.person == "my daughter"
+
+    def test_a_non_string_is_still_refused(self) -> None:
+        """`null` is the only thing being forgiven.
+
+        A number or a list in an entity means the model misunderstood
+        the field, and accepting it would put an unexpected type into
+        context selection.
+        """
+        with pytest.raises(ValidationError):
+            IntentResult.model_validate(
+                {
+                    "primary": "finance",
+                    "confidence": 0.8,
+                    "requires_safety_review": False,
+                    "entities": {"timeframe": ["next", "year"], "person": "", "topic": ""},
+                    "source": "model",
+                }
+            )

@@ -38,124 +38,136 @@ a summary, because a gate report that buries its one failure is worth nothing.
 
 The pre-pass half is met and then some. The model half is not.
 
+**The as-shipped number is now measured, not bounded.** Four earlier attempts died on
+a wedged machine; three full 118-message runs completed on 2026-09-21.
+
 | | result |
 |---|---|
-| Keyword pre-pass | **100% precision at 41% coverage** — asserted in CI on every run |
-| `llama3.2:3b`, model only | **40.0%** (80/200) |
-| `qwen2.5:7b`, model only | **60.5%** (121/200) |
-| As shipped (pre-pass + model) | **not measured** — bounded at ≥ 60.5% |
+| Keyword pre-pass | **82/82 correct — 100% precision at 41% coverage**, re-verified by execution, not read off this table |
+| As shipped, prompt **v2** | **134/200 = 67.0%** |
+| As shipped, prompt **v3** | **119/200 = 59.5%** — a regression I shipped; see below |
+| As shipped, prompt **v4** | **134/200 = 67.0%** |
+| Model-only accuracy, v4 | 57/94 = **60.6%** on the messages that reach it |
+| Ceiling if the threshold discarded nothing | 139/200 = **69.5%** |
 
-The as-shipped run was killed twice: once by `/tmp` being cleared, once by Ollama
-becoming unresponsive after several hours of concurrent test load. The bound above is
-arithmetic, not an estimate: the pre-pass contributes 82 correct answers by
-construction, so as-shipped ≥ the model-only figure. The true value sits close to the
-lower bound, because the 82 messages the pre-pass takes are the keyword-obvious ones
-the model would mostly get right anyway.
+Read the last row first. Even a *perfect* confidence policy leaves this at 69.5%, so
+nothing about thresholds, parsing or prompts closes a 15-point gap. **A 3B local model
+does not do 21-way classification at 85%.** That is the finding, and §15 predicted it:
+*"Free local models behave differently from Claude, so dev quality misleads."*
 
-**A free local model does not reach 85% on a 21-way classification.** That is the
-honest finding, and §15 predicted it: *"Free local models behave differently from
-Claude, so dev quality misleads."*
+An earlier version of this report said *"the prompt is not the explanation"* and
+listed it as ruled out. **That was wrong, twice**, and the corrections are the most
+useful thing on this page:
 
-Two things are **not** the explanation, and were ruled out:
+- `intent_classification.v1` never named its output fields, so llama3.2:3b answered
+  `{"intent": "career"}` — correct, and discarded by validation. Fixed in v2.
+- `v2` then handed the model a literal `"confidence": 0.0` to copy, which is what the
+  next section is about. Fixed in v4.
 
-- **Not a broken prompt.** `intent_classification.v1` never named its output fields,
-  so llama3.2:3b answered `{"intent": "career"}` — correct, and discarded by
-  validation. That was a real bug and it is fixed (`v2` names every field, with a
-  worked example). v1 is frozen and still loadable, because that is what the
-  immutability guarantee is for.
-- **Not a broken parser.** Local models wrap JSON in fences, single backticks and
-  prose. `app/structured.py` handles all of them.
+Both were found by *measuring*, and both had been written off in prose first. What is
+genuinely ruled out is the parser: local models wrap JSON in fences, single backticks
+and prose, and `app/structured.py` handles all of them — 18 of 118 replies are still
+unparseable under v4, but they are empty or truncated rather than merely wrapped.
 
-### The loss is mostly OURS, not the model's
+### The confidence signal was ours, and it was broken
 
-The first measurement reported post-policy accuracy as though it were model
-accuracy. It is not. Three things discard a classification before it is scored — an
-unparseable reply, a provider error, and the **confidence threshold** — and the third
-silently turns a correct answer into a miss whenever the model is right but unsure.
+The single most useful line in the first completed run was not the accuracy:
 
-Partial run, `llama3.2:1b`, first 30 messages that reach the model:
+```
+discarded confidences: min 0.0, median 0.0, max 0.0
+```
 
-| | |
+Not a spread — a constant. `confidence` is a **required** field with no default, so
+`llama3.2:3b` was genuinely emitting `0.0` on answers it had got right. 19 correct
+labels discarded.
+
+**Root cause, proven causal rather than inferred.** `intent_classification.v2`'s
+output template gave `"confidence"` as a concrete `0.0` while every sibling field was
+a placeholder. A 3B model pattern-completes the nearest template: it substituted
+`primary` and copied the rest verbatim. Changing that one line to a placeholder and
+nothing else moved the same three messages from `0.0, 0.0, 0.0` to `0.5, 0.0, 0.8`.
+`qwen2.5:7b` ignores the template and reports ~0.8, which is why this stayed invisible
+until it was measured on the model that actually serves the `fast` tier.
+
+A template value that is also a plausible answer is indistinguishable from an
+instruction to give that answer.
+
+**This also makes the 0.6 → 0.4 threshold change inert**, and that is arithmetic from
+the measured data rather than a second run: every discarded confidence in the v2 run
+was exactly `0.0`, and no threshold above zero keeps a `0.0`. The same 19 correct
+answers are lost at either setting. The change neither helped nor hurt.
+
+Worth stating because the threshold was lowered on the strength of evidence that
+pointed at it, and the evidence turned out to point one level deeper. Lowering it was
+not wrong; it was aimed at a symptom whose cause was in the prompt.
+
+### v3 was a regression, and it is recorded as one
+
+v3 turned every template value into a placeholder. It fixed the confidence signal and
+broke something worse: the model answered the entity *descriptions* —
+`"<the period the message states, or \"\">"` — with `null` instead of `""`, which
+failed validation and discarded the whole classification. Unparseable replies went
+from 18 to **66 of 118**, and as-shipped accuracy fell to 59.5%.
+
+Two fixes, and the order matters:
+
+1. **`Entities` now coerces `null` to `""`.** This is the real defect. A classifier
+   that loses a correct `primary` over the spelling of "nothing" is brittle against
+   every model and every future prompt version, and no prompt wording makes that
+   acceptable.
+2. **v4 uses two worked examples** with *different* confidences instead of a template
+   with placeholders. Two differing values cannot be copied as one.
+
+**v4 scores 134/200 — exactly what v2 scored.** Model-only accuracy rose from 58.2% to
+60.6% and the discarded confidences finally show a spread rather than a constant, so
+the mechanism is genuinely fixed. But the bottom line did not move, and saying
+otherwise would be dressing up a tie.
+
+Three prompt versions were produced in one session. v2 and v4 are on the board; v3 is
+on it too, as a regression, because a gate report that only lists the attempts that
+worked is not a record of anything.
+
+### What the loss actually is
+
+Three things discard a classification before it is scored — an unparseable reply, a
+provider error, and the confidence threshold — and only the third is policy. Under v4:
+
+| | of 118 |
 |---|---|
-| Model answered **correctly** | 12 |
-| Product delivered | 2 |
-| **Discarded by the threshold** | **10 — 83% of the model's correct answers** |
+| Model answered | 94 |
+| ...correctly | 57 |
+| Unparseable or provider error | 24 |
+| Correct answers still discarded by the threshold | 18 |
 
-The sample is small and the model is the weakest one installed, so the *ratio* will
-not hold for a better model. But the mechanism is not in doubt, and it is arithmetic,
-not inference: none of those 30 rows is labelled `general_astrology`, so an
-unparseable reply cannot score "raw correct" by luck and every one of the 10 must be
-a low-confidence discard.
+The threshold is applied to a **self-reported** number, and `llama3.2:3b` still
+reports `0.0` on some answers it got right even under v4. `intent_min_confidence` is a
+setting precisely so this can be re-tuned against a real model without a deploy.
 
-The threshold is applied to a **self-reported** number. Small models are poorly
-calibrated and report low confidence on answers they got right.
+`IntentResult.fallback_from` and `.fallback_confidence` carry what policy overrode, so
+production reports this from the first request rather than needing the investigation
+repeated. That is also the right seam for Phase 5: §6 asks for *"GENERAL_ASTROLOGY
+**with broad context**"* — the safety property is the context BREADTH, not the
+discarded label, so Phase 5's builder can widen retrieval while keeping the model's
+best guess.
 
-**It is now 0.4, down from §6's 0.6, and that was the owner's call against my
-recommendation.** Recording both halves, because a doc that reports only the decision
-teaches nothing:
+### Why it took five attempts
 
-- *Against:* 0.6 is §6's number, and the evidence for moving it is a 30-message
-  partial run on `llama3.2:1b` — the weakest model installed. Tuning a policy constant
-  against a model production will never use is precisely the trap §15 describes.
-- *For:* the failure is asymmetric. A discarded correct answer costs a worse reply on
-  every request it touches; a kept wrong one costs the same as the fallback already
-  does, because `GENERAL_ASTROLOGY` is itself a guess. And Phase 5 is where the
-  threshold acquires real teeth — better to have the seam explicit now.
+Four runs were started and killed before any finished — an Ollama `llama-server` stuck
+in a runaway generation for hours at 350–970% CPU with the machine at load ~23, as a
+root-owned snap process that could not be killed from the session and did not release
+on `{"keep_alive": 0}`.
 
-What makes it safe to have been overruled: **the number is no longer a constant.**
-`intent_min_confidence` is a setting (`app/settings.py`), so production can move it
-without a deploy and the eventual measurement against a real model can be run at
-several values. `MIN_CONFIDENCE = 0.4` in `app/classification/intents.py` is the
-*default*, not necessarily what is running — read `min_confidence()`.
-
-The loss is also *visible* now: `IntentResult.fallback_from` and
-`.fallback_confidence` carry what policy overrode, so production reports it from the
-first request rather than needing this investigation repeated.
-
-**What would settle it:** `diagnose_intent_loss` run at 0.4 and at 0.6 against a
-hosted model. If a well-calibrated model loses nothing at 0.6, 0.4 is buying noise and
-should go back.
-
-It also marks the right seam for Phase 5. §6 asks for *"GENERAL_ASTROLOGY **with
-broad context**"* — the safety property is the context BREADTH, not the discarded
-label. Phase 4's context builders are stubs, so today discarding the label is the
-entire effect. Phase 5's builder can read `fallback_from` and `confidence` and widen
-retrieval while keeping the model's best guess for persona and tier, which satisfies
-§6 without throwing the answer away.
-
-### Why the full number is still missing
-
-Not for lack of trying — four runs were started and none finished.
-
-An Ollama `llama-server` process has been stuck in a runaway `qwen2.5:7b` generation
-for hours, holding 350–970% CPU with the machine at load ~23. It is a root-owned snap
-process, so it cannot be killed from this session, and Ollama's own
-`{"keep_alive": 0}` unload returns `done_reason: unload` without releasing it. Under
-that contention a single classification takes minutes, and 118 of them do not
-complete.
-
-This is a machine condition, not a property of the code or the model — and it is
-worth writing down, because "the measurement kept failing" and "the model is bad"
-would otherwise be indistinguishable in six months.
+It is worth writing down, because "the measurement kept failing" and "the model is
+bad" would otherwise be indistinguishable in six months. The machine freed at 02:17 on
+2026-09-21 (load 1.24) and three full runs completed back to back.
 
 ### What would close it
 
-1. **Free the machine** (one command, needs root):
+**Not this:** more local prompt work. Three versions were tried and the ceiling is
+69.5%. The next change that moves this number is a different model, not a better
+sentence.
 
-   ```bash
-   sudo snap restart ollama
-   ```
-
-2. **Re-run.** Either is enough; the second is faster and answers the diagnostic
-   question directly:
-
-   ```bash
-   cd services/ai
-   uv run python -m scripts.measure_intent_accuracy          # full, both passes
-   uv run python -m scripts.diagnose_intent_loss qwen2.5:7b  # deferred only, attributed
-   ```
-
-3. **Measure against a hosted model**, which does not need the local machine at all
+1. **Measure against a hosted model**, which does not need the local machine at all
    and is the run that actually matters — §15's whole point is that dev quality
    misleads. Both scripts now build whatever `LLM_PROVIDER` names and **print what
    they are talking to before they start**:

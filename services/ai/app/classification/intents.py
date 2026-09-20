@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from enum import StrEnum
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from app.providers.base import CallStats
 
@@ -116,6 +116,30 @@ class Entities(BaseModel):
         default="",
         description="A short noun phrase for what specifically is being asked.",
     )
+
+    @field_validator("timeframe", "person", "topic", mode="before")
+    @classmethod
+    def _absent_is_empty(cls, value: object) -> object:
+        """`null` means the same as `""` here, so accept both.
+
+        These are OPTIONAL extractions. Rejecting the whole object
+        because one came back `null` throws away a `primary` the model
+        may have got exactly right — and it did, 66 times out of 118.
+
+        Measured: `intent_classification.v3` describes each entity as
+        "<the period the message states, or \"\">", and llama3.2:3b
+        answered that description with `null` rather than `""`. Every
+        one of those parsed as far as pydantic and was then discarded,
+        so as-shipped accuracy FELL from 67.0% to 59.5% on a change that
+        was otherwise an improvement.
+
+        A prompt can ask for `""` — and v4 does, with a worked example
+        instead of a description. But a classifier that loses its answer
+        over the spelling of "nothing" is brittle against every model
+        and every future prompt version, and no prompt wording makes
+        that acceptable.
+        """
+        return "" if value is None else value
 
 
 class IntentResult(BaseModel):

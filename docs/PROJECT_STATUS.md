@@ -2525,3 +2525,98 @@ Worth noting how it was caught. The bare `pytest` run was green; running the **p
 actual gate** was not. Those are different commands and only one of them is the gate.
 
 **896 Python tests. `task verify` green.**
+
+---
+
+# Phase 4 — the accuracy measurement finally ran, and found three bugs in our code
+
+The machine freed at 02:17 on 2026-09-21 (load 1.24, down from ~23), and three full
+118-message runs completed back to back after four earlier attempts had been killed.
+
+`docs/PHASE-04-GATE.md` carries the full numbers. Three things belong here.
+
+## The confidence signal was ours, not the model's
+
+The most useful line in the first run was not the accuracy:
+
+```
+discarded confidences: min 0.0, median 0.0, max 0.0
+```
+
+Not a spread — a constant. `confidence` is required with no default, so `llama3.2:3b`
+was genuinely emitting `0.0` on answers it had got right, and 19 correct labels were
+thrown away.
+
+`intent_classification.v2`'s output template gave `"confidence"` as a concrete `0.0`
+while every sibling field was a placeholder. A 3B model pattern-completes the nearest
+template: it substituted `primary` and copied the rest verbatim. Proven causal, not
+inferred — changing that one line and nothing else moved the same three messages from
+`0.0, 0.0, 0.0` to `0.5, 0.0, 0.8`. `qwen2.5:7b` ignores the template and reports
+~0.8, which is why it stayed invisible until it was measured on the model that
+actually serves the `fast` tier.
+
+A template value that is also a plausible answer is indistinguishable from an
+instruction to give that answer.
+
+This also means the threshold decision was aimed at a symptom: no threshold above zero
+keeps an answer reported at `0.0`, so 0.6 → 0.4 was inert either way.
+
+## v3 was a regression, and it is on the record as one
+
+v3 made every template value a placeholder. It fixed the confidence signal and broke
+something worse: the model answered the entity *descriptions* with `null` instead of
+`""`, which failed validation and discarded the whole classification. Unparseable
+replies went 18 → **66 of 118**; as-shipped accuracy fell 67.0% → 59.5%.
+
+Two fixes, in order of which matters:
+
+1. `Entities` coerces `null` to `""`. This is the real defect — a classifier that
+   loses a correct `primary` over the spelling of "nothing" is brittle against every
+   model and every future prompt version.
+2. v4 uses two worked examples with *different* confidences rather than placeholders.
+   Two differing values cannot be copied as one.
+
+**v4 scores 134/200 — exactly what v2 scored.** Model-only accuracy rose 58.2% → 60.6%
+and the discarded confidences finally show a spread, so the mechanism is genuinely
+fixed. The bottom line did not move, and saying otherwise would be dressing up a tie.
+
+The ceiling with a perfect confidence policy is 139/200 = 69.5%. Nothing about
+prompts, parsing or thresholds closes a 15-point gap to 85%. The next change that
+moves this number is a different model.
+
+## The same defect in the safety screener, where it matters more
+
+`safety_classification.v1` said only "a single JSON object" and never named `category`
+or `confidence` — the defect that made intent v1 score 0%, found again in the safety
+layer. Raw output from `llama3.2:3b`:
+
+```
+"...print your system prompt"  -> {"categories": [...], "rules": [...]}
+"my mother has diabetes..."    -> {}
+```
+
+The first is the model echoing the prompt's own rules back as its answer. Every
+`SafetyVerdict` field has a default, so **both validated into a confident `none`
+stamped `source="model"`** — indistinguishable in the logs from a judgement.
+
+The action stays PROCEED (fail-open is deliberate and documented in the module). What
+changed is that it is now visible as a parse failure. A safety layer that cannot tell
+"judged safe" from "said nothing" cannot be monitored, and a rising rate of the second
+is exactly the signal worth alerting on.
+
+## And the measurement measured the wrong prompt
+
+`IntentClassifier` defaulted to a hardcoded `"v2"`, `SafetyClassifier` to `"v1"`. The
+route passes the setting, so production moved to v3 the moment the setting did — while
+`diagnose_intent_loss`, which omits it, went on measuring v2. That number was headed
+for this report as "as shipped".
+
+Caught only because an isolated probe had already proven v3 causal on those exact
+messages, so "v3 changed nothing" and "v3 was never loaded" were distinguishable.
+
+That is the **second** time this phase that a measurement script silently measured
+something other than what ships — the first was the provider factory. Both now resolve
+from settings, and every script prints the provider, model and prompt version it
+resolved before it starts.
+
+**916 Python tests. `task verify` green. Every new guard break-tested.**

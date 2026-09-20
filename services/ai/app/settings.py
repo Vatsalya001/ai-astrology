@@ -167,7 +167,7 @@ class Settings(BaseSettings):
     # app/classification/classifier.py) — defaulting to it would demote
     # the classifier to useless as a side effect of declaring a setting.
     prompt_version_chat: str = Field(default="v1", pattern=r"^v[0-9]+$")
-    prompt_version_intent: str = Field(default="v3", pattern=r"^v[0-9]+$")
+    prompt_version_intent: str = Field(default="v4", pattern=r"^v[0-9]+$")
     # v2, not the hardcoded v1 the screener used to carry. v1 said only
     # "a single JSON object" and never named `category` or `confidence`,
     # so llama3.2:3b emitted `{}` and once echoed the prompt's own rules

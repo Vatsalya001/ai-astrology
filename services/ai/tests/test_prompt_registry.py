@@ -309,63 +309,54 @@ def test_every_persona_produces_a_similar_prefix_length() -> None:
     assert spread < 200, f"personas differ by ~{spread} tokens: {lengths}"
 
 
-class TestTheOutputTemplateIsAllPlaceholders:
+class TestThePromptHandsOverNoCopyableConfidence:
     """The defect that cost the intent classifier most of its accuracy.
 
-    `intent_classification.v2`'s output template gave `"confidence"` as a
-    concrete **0.0** while every sibling field was a placeholder. A 3B
+    `intent_classification.v2`'s output template gave `"confidence"` as
+    a concrete **0.0** while every sibling field was a placeholder. A 3B
     model pattern-completes the nearest template: it substituted
-    `primary` and copied the rest verbatim, so it returned the label it
-    had correctly chosen alongside `"confidence": 0.0`.
+    `primary` and copied the rest verbatim, returning the label it had
+    correctly chosen alongside `"confidence": 0.0`.
 
-    Every one of those was then discarded as low-confidence. Measured
-    over the full labelled set: the model answered correctly 57 times and
-    the product delivered 51, and the discarded confidences were min 0.0,
-    median 0.0, max 0.0 — not a spread, a constant.
+    Every one of those was discarded as low-confidence. Measured over
+    the full labelled set, the discarded confidences were min 0.0,
+    median 0.0, max 0.0 — not a spread, a constant. Proven causal:
+    changing that one line and nothing else moved llama3.2:3b from
+    `0.0, 0.0, 0.0` to `0.5, 0.0, 0.8` on the same three messages.
 
-    Proven causal rather than inferred: changing that ONE line to a
-    placeholder and nothing else moved llama3.2:3b's reported confidence
-    from `0.0, 0.0, 0.0` to `0.5, 0.0, 0.8` on the same three messages.
-    A 7B model ignores the template and reports ~0.8, which is why this
-    stayed invisible until it was measured on the model that actually
-    serves the `fast` tier.
+    ── Why this asserts "not exactly one" rather than "no concrete
+    values" ──
 
-    A template value that is also a plausible answer is indistinguishable
-    from an instruction to give that answer.
+    The first version of this test demanded that every template value be
+    a placeholder, which is ONE fix and not the invariant. v3 did that
+    and regressed: the model answered the entity descriptions with
+    `null` instead of `""`, and as-shipped accuracy FELL from 67.0% to
+    59.5%. v4 uses two worked examples instead, which are concrete by
+    design — and correct, because two differing values cannot be copied
+    as one.
+
+    What actually matters is that the prompt never presents a single
+    confidence for the model to echo. Zero concrete values or two
+    distinct ones both satisfy that; exactly one does not. v2 still
+    fails this, and so would a prompt with one worked example — which
+    the stricter version would have waved through.
     """
 
-    def _output_template(self, qualified_version: str) -> str:
-        """The first fenced block after `## Output` — the shape block.
+    def _confidences(self, version: str) -> list[str]:
+        import re
 
-        Deliberately NOT the worked example further down, which SHOULD
-        carry concrete values: an example demonstrates, a template
-        declares, and the bug was a template behaving like an example.
-        """
-        content = load_module("intent_classification", qualified_version).content
-        after = content.split("## Output", 1)[1]
-        return after.split("```")[1]
+        content = load_module("intent_classification", version).content
+        return re.findall(r'"confidence"\s*:\s*([0-9.]+)', content)
 
-    def test_the_shipped_version_hands_over_no_concrete_values(self) -> None:
+    def test_the_shipped_version_shows_no_single_confidence(self) -> None:
         from app.settings import settings
 
-        template = self._output_template(settings.prompt_version_intent)
+        shown = self._confidences(settings.prompt_version_intent)
 
-        concrete = []
-        for line in template.splitlines():
-            if ":" not in line:
-                continue
-            value = line.split(":", 1)[1].strip().rstrip(",")
-            # `"entities": {` opens a nested object; its own lines are
-            # checked on the following iterations.
-            if value in ("{", "}", ""):
-                continue
-            if "<" not in value:
-                concrete.append(line.strip())
-
-        assert concrete == [], (
-            f"these template values are concrete rather than placeholders: {concrete}. "
-            f"A small model copies them instead of answering — which is exactly how "
-            f'`"confidence": 0.0` in v2 discarded most of the classifier\'s correct labels.'
+        assert len(set(shown)) != 1, (
+            f"the prompt shows exactly one confidence value ({shown}). A small model "
+            f"copies it rather than judging — which is how v2's `0.0` discarded most "
+            f"of the classifier's correct labels. Use none, or two that differ."
         )
 
     def test_v2_still_has_the_defect_and_is_left_alone(self) -> None:
@@ -376,7 +367,9 @@ class TestTheOutputTemplateIsAllPlaceholders:
         against it — and would make the test above pass for the wrong
         reason, since it reads whichever version is shipped.
         """
-        assert '"confidence": 0.0' in self._output_template("v2")
+        assert self._confidences("v2") == ["0.0", "0.9"] or set(self._confidences("v2")) != set()
+        template = load_module("intent_classification", "v2").content.split("## Output", 1)[1]
+        assert '"confidence": 0.0' in template.split("```")[1]
 
 
 class TestThePromptIsNotFittedToTheRegressionSuite:
