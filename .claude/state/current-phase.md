@@ -28,13 +28,24 @@ at `58fe1f2`. Three §11 security items were carried forward — see below.
 | 4.4 | `AnthropicProvider` — caching, effort, refusal | ✅ offline; **one real-key run still owed** — `docs/PROVIDER-VERIFICATION.md` |
 | 4.5 | `GoogleProvider` + free embeddings | ✅ offline; free-tier run still owed |
 | — | `app/pricing.py` — tokens to integer micro-USD | ✅ unpriced model raises rather than costing 0 |
-| 4.12–4.21 | | not started |
+| 4.12 | Intent classifier + keyword pre-pass | ✅ pre-pass **100% precision at 41% coverage**, asserted in CI |
+| 4.13 | Safety input classifier + crisis short-circuit | ✅ static response, never generated; startup guard |
+| 4.14 | Output validator incl. `fabricated_chart_fact` | ✅ personal claims checked against the fact index |
+| 4.20 | 200-message labelled intent dataset | ✅ synthetic, all 21 intents, 18 marked ambiguous |
+| 4.15–4.19, 4.21 | | not started |
 
-**250 Python tests** in `services/ai`, `mypy --strict` clean, both import contracts kept.
+**381 Python tests** in `services/ai`, `mypy --strict` clean, both import contracts kept.
 
-Owed to the Phase 4 gate and **not closeable by the suite**: one real-key run per
-paid provider. Procedure and the exact numbers to read are in
-`docs/PROVIDER-VERIFICATION.md`; `uv run python -m scripts.verify_provider anthropic`.
+Owed to the Phase 4 gate and **not closeable by the suite**:
+
+- One real-key run per paid provider — `docs/PROVIDER-VERIFICATION.md`,
+  `uv run python -m scripts.verify_provider anthropic`.
+- The ≥85% intent-accuracy number — `uv run python -m scripts.measure_intent_accuracy`
+  against local Ollama. CI asserts the keyword pre-pass only, which is the half that
+  is pure code.
+- **A human must dial each crisis helpline number** in
+  `services/ai/app/safety/responses/`. No test can check a phone number is correct,
+  and a wrong one costs someone the single attempt they were willing to make.
 
 ---
 

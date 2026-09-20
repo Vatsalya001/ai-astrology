@@ -1,10 +1,12 @@
 {
  "astrology_rules.v1": "81535319602cfdfc9b36dc70cff84608060e688c0dbf09e1a4863d22d6457937",
+ "intent_classification.v1": "326c6bf13e2a7c91451cf3dab7a5878760145a0f8647c18975fcc8178867335b",
  "output_format.v1": "c94ac7ef4f48c2654c590b2488259d5d0bfd3a977159a94802155919fcd5dcac",
  "personas/career_guide.v1": "b947a83591d67da056bf64758b99080cf2a947ff4950b1de50b96f28da664e26",
  "personas/relationship_guide.v1": "0bfbd8884679d25c2390080dbf9156fd84ebf15c9958876fc9f1b1ea0b079fc7",
  "personas/spiritual_guide.v1": "13806c664fb5009b7077674d2771fdff5153fec065b6ac7f6177c887b37b1ad3",
  "personas/vedic_guide.v1": "4c63ad56a37d83722729a1d147e55cabb0fde4c7e2b60212594f197511e8a8f8",
+ "safety_classification.v1": "1954a1336551606617ff03100a7345382f3a0c6ac5edebc65c61a9dce311aba9",
  "safety_rules.v1": "4733302ab7b066084d043f6756680d38b392bddd0be1acce4a8cbea6f132de0f",
  "system_base.v1": "87abc6d7b437f081dee7877e74dea19b0248de16ba0d28cb21bbf4a545559765"
 }
