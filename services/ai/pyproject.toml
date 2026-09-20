@@ -99,6 +99,7 @@ name = "Vendor SDKs live only in app.providers"
 type = "forbidden"
 source_modules = [
     "app.api",
+    "app.classification",
     "app.guards",
     "app.main",
     "app.middleware",
@@ -106,9 +107,11 @@ source_modules = [
     "app.pricing",
     "app.prompts",
     "app.routing",
+    "app.safety",
     "app.schemas",
     "app.settings",
     "app.telemetry",
+    "app.validation",
 ]
 forbidden_modules = [
     "openai",

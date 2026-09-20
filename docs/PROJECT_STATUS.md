@@ -1918,3 +1918,126 @@ previously asserted a conflict was reasoning, not observation; it now states the
 verifiable fact.
 
 250 Python tests. `task verify` green.
+
+---
+
+# Phase 4.12, 4.13, 4.14, 4.20 — classify, screen, and check the answer
+
+## The pre-pass trades coverage for precision, and it is not a close call
+
+PHASE-04 §6 wants a keyword pre-pass so roughly 40% of messages skip the model
+entirely. The asymmetry that shapes the whole design: a **deferred** message costs
+one `fast`-tier call; a **wrongly matched** message never reaches the model at all.
+It retrieves the wrong chart facts, answers in the wrong persona, and if the true
+intent was MEDICAL it skips the posture that intent carries. Nothing downstream can
+recover, because nothing downstream knows a decision was made.
+
+So: exactly one rule matches, or defer. Ties are never broken by rule order.
+
+Measured on the 200-message set: **100% precision at 41% coverage.** Getting there
+found two real things.
+
+### The first-person gate
+
+Four messages were misclassified, and three shared a shape:
+
+```
+which house rules career in vedic astrology
+what does the 7th house signify for marriage generally
+is mercury retrograde a real thing or superstition
+```
+
+Each carries a strong keyword. None is about the person asking. Answered as personal
+questions they retrieve the user's chart for a question that was never about them.
+
+The fix is one condition — **the message must refer to the asker** — and it is safe
+in a way a tie-break is not: a suppressor can only move a message from "decided" to
+"deferred", so the worst case is one cheap call on a message that would have been
+right. Coverage fell from 52% to 41%, which is where the spec's estimate put it
+anyway. Hinglish pronouns are in the pattern, because a guard that works for users
+who write in English and fails for users who write in Hinglish is not a partial
+guard — it is a hole shaped like a demographic.
+
+The fourth miss was an ordinary gap: "kids" was missing from FAMILY.
+
+### A test that grepped prose, twice
+
+`test_the_rows_flagged_as_ambiguous_are_deferred` failed twice before it was right:
+
+1. It conflated **semantic** ambiguity ("my mother has not been well" is
+   family-or-health to a reader) with **lexical** ambiguity (two rules match). Only
+   the second is something a keyword matcher can act on.
+2. Rewritten to grep the `why` field for the word "fire", it failed on a row whose
+   note claimed FAMILY and LEGAL both matched — when "uncle" was not in FAMILY at
+   all. Worth having: it found a real gap (the extended relations are now there, and
+   a joint family is the default frame for much of this audience) and it showed that
+   an assertion keyed on prose tests the prose.
+
+Now an explicit `ambiguous: true` field — hand-declared, so it can be wrong in a way
+a test catches.
+
+## The crisis response is a file, not a prompt
+
+A model asked to write a compassionate crisis response will write one, differently
+every time, and one time in ten thousand it will say something harmful to the person
+least able to absorb it. It may also — being an astrology product — reach for the
+chart. No prompt reliably prevents that and no test catches it afterwards.
+
+A file has none of those properties. Written once by a person, reviewed like code,
+identical for everyone. `assert_crisis_responses_present()` runs at startup in
+**every** environment: booting without it is the one configuration that turns a
+working guard into silence, because detection firing means the astrology path is
+already bypassed and there is then nothing to send.
+
+The keyword pass is phrase-level, not word-level, and that is what makes it usable:
+"die" flags *"I'm dying to know"*; "want to die" does not. The bias toward false
+positives that §7 demands is spent on ambiguous **expressions** rather than ambiguous
+words.
+
+**Fail-open is a stated trade, not an oversight.** If the model screener is down the
+message proceeds. Failing closed would show a crisis response to everyone during an
+unrelated outage — telling thousands of people who asked about their career that the
+product thinks they are in danger. The keyword pass is unaffected by an outage and
+still runs. The residual risk is an indirectly-phrased crisis message during an
+outage; it is real, it is smaller than the alternative, and it is written down.
+
+> **Open, and not closeable by any test:** a human must dial each helpline number.
+> A test proves a number is *present*. A wrong number costs someone in crisis the
+> one attempt they were willing to make.
+
+## `fabricated_chart_fact`, and the possessive it rests on
+
+```
+Saturn is traditionally associated with discipline.   general — never blocked
+Saturn is in your 10th house.                         personal — checked
+```
+
+Only the second is checkable. An extractor that ignored the difference would block
+*"what does the 7th house mean?"* — one of the commonest questions the app gets — so
+the validator would have made the product unable to *explain* astrology in order to
+stop it *inventing* astrology.
+
+This is under-inclusive by construction and that is written down rather than hidden:
+"Saturn sits in the tenth, which for you means…" gets through.
+
+An **empty** fact index blocks personal claims rather than waving them through.
+"Unverifiable, so allow it" is the instinctive reading and it is exactly backwards: a
+response making personal placements when no chart was supplied invented the chart
+outright.
+
+## Three vacuous tests, caught by break-testing
+
+Seven deliberate breaks; **three did not fail**:
+
+| Break | Why the test missed it |
+|---|---|
+| Empty index waves claims through | the test used a *house* claim, which blocks via a second path anyway. Only `ascendant` and `dasha` isolate the branch |
+| 3-word shingles for prompt leak | the sample prose happened to share no short n-gram with the prompt, so it passed at any shingle length |
+| Dump the whole prompt into the leak excerpt | the test looked for the prompt *verbatim*, and the 200-char truncation meant it never appeared contiguously |
+
+All three rewritten to assert the property that matters, then re-broken to confirm
+they fire. The medication rule also had a real gap the tests found: the pattern could
+not match *"stop taking **your** medication"* — the commonest phrasing of the single
+most dangerous sentence this product could emit.
+
+381 Python tests. `task verify` green.

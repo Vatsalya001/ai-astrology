@@ -79,6 +79,7 @@ def assert_database_is_read_only(dsn: str, env: str) -> None:
 
 def run_all_startup_guards() -> None:
     """Run every guard. Called from the FastAPI lifespan hook."""
+    from app.safety import assert_crisis_responses_present
     from app.settings import settings
 
     assert_provider_allowed(
@@ -88,3 +89,10 @@ def run_all_startup_guards() -> None:
     )
     assert_internal_token_changed(settings.internal_token, settings.env)
     assert_database_is_read_only(settings.ai_database_url, settings.env)
+
+    # In every environment, not just production. A missing crisis
+    # response is worse than a missing provider key: detection still
+    # fires, which means the astrology path is already bypassed, and
+    # there is then nothing at all to send. Booting without it is the
+    # one configuration that turns a working guard into silence.
+    assert_crisis_responses_present()
