@@ -8,6 +8,7 @@ configuration change back into a code change.
 
 from app.providers.anthropic_provider import AnthropicProvider
 from app.providers.base import (
+    CallStats,
     Capabilities,
     CompletionChunk,
     CompletionRequest,
@@ -35,6 +36,7 @@ from app.providers.resilience import BreakerState, CircuitOpenError, ResilientPr
 __all__ = [
     "AnthropicProvider",
     "BreakerState",
+    "CallStats",
     "Capabilities",
     "CircuitOpenError",
     "CompletionChunk",

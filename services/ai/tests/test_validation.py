@@ -403,3 +403,139 @@ def test_blocks_are_reported_before_warnings() -> None:
     violations = V.validate(text, CHART)
 
     assert violations[0].severity == "block"
+
+
+# ─── the corpus that replaced the proximity window ───────────────────
+#
+# The first extractor joined a planet to a possessive with a wildcard
+# window, `[^.!?]{0,40}?`, which had no grammatical content and matched
+# straight across a clause boundary. Four of the five realistic general
+# sentences below were blocked as fabrications — a true answer to a
+# common question, refused, regenerated, refused again, and replaced
+# with the graceful fallback.
+#
+# Three tables rather than scattered assertions, because the property is
+# a BALANCE. Tightening the patterns until nothing false-positives is
+# easy and useless; the middle table is what stops that, and the third
+# is what stops the first two being satisfied by extracting nothing.
+
+GENERAL_STATEMENTS = [
+    "Saturn rules discipline, and your 10th house is career.",
+    "Jupiter is the planet of expansion, and your 9th house rules higher learning.",
+    "Your Venus is strong, as it always is in Libra.",
+    "- Saturn is the planet of structure\n- Your 10th house concerns profession",
+    "Mars governs energy. Your 3rd house covers siblings.",
+    "The 10th house is traditionally read as the house of profession.",
+    "Saturn is traditionally associated with discipline and delay.",
+    "In Vedic astrology, Jupiter in Leo is considered a strong placement.",
+]
+
+TRUE_PERSONAL_CLAIMS = [
+    "Saturn is in your 4th house.",
+    "Saturn, the planet of structure, is in your 4th house.",
+    "Saturn occupies your fourth house.",
+    "Saturn is currently in your 4th house.",
+    "Your Jupiter is in Leo.",
+    "Your ascendant is Capricorn.",
+    "Your moon sign is Scorpio.",
+    "You are running Venus mahadasha.",
+    "Your current mahadasha is Venus.",
+    "Your Saturn is in Bharani nakshatra.",
+    "Your 4th house is occupied by Saturn.",
+    "You have Saturn in the 4th house.",
+    "Saturn in your chart is in Aries.",
+]
+
+FALSE_PERSONAL_CLAIMS = [
+    "Saturn is in your 10th house.",
+    "Saturn, the planet of structure, is in your 10th house.",
+    "Saturn occupies your tenth house.",
+    "Saturn is currently in your 10th house.",
+    "Your Jupiter is in Capricorn.",
+    "Your ascendant is Leo.",
+    "Your moon sign is Aries.",
+    "Your sun sign is Leo.",
+    "You are running Saturn mahadasha.",
+    "Your current mahadasha is Saturn.",
+    "Your Saturn is in Rohini nakshatra.",
+    "Your 10th house is occupied by Saturn.",
+    "You have Saturn in the 10th house.",
+    "Saturn in your chart is in Capricorn.",
+]
+
+FULL_CHART = FactIndex(
+    planets={
+        "saturn": PlanetFact(sign="aries", house=4, nakshatra="bharani"),
+        "jupiter": PlanetFact(sign="leo", house=8),
+        "venus": PlanetFact(sign="taurus", house=5),
+        "moon": PlanetFact(sign="scorpio", house=11),
+    },
+    ascendant="capricorn",
+    moon_sign="scorpio",
+    sun_sign="pisces",
+    current_dasha="venus",
+)
+
+
+@pytest.mark.parametrize("text", GENERAL_STATEMENTS)
+def test_a_general_statement_is_never_extracted(text: str) -> None:
+    """The regression. These are the sentences the window broke on.
+
+    Asserted on `extract_claims` as well as on the block, because a
+    validator that extracted the phantom claim and then happened to find
+    it true would pass the block assertion while still being wrong — and
+    would start blocking the moment the chart changed.
+    """
+    assert extract_claims(text) == [], "phantom claim extracted from a general statement"
+    assert not blocks(text, FULL_CHART)
+
+
+@pytest.mark.parametrize("text", TRUE_PERSONAL_CLAIMS)
+def test_a_true_personal_claim_passes(text: str) -> None:
+    """Tightening the patterns until nothing false-positives is easy.
+
+    This table is what makes it not trivially satisfiable: every
+    sentence here states a placement the chart agrees with, in a
+    phrasing a model actually uses.
+    """
+    assert not blocks(text, FULL_CHART)
+
+
+@pytest.mark.parametrize("text", FALSE_PERSONAL_CLAIMS)
+def test_a_false_personal_claim_is_blocked(text: str) -> None:
+    """And this is what stops the other two being satisfied by an
+    extractor that returns nothing at all."""
+    assert blocks(text, FULL_CHART)
+
+
+def test_the_three_tables_cover_the_same_phrasings(text: str = "") -> None:
+    """Every false phrasing has a true counterpart and vice versa.
+
+    Without this the tables drift: a phrasing gets added to the
+    must-block list, the pattern is tightened to catch it, and nothing
+    checks that the same phrasing still passes when it is TRUE.
+    """
+    assert len(TRUE_PERSONAL_CLAIMS) >= 12
+    assert len(FALSE_PERSONAL_CLAIMS) >= 12
+    assert abs(len(TRUE_PERSONAL_CLAIMS) - len(FALSE_PERSONAL_CLAIMS)) <= 2
+
+
+def test_an_impossible_house_number_is_not_a_claim() -> None:
+    """ "your 40th house" names no house.
+
+    Extracting it would produce a violation about a house that does not
+    exist, and the corrective instruction would tell the model to fix a
+    placement nobody can hold.
+    """
+    assert extract_claims("Saturn is in your 40th house.") == []
+
+
+def test_the_two_luminary_signs_are_checked() -> None:
+    """`moon_sign` and `sun_sign` were in the index and read by nothing.
+
+    The index carried two checkable facts that no pattern could
+    contradict, so "what's my moon sign" — among the commonest questions
+    the product gets — was unguarded.
+    """
+    assert blocks("Your moon sign is Aries.", FULL_CHART)
+    assert not blocks("Your moon sign is Scorpio.", FULL_CHART)

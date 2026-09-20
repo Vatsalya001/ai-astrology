@@ -29,12 +29,11 @@ is recorded here so the trade is visible rather than discovered.
 
 from __future__ import annotations
 
-import json
-
 from pydantic import ValidationError
 
 from app.prompts import PromptBuilder
 from app.providers.base import (
+    CallStats,
     CompletionRequest,
     LLMProvider,
     Message,
@@ -43,6 +42,7 @@ from app.providers.base import (
 )
 from app.safety.categories import SafetyCategory, SafetyVerdict
 from app.safety.crisis import detect_crisis
+from app.structured import parse_json_object
 
 SAFETY_SCHEMA: dict[str, object] = {
     "type": "object",
@@ -85,16 +85,17 @@ class SafetyClassifier:
         return PromptBuilder().add("safety_classification", self._prompt_version).cache_breakpoint()
 
     def _parse(self, text: str) -> SafetyVerdict | None:
-        stripped = text.strip()
-        if stripped.startswith("```"):
-            stripped = stripped.strip("`").removeprefix("json").strip()
+        """Shared with the intent classifier — see app/structured.py.
 
-        try:
-            payload = json.loads(stripped)
-        except (json.JSONDecodeError, ValueError):
-            return None
-
-        if not isinstance(payload, dict):
+        It was a private copy, and the copy was weaker: it stripped only
+        a TRIPLE fence, so a verdict wrapped in a single backtick — the
+        shape llama3.2:3b actually produces — failed to parse, became
+        `none`, and let a crisis message through to generation. The
+        recoverable path had the robust parser and the unrecoverable one
+        did not.
+        """
+        payload = parse_json_object(text)
+        if payload is None:
             return None
 
         try:
@@ -140,17 +141,23 @@ class SafetyClassifier:
         except ProviderError:
             # Fail open. See the module docstring — this is a stated
             # trade, not an oversight, and the keyword pass has already
-            # run.
-            return SafetyVerdict(category=SafetyCategory.NONE, source="provider_error")
+            # run. The attempt is still counted: it was billed.
+            return SafetyVerdict(
+                category=SafetyCategory.NONE,
+                source="provider_error",
+                stats=CallStats(calls=1),
+            )
+
+        stats = CallStats(calls=1, usage=response.usage, model=response.model)
 
         verdict = self._parse(response.text)
         if verdict is None:
-            return SafetyVerdict(category=SafetyCategory.NONE, source="unparseable")
+            return SafetyVerdict(category=SafetyCategory.NONE, source="unparseable", stats=stats)
 
         threshold = (
             CRISIS_THRESHOLD if verdict.category is SafetyCategory.CRISIS else DEFAULT_THRESHOLD
         )
         if verdict.confidence < threshold:
-            return SafetyVerdict(category=SafetyCategory.NONE, source="low_confidence")
+            return SafetyVerdict(category=SafetyCategory.NONE, source="low_confidence", stats=stats)
 
-        return verdict
+        return verdict.model_copy(update={"stats": stats})

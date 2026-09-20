@@ -126,18 +126,47 @@ type AI struct {
 	// under concurrent first calls.
 	slots     chan struct{}
 	slotsOnce sync.Once
+
+	// Per-call budget for Complete. A field rather than the bare
+	// constant so a test can shrink it — and so it is visibly the same
+	// value the transport was sized from.
+	completionTimeout time.Duration
 }
 
 func NewAI(baseURL, token string, timeout time.Duration) (*AI, error) {
+	return newAI(baseURL, token, timeout, completionTimeout)
+}
+
+// newAI takes both budgets so a test can shrink them.
+//
+// ── Why the transport budget is the LARGER of the two ──
+//
+// http.Client.Timeout bounds the whole call and cannot be extended by a
+// per-request context — a context deadline can only ever make a request
+// finish SOONER. Built with the general 10s ServiceTimeout, the 90s
+// context that Complete sets was dead code: every completion was capped
+// at 10s, and a deep-tier interpretation that legitimately takes thirty
+// seconds failed as a timeout with a comment above it claiming it had a
+// minute and a half.
+//
+// Raising it is safe for the other caller on this client. Health bounds
+// itself: httpapi/health.go wraps each probe in its own context, so a
+// long transport budget cannot make the status page hang.
+func newAI(baseURL, token string, timeout, completion time.Duration) (*AI, error) {
+	transportBudget := timeout
+	if completion > transportBudget {
+		transportBudget = completion
+	}
+
 	api, err := aiclient.NewClientWithResponses(
 		strings.TrimRight(baseURL, "/"),
-		aiclient.WithHTTPClient(httpClient(timeout, "ai")),
+		aiclient.WithHTTPClient(httpClient(transportBudget, "ai")),
 		aiclient.WithRequestEditorFn(headerInjector(token)),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("build ai client: %w", err)
 	}
-	return &AI{api: api}, nil
+	return &AI{api: api, completionTimeout: completion}, nil
 }
 
 // Health probes ai-service and reports which model backend it is wired

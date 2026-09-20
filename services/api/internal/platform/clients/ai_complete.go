@@ -64,11 +64,17 @@ func (a *AI) Complete(
 	}
 	defer release()
 
-	// Bounded here rather than relying on the shared client timeout. A
-	// completion is the one call in this service that legitimately takes
-	// a minute, and giving it the general budget would fail every
-	// deep-tier request on a slow day.
-	ctx, cancel := context.WithTimeout(ctx, completionTimeout)
+	// A context deadline can only make a request finish SOONER, never
+	// later, so this alone was not enough: the client was built with the
+	// general 10s ServiceTimeout and capped every completion at 10s
+	// regardless of what this line said. newAI now sizes the transport
+	// from the same value, and TestACompletionIsNotCappedByTheGeneralTimeout
+	// is what says so.
+	budget := a.completionTimeout
+	if budget <= 0 {
+		budget = completionTimeout
+	}
+	ctx, cancel := context.WithTimeout(ctx, budget)
 	defer cancel()
 
 	// Deliberately NOT marked idempotent. Unlike a chart computation,

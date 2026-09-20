@@ -20,6 +20,8 @@ from enum import StrEnum
 
 from pydantic import BaseModel, Field
 
+from app.providers.base import CallStats
+
 
 class Intent(StrEnum):
     """The 21 intents from PHASE-04 §6.
@@ -117,6 +119,12 @@ class IntentResult(BaseModel):
     source: str = Field(
         default="model",
         description="'keywords' or 'model'. Telemetry only; never routing.",
+    )
+
+    stats: CallStats = Field(
+        default_factory=CallStats,
+        description="What this classification cost. Zero when the keyword "
+        "pre-pass answered, which is what makes the saving measurable.",
     )
 
     @property

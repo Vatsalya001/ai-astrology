@@ -149,6 +149,32 @@ class TestCrisisBypasses:
         assert generator.requests == []
         assert envelope.result.is_crisis_response is True
 
+    async def test_a_wrapped_crisis_verdict_still_bypasses(self, tmp_path: Path) -> None:
+        """End to end, with the screener's reply wrapped as a local model
+        actually wraps it.
+
+        `build()` feeds the screener clean `json.dumps` output, so every
+        other test in this class exercises a shape no local model
+        produces. When the safety parser only stripped a TRIPLE fence, a
+        single-backtick reply became `none` here, the bypass never fired,
+        and the generation provider received two requests — a crisis
+        message answered with astrology, recorded in telemetry as
+        `safety_category: none`.
+        """
+        orchestrator, generator, _, screener = build(tmp_path)
+        # Replace the screener's reply with the single-backtick shape.
+        screener._default_text = "`" + json.dumps({"category": "crisis", "confidence": 0.95}) + "`"
+
+        envelope = await orchestrator.complete(
+            a_request("I don't see the point of anything anymore")
+        )
+
+        assert generator.requests == [], (
+            "a crisis message reached the generation provider because the screener's "
+            "reply was wrapped the way a local model wraps it"
+        )
+        assert envelope.result.is_crisis_response is True
+
     async def test_the_text_is_the_static_file(self, tmp_path: Path) -> None:
         from app.safety import load_crisis_response
 
@@ -524,3 +550,143 @@ class TestProviderFailure:
 
         assert envelope.result.blocked is False
         assert envelope.result.safety_category is SafetyCategory.NONE
+
+
+# ─── every model call is billed ──────────────────────────────────────
+#
+# The orchestrator made three model calls per request and recorded the
+# tokens of one. Classification and screening are real calls on a paid
+# provider in production, and `ai_request_logs.cost_micros` — the table
+# Phase 7 bills from — covered neither.
+#
+# The under-report was worst where it mattered most: on a request the
+# keyword pre-pass made cheap, the two uncounted `fast` calls were a
+# large fraction of the total, so the exact requests whose cost model
+# needed to be trusted were the ones most wrongly reported.
+
+
+class TestEveryCallIsBilled:
+    async def test_tokens_from_all_three_calls_are_summed(self, tmp_path: Path) -> None:
+        orchestrator, gen, cls, saf = build(tmp_path, chart=StubChart())
+
+        envelope = await orchestrator.complete(a_request("an ambiguous question with no keywords"))
+
+        assert (len(gen.requests), len(cls.requests), len(saf.requests)) == (1, 1, 1)
+
+        # Recomputed from the requests the mocks recorded, using the
+        # mock's own documented formula, so this is an EXACT equality
+        # rather than a bound — a bound would pass with one call's
+        # tokens missing.
+        expected_in = sum(
+            sum(len(m.content) for m in request.messages) // 4
+            for provider in (gen, cls, saf)
+            for request in provider.requests
+        )
+
+        assert envelope.telemetry.input_tokens == expected_in, (
+            f"recorded {envelope.telemetry.input_tokens} input tokens for three calls "
+            f"that reported {expected_in} between them"
+        )
+        assert envelope.telemetry.output_tokens > 0
+
+    async def test_model_calls_matches_the_calls_actually_made(self, tmp_path: Path) -> None:
+        orchestrator, gen, cls, saf = build(tmp_path, chart=StubChart())
+
+        envelope = await orchestrator.complete(a_request("an ambiguous question with no keywords"))
+
+        made = len(gen.requests) + len(cls.requests) + len(saf.requests)
+        assert envelope.telemetry.model_calls == made
+
+    async def test_an_unparseable_screening_still_counts_as_a_call(self, tmp_path: Path) -> None:
+        """It was made, and it was billed.
+
+        `model_calls` was inferred from the verdict's `source`, and an
+        unparseable reply reports `source="unparseable"` rather than
+        `"model"` — so the request that had trouble was recorded as
+        having made fewer calls than the one that went smoothly.
+        """
+        orchestrator, gen, cls, saf = build(tmp_path, chart=StubChart())
+        saf._default_text = "I think they seem fine."
+
+        envelope = await orchestrator.complete(a_request("an ambiguous question with no keywords"))
+
+        made = len(gen.requests) + len(cls.requests) + len(saf.requests)
+        assert envelope.telemetry.model_calls == made
+
+    async def test_a_keyword_hit_costs_nothing(self, tmp_path: Path) -> None:
+        """The negative case, and the one the saving depends on.
+
+        A version of the fix that counted a call unconditionally would
+        pass every test above and make the pre-pass look free-of-charge
+        in no dashboard at all.
+        """
+        orchestrator, _, cls, _ = build(tmp_path, chart=StubChart())
+
+        envelope = await orchestrator.complete(a_request("will i get a promotion this year"))
+
+        assert cls.requests == []
+        assert envelope.telemetry.model_calls == 2  # screening + generation
+
+    async def test_the_crisis_path_records_what_it_spent(self, tmp_path: Path) -> None:
+        """Not zero.
+
+        A crisis reached via the MODEL screener has already paid for a
+        classification and a screening. Recording that as free made the
+        safety layer look costless in exactly the dashboard an operator
+        would use to ask whether it is worth its price — and the crisis
+        path is the one nobody wants to find reasons to trim.
+        """
+        orchestrator, gen, cls, saf = build(tmp_path, safety="crisis", chart=StubChart())
+
+        envelope = await orchestrator.complete(
+            a_request("I don't see the point of anything anymore")
+        )
+
+        assert envelope.result.is_crisis_response is True
+        assert gen.requests == [], "the bypass leaked"
+        assert envelope.telemetry.model_calls == len(cls.requests) + len(saf.requests)
+        assert envelope.telemetry.input_tokens > 0, (
+            "two paid model calls were recorded as costing nothing"
+        )
+        # Nothing GENERATED, so these stay blank — that is the record
+        # that the bypass held.
+        assert envelope.telemetry.provider_id == ""
+        assert envelope.telemetry.model == ""
+
+    async def test_a_keyword_crisis_still_records_zero(self, tmp_path: Path) -> None:
+        # The negative case for the test above: the offline path makes no
+        # calls at all, and must not start reporting phantom ones.
+        orchestrator, _, _, _ = build(tmp_path, chart=StubChart())
+
+        envelope = await orchestrator.complete(a_request("i want to die"))
+
+        assert envelope.telemetry.model_calls == 0
+        assert envelope.telemetry.cost_micros == 0
+
+    async def test_the_failure_path_keeps_its_trace_id(self, tmp_path: Path) -> None:
+        """`trace_id` is NOT NULL in ai_request_logs and is the only join
+        back to the Go request and both services' logs.
+
+        It was hardcoded to `""` here — so the row an operator most wants
+        to find, the one for a request that failed, was the one row that
+        could not be found.
+        """
+        orchestrator, gen, _, _ = build(tmp_path, chart=StubChart())
+        gen.fail_next = ProviderError("down", provider_id="mock", retryable=True)
+
+        envelope = await orchestrator.complete(a_request(), trace_id="trace-42")
+
+        assert envelope.telemetry.trace_id == "trace-42"
+
+    async def test_the_failure_path_keeps_both_cache_counters(self, tmp_path: Path) -> None:
+        # They were dropped while a non-zero cost was still recorded, so
+        # a failed request's tokens could not be reconciled against its
+        # own charge.
+        orchestrator, gen, _, _ = build(tmp_path, chart=StubChart())
+        gen.fail_next = ProviderError("down", provider_id="mock", retryable=True)
+
+        telemetry = (await orchestrator.complete(a_request())).telemetry
+
+        assert telemetry.cached_tokens >= 0
+        assert telemetry.cache_write_tokens >= 0
+        assert telemetry.model_calls > 0, "the classification and screening calls were lost"

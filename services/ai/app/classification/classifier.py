@@ -16,8 +16,6 @@ a f-string that builds one string out of both throws it away silently.
 
 from __future__ import annotations
 
-import json
-
 from pydantic import ValidationError
 
 from app.classification.intents import (
@@ -29,12 +27,14 @@ from app.classification.intents import (
 from app.classification.keywords import classify_by_keywords
 from app.prompts import PromptBuilder
 from app.providers.base import (
+    CallStats,
     CompletionRequest,
     LLMProvider,
     Message,
     ProviderError,
     RequestMetadata,
 )
+from app.structured import parse_json_object
 
 INTENT_SCHEMA: dict[str, object] = {
     "type": "object",
@@ -107,22 +107,12 @@ class IntentClassifier:
         into no answer, which is a much worse trade at the top of the
         pipeline.
         """
-        # Local models wrap output despite being asked not to, and each
-        # one does it differently: a ```json fence, a plain ``` fence, a
-        # single backtick. Observed from llama3.2:3b, which returned
-        # `{"primary": ...}` with one backtick on each side. Stripping
-        # them all is the adapter's job — a parse failure here reads as
-        # "the model could not classify", which is the wrong diagnosis
-        # and sends the answer to the fallback.
-        stripped = text.strip().strip("`").strip()
-        stripped = stripped.removeprefix("json").strip()
-
-        try:
-            payload = json.loads(stripped)
-        except (json.JSONDecodeError, ValueError):
-            return None
-
-        if not isinstance(payload, dict):
+        # Shared with the safety screener — see app/structured.py. This
+        # logic lived here alone, which is how the safety copy ended up
+        # strictly weaker than this one on the exact wrapper llama3.2:3b
+        # produces.
+        payload = parse_json_object(text)
+        if payload is None:
             return None
 
         try:
@@ -135,7 +125,7 @@ class IntentClassifier:
         return result
 
     @staticmethod
-    def _fallback(reason: str) -> IntentResult:
+    def _fallback(reason: str, stats: CallStats | None = None) -> IntentResult:
         """Broad context beats a narrow guess.
 
         PHASE-04 §6: below 0.6, fall back to GENERAL_ASTROLOGY "rather
@@ -153,6 +143,10 @@ class IntentClassifier:
             # safe one.
             requires_safety_review=True,
             source=reason,
+            # Carried even on the fallback: the call HAPPENED and was
+            # billed. A counter that only recorded parseable answers
+            # would show the retry-heavy requests as the cheap ones.
+            stats=stats or CallStats(),
         )
 
     async def classify(self, message: str, *, trace_id: str = "") -> IntentResult:
@@ -187,14 +181,22 @@ class IntentClassifier:
             # Every provider in the chain has already been tried by the
             # time this raises. Classification is not worth failing the
             # user's whole question over.
-            return self._fallback("provider_error")
+            #
+            # `calls=1` even though nothing came back: the attempt was
+            # made, and a provider that failed after generating tokens
+            # still charged for them.
+            return self._fallback("provider_error", CallStats(calls=1))
+
+        stats = CallStats(calls=1, usage=response.usage, model=response.model)
 
         result = self._parse(response.text)
         if result is None:
-            return self._fallback("unparseable")
+            return self._fallback("unparseable", stats)
+
+        result = result.model_copy(update={"stats": stats})
 
         if not result.is_confident:
-            return self._fallback("low_confidence")
+            return self._fallback("low_confidence", stats)
 
         if result.primary in SAFETY_REVIEWED_INTENTS:
             # Asserted here rather than trusted from the model. The three

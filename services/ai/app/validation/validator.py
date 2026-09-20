@@ -168,13 +168,22 @@ class OutputValidator:
                 actual = facts.nakshatra_of(claim.subject)
             case "ascendant":
                 actual = facts.ascendant or None
+            case "moon_sign":
+                actual = facts.moon_sign or None
+            case "sun_sign":
+                actual = facts.sun_sign or None
             case "dasha":
                 actual = facts.current_dasha or None
             case _:
                 actual = None
 
         if actual is None:
-            if facts.knows(claim.subject) or claim.kind in {"ascendant", "dasha"}:
+            if facts.knows(claim.subject) or claim.kind in {
+                "ascendant",
+                "dasha",
+                "moon_sign",
+                "sun_sign",
+            }:
                 # The chart names this body but not this property — a
                 # nakshatra nobody computed, say. Not provably wrong.
                 return None
@@ -193,7 +202,7 @@ class OutputValidator:
         # instruction the model reads, and a garbled one is a worse
         # instruction.
         subject = (
-            f"the current {claim.kind}"
+            f"the current {claim.kind.replace('_', ' ')}"
             if claim.subject == claim.kind
             else f"{claim.subject}'s {claim.kind}"
         )

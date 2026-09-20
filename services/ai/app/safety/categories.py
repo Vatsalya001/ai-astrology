@@ -11,6 +11,8 @@ from enum import StrEnum
 
 from pydantic import BaseModel, Field
 
+from app.providers.base import CallStats
+
 
 class SafetyCategory(StrEnum):
     CRISIS = "crisis"
@@ -75,6 +77,12 @@ class SafetyVerdict(BaseModel):
     )
 
     source: str = Field(default="keywords", description="'keywords' or 'model'.")
+
+    stats: CallStats = Field(
+        default_factory=CallStats,
+        description="What this screening cost. Zero when the offline keyword "
+        "pass answered, which is the common case and the whole point of it.",
+    )
 
     @property
     def action(self) -> SafetyAction:

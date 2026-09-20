@@ -37,6 +37,7 @@ cannot pass while the bypass is broken.
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
 
 from pydantic import BaseModel, Field
@@ -54,6 +55,7 @@ from app.orchestrator.context import (
 from app.orchestrator.envelope import AIResponseEnvelope, SafetyFlag, Telemetry
 from app.prompts import PromptBuilder
 from app.providers.base import (
+    CallStats,
     CompletionRequest,
     CompletionResponse,
     LLMProvider,
@@ -82,6 +84,8 @@ PERSONA_FOR: dict[Intent, str] = {
     Intent.EMOTIONAL_SUPPORT: "spiritual_guide",
 }
 DEFAULT_PERSONA = "vedic_guide"
+
+log = logging.getLogger(__name__)
 
 
 class CompleteRequest(BaseModel):
@@ -163,13 +167,21 @@ class Orchestrator:
         model_calls: int,
         *,
         trace_id: str,
+        usage: Usage | None = None,
     ) -> AIResponseEnvelope[CompleteResult]:
         """The static response, with a telemetry row that says so.
 
-        `cost_micros` is whatever the classification cost and no more —
-        this path generates nothing, which is the whole point, and a
-        telemetry row showing generation tokens here would mean the
-        bypass leaked.
+        `cost_micros` is whatever the classification and screening cost
+        and no more — this path GENERATES nothing, which is the whole
+        point, and a telemetry row showing generation tokens here would
+        mean the bypass leaked.
+
+        It is not zero, though, and the first version recorded zero. A
+        crisis reached via the model screener has already paid for a
+        classification and a screening, both on a paid provider in
+        production. Recording that as free would make the crisis path
+        look costless in exactly the dashboard an operator would use to
+        ask whether the safety layer is worth its price.
         """
         return AIResponseEnvelope(
             result=CompleteResult(
@@ -185,6 +197,11 @@ class Orchestrator:
                 # No provider, no model, no prompt version: nothing
                 # generated this. Leaving them blank is the record that
                 # the bypass worked.
+                input_tokens=(usage or Usage()).input_tokens,
+                output_tokens=(usage or Usage()).output_tokens,
+                cached_tokens=(usage or Usage()).cached_input_tokens,
+                cache_write_tokens=(usage or Usage()).cache_write_input_tokens,
+                cost_micros=(usage or Usage()).cost_micros,
                 latency_ms=int((time.monotonic() - started) * 1000),
                 finish_reason="stop",
                 safety_flags=[SafetyFlag(type="crisis", severity="block")],
@@ -293,17 +310,22 @@ class Orchestrator:
             self._screener.screen(req.message, trace_id=trace_id),
         )
 
-        if intent.source != "keywords":
-            calls += 1
-        if verdict.source == "model":
-            calls += 1
+        # Counted from what each step REPORTS rather than inferred from
+        # its `source`. The inference undercounted: a screening whose
+        # reply was unparseable or below threshold reports
+        # source="unparseable", which is not "model" — so the call that
+        # was made and billed was not counted, and the requests that had
+        # trouble looked like the cheap ones.
+        for step in (intent.stats, verdict.stats):
+            calls += step.calls
+            usage = self._accumulate(usage, self._price_stats(step))
 
         # The model screener saw something the phrase list did not —
         # "I don't see the point of anything anymore" carries no crisis
         # keyword. Still a bypass: this returns before any context is
         # built and before the generation provider is touched.
         if verdict.category is SafetyCategory.CRISIS:
-            return self._crisis_envelope(req, started, calls, trace_id=trace_id)
+            return self._crisis_envelope(req, started, calls, trace_id=trace_id, usage=usage)
 
         # ── 3. context (stubs in Phase 4) ────────────────────────────
         chart, conversation, knowledge = await asyncio.gather(
@@ -327,7 +349,7 @@ class Orchestrator:
         try:
             response = await self._generate(req, builder)
         except ProviderError:
-            return self._failed_envelope(req, intent, started, calls, usage)
+            return self._failed_envelope(req, intent, started, calls, usage, trace_id=trace_id)
 
         calls += 1
         usage = self._accumulate(usage, self._priced(response))
@@ -349,7 +371,7 @@ class Orchestrator:
             try:
                 response = await self._generate(req, corrected)
             except ProviderError:
-                return self._failed_envelope(req, intent, started, calls, usage)
+                return self._failed_envelope(req, intent, started, calls, usage, trace_id=trace_id)
 
             calls += 1
             usage = self._accumulate(usage, self._priced(response))
@@ -396,6 +418,24 @@ class Orchestrator:
     # ─── pricing and failure ─────────────────────────────────────────
 
     @staticmethod
+    def _price_stats(stats: CallStats) -> Usage:
+        """A classification or screening call, costed.
+
+        Same rate table as generation, keyed on the model that actually
+        answered — which on a fallback chain is not the one configured.
+        """
+        if not stats.calls or not stats.model:
+            return Usage()
+        try:
+            return pricing.priced(stats.model, stats.usage)
+        except pricing.UnpricedModelError:
+            log.warning(
+                "unpriced model on a pipeline step; cost recorded as zero",
+                extra={"model": stats.model},
+            )
+            return stats.usage
+
+    @staticmethod
     def _priced(response: CompletionResponse) -> Usage:
         """Cost applied here, once, where the model name is known.
 
@@ -403,11 +443,20 @@ class Orchestrator:
         user's request over a bookkeeping gap. Caught and recorded as
         zero WITH the model name still in telemetry, so the gap is
         visible in the dashboard as a row costing nothing from a paid
-        provider — which is exactly how it gets noticed and fixed.
+        provider.
+
+        Logged at WARNING as well, because "visible in the dashboard"
+        assumed somebody was looking at the dashboard. A zero from an
+        unpriced model and a zero from a local model are identical in
+        that table; this line is the only thing that distinguishes them.
         """
         try:
             return pricing.priced(response.model, response.usage)
         except pricing.UnpricedModelError:
+            log.warning(
+                "unpriced model; cost recorded as zero. Add it to app/pricing.json.",
+                extra={"model": response.model, "provider": response.provider_id},
+            )
             return response.usage
 
     def _failed_envelope(
@@ -417,6 +466,8 @@ class Orchestrator:
         started: float,
         calls: int,
         usage: Usage,
+        *,
+        trace_id: str,
     ) -> AIResponseEnvelope[CompleteResult]:
         """Every provider in the chain failed.
 
@@ -428,7 +479,12 @@ class Orchestrator:
         return AIResponseEnvelope(
             result=CompleteResult(text=GRACEFUL_FALLBACK, intent=intent.primary, blocked=True),
             telemetry=Telemetry(
-                trace_id="",
+                # Carried, not blanked. trace_id is NOT NULL in
+                # ai_request_logs and is the only join back to the Go
+                # request and the log lines of both services — so a
+                # failure row written without one is the row an operator
+                # most wants to find and cannot.
+                trace_id=trace_id,
                 user_id=req.user_id,
                 conversation_id=req.conversation_id,
                 job_type=req.job.value,
@@ -436,6 +492,11 @@ class Orchestrator:
                 tier=self._router.tier_for(req.job),
                 input_tokens=usage.input_tokens,
                 output_tokens=usage.output_tokens,
+                # Both cache classes were dropped here while a non-zero
+                # cost was still recorded, so a failed request's tokens
+                # could not be reconciled against its own charge.
+                cached_tokens=usage.cached_input_tokens,
+                cache_write_tokens=usage.cache_write_input_tokens,
                 cost_micros=usage.cost_micros,
                 latency_ms=int((time.monotonic() - started) * 1000),
                 finish_reason="error",

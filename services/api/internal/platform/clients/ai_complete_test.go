@@ -237,3 +237,99 @@ func containsAny(haystack string, needles ...string) bool {
 	}
 	return false
 }
+
+// TestACompletionIsNotCappedByTheGeneralTimeout pins the interaction
+// between two budgets that looked independent and were not.
+//
+// http.Client.Timeout bounds the whole call and a per-request context
+// can only ever make a request finish SOONER. The AI client was built
+// with the general 10s ServiceTimeout, so the 90s context Complete set
+// was dead code: every completion was capped at 10s, under a comment
+// claiming it had a minute and a half. A deep-tier interpretation that
+// legitimately takes thirty seconds failed as a timeout.
+//
+// Scaled down so the test is fast: a 50ms transport budget against a
+// 400ms completion budget, with a handler that sleeps 200ms. Sized from
+// the constants means the assertion survives them changing.
+func TestACompletionIsNotCappedByTheGeneralTimeout(t *testing.T) {
+	const (
+		general    = 50 * time.Millisecond
+		completion = 400 * time.Millisecond
+		serverWork = 200 * time.Millisecond
+	)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(serverWork)
+		okEnvelope(w, r)
+	}))
+	t.Cleanup(server.Close)
+
+	ai, err := newAI(server.URL, "token-long-enough", general, completion)
+	if err != nil {
+		t.Fatalf("newAI: %v", err)
+	}
+
+	started := time.Now()
+	envelope, err := ai.Complete(context.Background(), aiclient.CompleteRequest{Message: "x"})
+	elapsed := time.Since(started)
+
+	if err != nil {
+		t.Fatalf("a %v completion failed under a %v general timeout after %v: %v\n"+
+			"The transport budget is capping the call; the completion budget is "+
+			"dead code.", serverWork, general, elapsed, err)
+	}
+	if envelope.Result.Text == "" {
+		t.Error("the completion returned an empty result")
+	}
+}
+
+// TestTheCompletionBudgetStillBounds is the negative case.
+//
+// Without it, "make the transport budget enormous" would pass the test
+// above and remove every bound — a hung provider would hold a
+// connection until the process died.
+func TestTheCompletionBudgetStillBounds(t *testing.T) {
+	const (
+		general    = 50 * time.Millisecond
+		completion = 120 * time.Millisecond
+	)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(2 * time.Second)
+		okEnvelope(w, r)
+	}))
+	t.Cleanup(server.Close)
+
+	ai, err := newAI(server.URL, "token-long-enough", general, completion)
+	if err != nil {
+		t.Fatalf("newAI: %v", err)
+	}
+
+	started := time.Now()
+	_, err = ai.Complete(context.Background(), aiclient.CompleteRequest{Message: "x"})
+	elapsed := time.Since(started)
+
+	if err == nil {
+		t.Fatal("a 2s response was accepted under a 120ms completion budget")
+	}
+	if elapsed > time.Second {
+		t.Errorf("the completion budget did not bound the call: took %v", elapsed)
+	}
+}
+
+// TestTheRealClientUsesTheCompletionBudget guards the wiring itself.
+//
+// The two tests above both call newAI directly. NewAI — the constructor
+// cmd/api actually uses — could stop passing completionTimeout and they
+// would both still pass.
+func TestTheRealClientUsesTheCompletionBudget(t *testing.T) {
+	ai, err := NewAI("http://127.0.0.1:1", "token-long-enough", 10*time.Millisecond)
+	if err != nil {
+		t.Fatalf("NewAI: %v", err)
+	}
+
+	if ai.completionTimeout != completionTimeout {
+		t.Errorf("NewAI set completionTimeout=%v, want %v — production completions "+
+			"are capped by the general service timeout", ai.completionTimeout, completionTimeout)
+	}
+}

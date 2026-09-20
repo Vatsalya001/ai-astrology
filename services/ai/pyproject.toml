@@ -131,6 +131,7 @@ source_modules = [
     "app.safety",
     "app.schemas",
     "app.settings",
+    "app.structured",
     "app.telemetry",
     "app.validation",
 ]

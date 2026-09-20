@@ -156,6 +156,47 @@ class Usage(BaseModel):
     cost_micros: int = Field(default=0, ge=0)
 
 
+class CallStats(BaseModel):
+    """What one pipeline step spent at a provider.
+
+    Carried back by the intent classifier and the safety screener so the
+    orchestrator can bill them. Without it, both made real model calls
+    whose tokens reached nothing: `ai_request_logs.cost_micros` covered
+    only the generation call, so every request under-reported — and the
+    under-report was largest on the cheap requests the keyword pre-pass
+    was supposed to make cheaper, which is exactly where the cost model
+    needed to be trusted.
+
+    `calls` counts an ATTEMPT, not a success. A classification whose
+    reply was unparseable still cost money, and a counter that only
+    recorded parseable answers would show the retry-heavy requests as
+    the cheap ones.
+    """
+
+    calls: int = Field(default=0, ge=0)
+    usage: Usage = Field(default_factory=Usage)
+    model: str = Field(default="", description="For pricing. The model that ANSWERED.")
+
+    def plus(self, other: CallStats) -> CallStats:
+        """Summed with integers throughout, so the total does not depend
+        on which of two concurrent steps finished first."""
+        return CallStats(
+            calls=self.calls + other.calls,
+            usage=Usage(
+                input_tokens=self.usage.input_tokens + other.usage.input_tokens,
+                output_tokens=self.usage.output_tokens + other.usage.output_tokens,
+                cached_input_tokens=(
+                    self.usage.cached_input_tokens + other.usage.cached_input_tokens
+                ),
+                cache_write_input_tokens=(
+                    self.usage.cache_write_input_tokens + other.usage.cache_write_input_tokens
+                ),
+                cost_micros=self.usage.cost_micros + other.usage.cost_micros,
+            ),
+            model=other.model or self.model,
+        )
+
+
 class CompletionResponse(BaseModel):
     """What every adapter returns, whatever it talked to.
 
