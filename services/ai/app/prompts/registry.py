@@ -187,6 +187,21 @@ class PromptBuilder:
     def chart_context(self, content: str) -> PromptBuilder:
         return self._volatile_block("chart_context", content)
 
+    def instruction(self, content: str) -> PromptBuilder:
+        """A post-breakpoint block that is an INSTRUCTION, not data.
+
+        The safety posture and the corrective retry both live here. They
+        vary per request, so they cannot sit in the cached prefix — but
+        they are still things the model is told to do, and a response
+        that quotes one back is a prompt leak.
+
+        Separated from the data blocks below because the leak check
+        needs exactly this distinction. Instructions must never be
+        echoed; the user's own chart is MEANT to be reflected back, and
+        a leak check that covered it would block the product's main job.
+        """
+        return self._volatile_block("instruction", content)
+
     def user_context(self, content: str) -> PromptBuilder:
         return self._volatile_block("user_context", content)
 
@@ -217,6 +232,32 @@ class PromptBuilder:
         once the prompts have moved on.
         """
         return dict(self._versions)
+
+    @property
+    def leakable(self) -> str:
+        """Everything the model must never quote back.
+
+        The stable prefix PLUS the post-breakpoint instructions — not
+        the chart, conversation or knowledge blocks.
+
+        The validator was built from `cacheable_prefix` alone, so
+        anything after the breakpoint went unchecked. That covered the
+        safety posture ("Do not name a condition") and the corrective
+        retry instruction, both of which are instructions a response
+        must not repeat. §14 asks for "prompt_leak validation active on
+        ALL output"; it was active on part of the prompt.
+
+        The data blocks are deliberately excluded. A user's chart is
+        theirs and discussing it back to them is the product's entire
+        job — a leak check covering it would block every correct
+        reading.
+        """
+        instructions = [
+            block.content
+            for block in (*self._stable, *self._volatile)
+            if block.cacheable or block.name == "instruction"
+        ]
+        return "\n\n".join(instructions)
 
     @property
     def cacheable_prefix_tokens(self) -> int:

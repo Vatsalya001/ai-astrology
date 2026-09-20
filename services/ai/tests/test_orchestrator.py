@@ -861,3 +861,94 @@ class TestSafetyActionsAreApplied:
             assert violation.excerpt not in retry_prompt, (
                 f"the {violation.type} excerpt was quoted into the system prompt"
             )
+
+
+# ─── §14: "prompt_leak validation active on ALL output" ──────────────
+
+
+class TestTheLeakCheckCoversEveryInstruction:
+    """It covered the cached prefix and stopped there.
+
+    `OutputValidator` was built from `builder.cacheable_prefix`, which
+    ends at the cache breakpoint — so the safety posture ("Do not name a
+    condition") and the corrective retry instruction both went
+    unchecked. Both are things the model is TOLD to do, and a response
+    quoting one back is exactly the leak §14 asks to be caught.
+
+    The data blocks stay excluded, deliberately. A user's own chart is
+    theirs, and reflecting it back is the product's entire job — a leak
+    check covering it would block every correct reading.
+    """
+
+    async def test_a_leaked_posture_is_blocked(self, tmp_path: Path) -> None:
+        posture_echo = (
+            "SAFETY POSTURE — this message is about health. Answer with cultural "
+            "and traditional framing only. Do not name a condition, do not suggest "
+            "a diagnosis."
+        )
+        orchestrator, _, _, _ = build(
+            tmp_path, safety="medical", answer=posture_echo, chart=StubChart()
+        )
+
+        envelope = await orchestrator.complete(a_request("an ambiguous question with no keywords"))
+
+        assert envelope.result.blocked is True, (
+            "the model quoted the safety posture back and it was not caught"
+        )
+        assert "prompt_leak" in {f.type for f in envelope.telemetry.safety_flags}
+
+    async def test_a_leaked_stable_module_is_still_blocked(self, tmp_path: Path) -> None:
+        # The negative case for the change: widening the check must not
+        # have dropped what it already covered.
+        from app.prompts import PromptBuilder
+
+        prefix = (
+            PromptBuilder()
+            .add("system_base", "v1")
+            .add("astrology_rules", "v1")
+            .add("safety_rules", "v1")
+            .persona("vedic_guide", "v1")
+            .add("output_format", "v1")
+            .cache_breakpoint()
+            .cacheable_prefix
+        )
+        # A long verbatim run from the stable prefix.
+        echo = " ".join(prefix.split()[:40])
+
+        orchestrator, _, _, _ = build(tmp_path, answer=echo, chart=StubChart())
+
+        envelope = await orchestrator.complete(a_request())
+
+        assert "prompt_leak" in {f.type for f in envelope.telemetry.safety_flags}
+
+    async def test_the_users_own_chart_is_not_a_leak(self, tmp_path: Path) -> None:
+        """The reason `leakable` excludes the data blocks.
+
+        Reflecting somebody's chart back at them is what the product
+        does. A leak check that covered the chart context would block
+        every correct reading — the same shape of mistake the claim
+        extractor made before it was rewritten.
+        """
+        # Long enough to exceed the 8-word shingle. The first version of
+        # this test used a five-word chart, which CANNOT collide however
+        # the check is scoped — so the break that widened `leakable` to
+        # swallow the data blocks left it green.
+        chart_text = (
+            "Saturn is in the fourth house in the sign of Aries at twelve "
+            "degrees, and the Moon is in Scorpio in the eleventh house."
+        )
+        assert len(chart_text.split()) > 8
+
+        orchestrator, _, _, _ = build(
+            tmp_path,
+            answer=f"{chart_text} That placement is traditionally read as a focus on home.",
+            chart=StubChart(text=chart_text),
+        )
+
+        envelope = await orchestrator.complete(a_request())
+
+        assert "prompt_leak" not in {f.type for f in envelope.telemetry.safety_flags}, (
+            "the user's own chart was treated as a prompt leak — that would block "
+            "every correct reading the product produces"
+        )
+        assert envelope.result.blocked is False

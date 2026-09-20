@@ -315,14 +315,14 @@ class Orchestrator:
             # anyone asked a health question — taking the hit rate to
             # zero for every OTHER user of the same persona, invisibly,
             # because every answer would still be correct.
-            builder.user_context(posture)
+            builder.instruction(posture)
 
         if correction:
             # Last, so it is the most recent thing the model read, and
             # after the breakpoint so it never pollutes the cached
             # prefix — a correction baked into the prefix would be sent
             # to every subsequent user.
-            builder.user_context(correction)
+            builder.instruction(correction)
 
         return builder
 
@@ -435,7 +435,13 @@ class Orchestrator:
             posture=posture,
         )
 
-        validator = OutputValidator(system_prompt=builder.cacheable_prefix)
+        # `leakable`, not `cacheable_prefix`. The prefix stops at the
+        # cache breakpoint, so the safety posture and the corrective
+        # retry — both instructions — went unchecked, and §14 asks for
+        # leak validation on ALL output. The chart and conversation
+        # blocks are excluded by `leakable` on purpose: a user's own
+        # chart is meant to be reflected back at them.
+        validator = OutputValidator(system_prompt=builder.leakable)
 
         # ── 5. generate ──────────────────────────────────────────────
         try:
