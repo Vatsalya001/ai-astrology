@@ -2,20 +2,28 @@
 
 ```
 Phase: 4 — AI Infrastructure
-Gate:  🔶 OPEN  (18 of 19 closed — one BLOCKED on a credential)
+Gate:  ✅ 19 of 19 §17 items closed (2026-09-21)
        21 tasks done. Nothing is exposed to users in this phase.
 
-       Blocked: "AnthropicProvider verified once against a real key,
-       incl. prompt caching". Needs a paid Anthropic key, which this
-       machine does not have — and the prompt-caching half is NOT
-       satisfiable in Phase 4 at all: the stable prefix is ~770 tokens
-       against Anthropic's ~1024 minimum, so `cache_control` is ignored
-       and there is no cache behaviour to observe. Phase 5's RAG corpus
-       takes the prefix over the line; `test_prompt_registry.py` fails
-       on the day it does.
+       Accuracy CLOSED at 180/200 = 90.0% (qwen/qwen3.8-27b via Groq,
+       prompt v4, 4 provider errors — under the 5% the script tolerates
+       before it refuses to report a number).
 
-       Accuracy CLOSED 2026-09-21 at 180/200 = 90.0%
-       (qwen/qwen3.8-27b via Groq, prompt v4, 4 provider errors).
+       The Anthropic line is SUPERSEDED by ADR-011: the adapter is
+       removed, production provider deferred to Phase 7. Its purpose —
+       verify an adapter against a real vendor once — is met by
+       `scripts/verify_provider.py openai-compatible` against Groq.
+
+       ⚠️  NOT a clean bill of health. See PROJECT_STATUS.md: two
+       single-bit flips were found in the committed ephemeris kernel on
+       this machine, memtest86+ has never been run, and every number
+       above was measured here.
+
+       Open, none of them §17 gate items:
+         · GoogleProvider never run against a real key (free, ~5 min)
+         · CI has not run since 2026-09-16 (GitHub Actions billing)
+         · Hinglish crisis phrases need a native speaker
+         · 6 commits unpushed — the remote 404s
 ```
 
 Phase 3 closed 16 of 16 on 2026-09-19. Its record is `docs/TESTING-PHASE-3.md` and
