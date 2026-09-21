@@ -84,6 +84,17 @@ async def _usage_table(provider: LLMProvider, label: str, req: CompletionRequest
         response = await provider.complete(req)
     except ProviderError as err:
         print(f"\n{label}: FAILED — {err}")
+        # A bare status is where an hour goes. The adapters build their
+        # messages from the status code alone and never the response
+        # body — deliberately, because that body is where a vendor
+        # echoes back the key it rejected — so the hint has to be added
+        # here, by the one caller that knows a human is reading.
+        if err.status_code in (400, 401, 403):
+            print("    ^ that status is almost always the KEY, not the request.")
+            print("      Google returns 400 INVALID_ARGUMENT for a malformed key and")
+            print("      403 for one that is valid but not enabled for this API.")
+            print("      Check LLM_API_KEY in services/ai/.env — no quotes, no spaces,")
+            print("      and from https://aistudio.google.com/apikey")
         return
 
     print(f"\n{label}")
