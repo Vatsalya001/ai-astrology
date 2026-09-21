@@ -4,8 +4,28 @@ Every item in `docs/specs/PHASE-04-AI-INFRASTRUCTURE.md` §17, checked by
 **executing it** rather than by reading the code. Where a check is a command, the
 command is here so anyone can re-run it.
 
-**Every §17 gate item is now met.** The accuracy item was the last one open and closed
-at **180/200 = 90.0%** on 2026-09-21.
+**18 of 19 §17 gate items are met. One is BLOCKED and cannot be closed on this
+machine.** The accuracy item closed at **180/200 = 90.0%** on 2026-09-21.
+
+> ❌ **`AnthropicProvider` verified once against a real key, incl. prompt caching.**
+>
+> Two separate blockers, and the second is the interesting one:
+>
+> 1. No paid Anthropic key exists here. Groq does not substitute — it is reached
+>    through `OpenAICompatibleProvider`, a different adapter with different usage
+>    accounting, different cache semantics and a different refusal shape.
+> 2. **The prompt-caching half is not satisfiable in Phase 4 at all.** The stable
+>    prefix is ~770 tokens against Anthropic's ~1024 minimum, so `cache_control` is
+>    ignored outright — no write, no read, no error. Even with a key there would be no
+>    cache behaviour to observe, so the item cannot be honestly ticked until Phase 5's
+>    RAG corpus grows the prefix past the threshold. `test_prompt_registry.py` asserts
+>    the prefix is still below it and **fails on the day that changes**, which is how
+>    somebody learns the date to run this check.
+>
+> An earlier version of this report filed this under "owed, not closeable by a test"
+> rather than as an unmet gate item. That was wrong: §17 lists it as a gate line, and
+> a gate report that quietly reclassifies its own failures is the thing this document
+> exists not to be.
 
 Two rows below were marked met by an earlier pass and did **not** survive being
 re-executed at phase close — the PII guard had a hole in the primary position, and the

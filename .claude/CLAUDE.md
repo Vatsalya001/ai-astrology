@@ -2,7 +2,7 @@
 
 Read this at the start of every session. It is short on purpose.
 
-**Current phase: 3 — Kundli UI.** Phases 0, 1 and 2 are closed.
+**Current phase: 4 — AI Infrastructure.** Phases 0–3 are closed.
 See `.claude/state/current-phase.md` for what carries forward.
 
 ---

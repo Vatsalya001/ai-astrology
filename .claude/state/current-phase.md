@@ -2,8 +2,20 @@
 
 ```
 Phase: 4 — AI Infrastructure
-Gate:  🔶 OPEN  (0 of 19 gate items closed)
-       21 tasks. Nothing is exposed to users in this phase.
+Gate:  🔶 OPEN  (18 of 19 closed — one BLOCKED on a credential)
+       21 tasks done. Nothing is exposed to users in this phase.
+
+       Blocked: "AnthropicProvider verified once against a real key,
+       incl. prompt caching". Needs a paid Anthropic key, which this
+       machine does not have — and the prompt-caching half is NOT
+       satisfiable in Phase 4 at all: the stable prefix is ~770 tokens
+       against Anthropic's ~1024 minimum, so `cache_control` is ignored
+       and there is no cache behaviour to observe. Phase 5's RAG corpus
+       takes the prefix over the line; `test_prompt_registry.py` fails
+       on the day it does.
+
+       Accuracy CLOSED 2026-09-21 at 180/200 = 90.0%
+       (qwen/qwen3.8-27b via Groq, prompt v4, 4 provider errors).
 ```
 
 Phase 3 closed 16 of 16 on 2026-09-19. Its record is `docs/TESTING-PHASE-3.md` and
