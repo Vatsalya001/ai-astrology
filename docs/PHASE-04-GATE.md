@@ -39,7 +39,8 @@ a summary, because a gate report that buries its one failure is worth nothing.
 The pre-pass half is met and then some. The model half is not.
 
 **The as-shipped number is now measured, not bounded.** Four earlier attempts died on
-a wedged machine; three full 118-message runs completed on 2026-09-21.
+a wedged machine; three full 118-message runs completed on 2026-09-21, all on
+`llama3.2:3b` — the model that actually serves the `fast` tier locally.
 
 | | result |
 |---|---|
@@ -54,6 +55,41 @@ Read the last row first. Even a *perfect* confidence policy leaves this at 69.5%
 nothing about thresholds, parsing or prompts closes a 15-point gap. **A 3B local model
 does not do 21-way classification at 85%.** That is the finding, and §15 predicted it:
 *"Free local models behave differently from Claude, so dev quality misleads."*
+
+
+### A hosted model clears the bar — measured, on 70 messages
+
+`openai/gpt-oss-120b` on Groq's free tier, prompt v4:
+
+| | result |
+|---|---|
+| **Model accuracy on what it was asked** | **65/70 = 92.9%** |
+| Correct answers lost to the threshold | **3**, all at confidence 0.3 |
+| As shipped, whole set | **not soundly measured** — see below |
+
+92.9% is the answer to the question this gate item actually asks. The local 3B
+manages 60.6% on the same prompt and the same 118 messages, so the gap is the model,
+exactly as §15 warned.
+
+**The as-shipped figure from that run is not quotable, and the script now refuses to
+quote it.** 48 of 118 calls died at the provider, so those rows fell back to
+`GENERAL_ASTROLOGY` — a label 27 of the 200 rows carry — and *failing scored points*.
+The run printed 80.5% while the model was answering 92.9% of what it was given.
+
+The cause was a limit that is not in the response headers. Groq advertises
+`x-ratelimit-limit-tokens: 8000` per minute; the binding limit is **200,000 tokens per
+day**, which appears only in the body of the 429 that eventually fires. At ~1,400
+tokens per classification that is ~142 calls a day — one clean 118-message run, with
+little spare, and the earlier unpaced attempt had already spent most of it.
+
+**What would close the item:** one clean run once the daily budget resets — roughly 45
+minutes at the per-minute pacing, and the script exits non-zero unless it completes
+without provider errors, so a contaminated run cannot be mistaken for a result again:
+
+```bash
+cd services/ai
+MEASURE_TOKENS_PER_MINUTE=7200 uv run python -m scripts.diagnose_intent_loss
+```
 
 An earlier version of this report said *"the prompt is not the explanation"* and
 listed it as ruled out. **That was wrong, twice**, and the corrections are the most

@@ -36,14 +36,22 @@ DATASET = pathlib.Path(__file__).parent.parent / "tests" / "fixtures" / "intents
 #
 # Free hosted tiers meter TOKENS, not requests, and the difference is the
 # whole problem. Groq's free tier allows 1000 requests but only 8000
-# tokens/minute; one classification costs ~1250, so the sixth call in a
-# minute is a 429 while 994 of the request budget sit unused.
+# tokens/minute; one classification of this prompt costs ~1400, so the
+# sixth call in a minute is a 429 while 994 of the request budget sits
+# unused. Unpaced, that produced a 118-message run in 90 seconds where
+# the model answered 3 times and errored 115.
 #
-# Unpaced, that produced a full 118-message run in 90 seconds where the
-# model answered 3 times and errored 115 — and the script still printed
-# "56.0%" as an accuracy, because a provider error falls back to
-# GENERAL_ASTROLOGY and 27 rows carry that label. A rate limit read as a
-# model evaluation.
+# PACING THIS IS NECESSARY AND NOT SUFFICIENT. The per-minute number is
+# what the `x-ratelimit-*` response headers advertise, and it is not the
+# binding limit: the same tier also caps TOKENS PER DAY at 200000, which
+# the headers never mention and which only appears in the body of the
+# 429 that finally fires. At ~1400/call that is ~142 calls a day — one
+# clean 118-message run, with little spare.
+#
+# So a paced run can still die two thirds of the way through on a
+# budget it could not see. That is what the contamination check at the
+# bottom of `main` is for: pacing keeps a run alive, the check keeps a
+# dead one from being quoted.
 TOKENS_PER_MINUTE = int(os.environ.get("MEASURE_TOKENS_PER_MINUTE", "0"))
 
 
@@ -235,11 +243,50 @@ async def main() -> int:
         print("\n  right answers the threshold threw away:")
         print("\n".join(examples))
 
+    # A run that lost calls to the PROVIDER did not measure the model,
+    # and must not print a gate number as though it had.
+    #
+    # The failure this exists to stop has now happened twice. Unpaced,
+    # 115 of 118 calls 429'd and the script reported "56.0%" — a rate
+    # limit wearing the shape of an accuracy, because a provider error
+    # falls back to GENERAL_ASTROLOGY and 27 of the 200 rows carry that
+    # label, so failing scores points. Paced to Groq's PER-MINUTE limit,
+    # 48 still failed: the binding limit was 200000 tokens per DAY, and
+    # the run exhausted it partway through. It printed 80.5% while the
+    # model was answering 92.9% of what it was actually asked.
+    #
+    # The tell both times was the ceiling printing BELOW the shipped
+    # figure, which is arithmetically impossible unless rows never
+    # reached the model. That is now checked rather than left for a
+    # reader to notice.
+    failed = sources["provider_error"]
+    contaminated = failed > max(2, len(deferred) // 20)
+
+    if contaminated:
+        print(f"\n{'!' * 66}")
+        print(f"  NOT A MEASUREMENT — {failed}/{len(deferred)} calls failed at the provider.")
+        print("  Those rows fell back to GENERAL_ASTROLOGY, which is a LABEL IN THE")
+        print("  SET, so provider failures score points and the totals below read")
+        print("  higher than the model earned. Do not quote them.")
+        if model_answers:
+            sound = f"{raw_correct}/{model_answers} = {raw_correct / model_answers:.1%}"
+            print(f"\n  The model's accuracy on what it was actually asked — {sound} —")
+            print("  is the only sound number here. Re-run when quota allows.")
+        else:
+            # Nothing got through, so there is no sound number at all.
+            # Dividing here is how this banner crashed the first time it
+            # fired for real: `llama3.2:3b` passed while LLM_PROVIDER
+            # pointed at Groq, every call 404'd, and model_answers was 0.
+            print("\n  NOTHING reached the model, so there is no accuracy here at all.")
+            print("  Check the provider/model line at the top: a model name from one")
+            print("  vendor sent to another is a 404 on every row.")
+        print(f"{'!' * 66}")
+
     if not limit:
         shipped = prepass_correct + final_correct
         ceiling = prepass_correct + raw_correct
         print(f"\n{'=' * 66}")
-        print("AS SHIPPED, WHOLE SET")
+        print("AS SHIPPED, WHOLE SET" + ("  (INVALID — see above)" if contaminated else ""))
         print(f"{'=' * 66}")
         print(
             f"  {shipped}/{total} = {shipped / total:.1%}   "
@@ -249,7 +296,16 @@ async def main() -> int:
             f"  ceiling if the threshold discarded nothing: "
             f"{ceiling}/{total} = {ceiling / total:.1%}"
         )
-    return 0
+        if ceiling < shipped:
+            print(
+                "\n  NOTE: the ceiling is BELOW the shipped figure. That is only\n"
+                "  possible when rows never reached the model, so the shipped\n"
+                "  figure is inflated by lucky fallbacks rather than earned."
+            )
+
+    # Non-zero so a CI step or a shell `&&` cannot treat a contaminated
+    # run as a result.
+    return 1 if contaminated else 0
 
 
 if __name__ == "__main__":

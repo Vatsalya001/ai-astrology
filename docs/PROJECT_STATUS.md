@@ -2620,3 +2620,67 @@ from settings, and every script prints the provider, model and prompt version it
 resolved before it starts.
 
 **916 Python tests. `task verify` green. Every new guard break-tested.**
+
+---
+
+# Phase 4 — a hosted model answers the gate question: 92.9%
+
+Groq's free tier, `openai/gpt-oss-120b`, prompt v4. Key in `services/ai/.env`; no code
+changes were needed, because the `openai-compatible` adapter takes an arbitrary
+`LLM_BASE_URL` and requests JSON via `response_format: {"type":"json_object"}` — the
+widely-supported form rather than the strict-schema one.
+
+| | llama3.2:3b (local) | gpt-oss-120b (Groq) |
+|---|---|---|
+| Model accuracy on messages it answered | 60.6% | **92.9%** (65/70) |
+| Correct answers lost to the threshold | 18 | 3 |
+| Discarded confidences | 0.0–0.3 | all 0.3 |
+
+92.9% is the answer to what §17 actually asks. The gap to the local model is the
+model, precisely as §15 warned.
+
+## The as-shipped figure from that run is NOT quotable
+
+48 of 118 calls died at the provider. Those rows fall back to `GENERAL_ASTROLOGY` — a
+label 27 of the 200 rows carry — so **provider failures score points**. The run printed
+80.5% while the model was answering 92.9% of what it was given.
+
+This is the second time a rate limit nearly entered the record as a model evaluation.
+The first was worse: unpaced, 115 of 118 calls 429'd, the run finished in 90 seconds,
+and it printed "56.0%" — which read as *gpt-oss-120b is worse than llama3.2:3b*, the
+exact opposite of the data. Of the 3 calls that got through, 3 were correct.
+
+**The tell both times was the ceiling printing BELOW the shipped figure**, which is
+arithmetically impossible unless rows never reached the model. That is now checked, not
+left for a reader to notice.
+
+## Why pacing was necessary and not sufficient
+
+Groq's response headers advertise `x-ratelimit-limit-tokens: 8000` per minute. That is
+not the binding limit. The same tier also caps **200,000 tokens per day**, which the
+headers never mention and which surfaces only in the body of the 429 that finally
+fires. At ~1,400 tokens per classification that is ~142 calls a day — one clean
+118-message run, with little spare, and the earlier unpaced attempt had already spent
+most of it.
+
+So `TokenPacer` keeps a run alive against the visible limit, and the contamination
+check keeps a run that died on the invisible one from being quoted. The script now
+**exits non-zero** when provider errors exceed 5% of the set, so no shell `&&` or CI
+step can treat a dead run as a result.
+
+A bug in that very check, found by running it: when *nothing* reached the model it
+divided by zero. It fired for real because `diagnose_intent_loss llama3.2:3b` was run
+while `LLM_PROVIDER` pointed at Groq — a model name from one vendor sent to another,
+404 on every row. The banner now says exactly that, and points at the provider line it
+prints at the top.
+
+## What is left
+
+One clean run once the daily budget resets (~45 min at the per-minute pacing):
+
+```bash
+cd services/ai
+MEASURE_TOKENS_PER_MINUTE=7200 uv run python -m scripts.diagnose_intent_loss
+```
+
+**916 Python tests. `task verify` green.**
