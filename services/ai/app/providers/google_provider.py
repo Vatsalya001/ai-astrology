@@ -236,7 +236,8 @@ class GoogleProvider:
 
         return Usage(
             # Google reports `prompt_token_count` INCLUSIVE of cached
-            # tokens, the opposite of Anthropic. Subtracting keeps the
+            # tokens, unlike vendors that report them disjointly.
+            # Subtracting keeps the
             # fields disjoint as `Usage` documents them; without it, a
             # cached request is priced as though the prefix were fresh —
             # which is the most expensive direction to be wrong in.

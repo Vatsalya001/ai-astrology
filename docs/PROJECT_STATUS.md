@@ -2771,3 +2771,76 @@ its own fixture. Both were found by running the project's real gate rather than 
   `localhost:11434`. A model name is not a secret; it belongs on the command line.
 
 **931 Python tests. `task verify` green.**
+
+---
+
+# 🔴 The ephemeris kernel was silently corrupted — two single-bit flips
+
+Found by `task verify` while removing the Anthropic adapter, i.e. by accident. It has
+nothing to do with that change and matters far more.
+
+`services/astro/data/de421.bsp` failed its committed checksum. The forensics:
+
+| | |
+|---|---|
+| Committed blob (git) | sha256 `08b20db2…` — **matches** `de421.bsp.sha256` |
+| File on disk | sha256 `cb79e1d6…` |
+| Bytes differing, of 16,790,528 | **2** |
+| offset 3,238,520 | `0xBF` → `0xBD` |
+| offset 3,239,800 | `0x3F` → `0x3E` |
+
+**Both are single-bit clears, 1→0, 1,280 bytes apart.** Not a truncated write, not a
+partial download — two weak bits. That is a DRAM signature.
+
+`git status` never reported the file as modified, because the bytes changed **in place**
+with size and mtime untouched, so git's stat cache saw nothing to re-hash. `git checkout
+HEAD -- <file>` was a no-op for the same reason; the file had to be deleted first. **A
+silently corrupted tracked file is invisible to every routine git command.**
+
+## Why this is the most serious thing in this phase
+
+`test_the_kernel_is_the_one_we_vendored` predicted it exactly:
+
+> *"A flipped byte in a Chebyshev coefficient does not raise. It shifts a planet, and
+> the chart still renders, still validates, still has twelve houses and nine grahas.
+> Nothing downstream can tell."*
+
+Those offsets are inside coefficient data. Any chart computed on this machine between
+the corruption and now had planetary positions that were quietly wrong — and every
+golden-file test would have agreed with them, because the golden files are computed from
+the same kernel. Invariant 1 says astrology is computed, never generated; it says nothing
+about the computation being done on sound hardware.
+
+## This machine has now logged thirteen data-corruption events
+
+Nine were already recorded here before today. Today added four:
+
+| Today | Symptom |
+|---|---|
+| Go linker | `panic: bad alignment value` |
+| Go linker | `panic: index out of range [33554444] with length 35` |
+| mypy | `ValueError: reading past the buffer end` (cache.py) |
+| ephemeris | two single-bit clears in a committed binary |
+
+The first three were dismissed as stale caches, and clearing the caches did fix them —
+which is exactly what memory corruption looks like when it lands in a cache file rather
+than in a checksummed one. The ephemeris is the first corruption that landed somewhere
+with a checksum, which is the only reason it was caught rather than believed.
+
+**`memtest86+` is still unrun. It should be run before anything else on this machine is
+trusted**, including every measurement recorded in this document today.
+
+## Recovery
+
+```bash
+rm services/astro/data/de421.bsp          # git checkout alone is a NO-OP here
+git checkout HEAD -- services/astro/data/de421.bsp
+cd services/astro && uv run pytest tests/test_ephemeris.py
+```
+
+The corrupt copy is at `/tmp/de421.corrupt.bsp` until that is cleared, if anyone wants
+to confirm the bit pattern.
+
+**Worth adding:** a `task verify` step that hashes every committed binary, not just the
+ephemeris. The ephemeris was caught because somebody wrote a checksum test for it; no
+other binary in this repo has one.

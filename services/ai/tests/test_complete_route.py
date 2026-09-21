@@ -138,9 +138,12 @@ class TestChainConstruction:
         _configure(
             monkeypatch,
             env="production",
-            llm_provider="anthropic",
+            # `openai-compatible` with a DECLARED paid tier is the only
+            # production-legal primary now that the Anthropic adapter is
+            # gone: it is the one adapter with no vendor identity to
+            # infer a tier from, so the declaration is the only signal.
+            llm_provider="openai-compatible",
             llm_provider_tier="paid",
-            llm_api_key="sk-ant-not-a-real-key",
             llm_fallback_provider="google",
             llm_fallback_api_key="not-a-real-key",
         )
@@ -173,21 +176,24 @@ class TestChainConstruction:
     def test_one_adapter_twice_is_refused_as_a_chain(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Not a fallback: the same endpoint, retried under another name.
 
-        Reached by the only production-legal fallback the settings can
-        express today — `anthropic` behind `anthropic` — because §11
-        defines no fallback tier, base URL or model map. The refusal
-        comes from the registry, not the PII guard, and asserting which
-        one fired is the point: a chain that silently registered the same
-        provider twice would report a fallback it does not have.
+        §11 defines no fallback tier, base URL or model map, so a
+        fallback naming the provider the primary already uses is the
+        same endpoint wearing a second name. The refusal must come from
+        the REGISTRY, not the PII guard, and asserting which one fired
+        is the point: a chain that silently registered the same provider
+        twice would report a fallback it does not have.
         """
+        # Development, not production: the PII guard would otherwise
+        # refuse `google` first and this test would assert the wrong
+        # refusal. Which guard fires IS the point — see below.
         _configure(
             monkeypatch,
-            env="production",
-            llm_provider="anthropic",
-            llm_provider_tier="paid",
-            llm_api_key="sk-ant-not-a-real-key",
-            llm_fallback_provider="anthropic",
-            llm_fallback_api_key="sk-ant-also-not-real",
+            env="development",
+            llm_provider="google",
+            llm_provider_tier="free-hosted",
+            llm_api_key="not-a-real-key",
+            llm_fallback_provider="google",
+            llm_fallback_api_key="also-not-real",
         )
 
         with pytest.raises(ValueError) as caught:
@@ -298,7 +304,6 @@ class TestTheProviderFactory:
         [
             ("openai-compatible", "OpenAICompatibleProvider"),
             ("google", "GoogleProvider"),
-            ("anthropic", "AnthropicProvider"),
             ("mock", "MockProvider"),
         ],
     )
@@ -418,7 +423,6 @@ class TestTheModelsFollowTheProvider:
         ("provider", "expected"),
         [
             ("google", ("gemini-2.5-flash", "gemini-2.5-flash", "gemini-2.5-pro")),
-            ("anthropic", ("claude-haiku-4-5", "claude-sonnet-5", "claude-opus-5")),
             ("openai-compatible", ("llama3.2:3b", "qwen2.5:7b", "qwen2.5:7b")),
             ("mock", ("mock-fast", "mock-chat", "mock-deep")),
         ],
@@ -619,12 +623,11 @@ class TestADeclaredTierCannotBlessAFreeKey:
         _configure(
             monkeypatch,
             env="production",
-            llm_provider="anthropic",
+            llm_provider="openai-compatible",
             llm_provider_tier="paid",
-            llm_api_key="sk-ant-not-a-real-key",
         )
 
-        assert [p.id for p in get_provider_chain().chain] == ["anthropic"]
+        assert [p.id for p in get_provider_chain().chain] == ["openai-compatible"]
 
     def test_development_still_allows_the_free_provider(
         self, monkeypatch: pytest.MonkeyPatch

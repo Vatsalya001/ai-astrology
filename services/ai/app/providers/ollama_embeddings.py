@@ -76,7 +76,9 @@ class OllamaEmbeddingProvider:
             )
         except httpx.HTTPError as err:
             raise ProviderError(
-                # Type only — see the note in anthropic_provider._classify.
+                # Type only, never the exception's message: a vendor
+                # error string can carry the request URL, and for a
+                # hosted provider the key travels in it.
                 f"{self._id} unreachable: {type(err).__name__}",
                 provider_id=self._id,
                 retryable=True,

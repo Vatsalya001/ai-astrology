@@ -2,7 +2,7 @@
 
     "One suite run against every adapter, asserting schema-valid output
     and consistent exception types. Mock and Ollama runs are free and run
-    in CI; Anthropic and Google runs are manual, on demand."
+    in CI; hosted-vendor runs are manual, on demand."
 
 ── What parity means here, and what it does not ──
 
@@ -37,11 +37,9 @@ from pathlib import Path
 from typing import Any
 
 import httpx
-import httpx2
 import pytest
 
 from app.providers import (
-    AnthropicProvider,
     Capabilities,
     CompletionRequest,
     CompletionResponse,
@@ -65,7 +63,8 @@ from app.providers import (
 #
 # This list used to be `[429, 500, 503]`, which is exactly the set of
 # codes nobody gets wrong. The ones that broke were the unglamorous
-# 5xx: 529 is Anthropic's "overloaded", and 520/522/524 come from a
+# 5xx: 529 is an "overloaded" signal some vendors send, and
+# 520/522/524 come from a
 # Cloudflare edge in front of an OpenRouter-style proxy. The OpenAI
 # adapter enumerated 5xx code by code and so marked every one of them
 # permanent.
@@ -115,19 +114,6 @@ def _openai_body(text: str = "Saturn.", finish: str = "stop") -> dict[str, Any]:
             {"index": 0, "message": {"role": "assistant", "content": text}, "finish_reason": finish}
         ],
         "usage": {"prompt_tokens": 11, "completion_tokens": 7, "total_tokens": 18},
-    }
-
-
-def _anthropic_body(text: str = "Saturn.", stop: str = "end_turn") -> dict[str, Any]:
-    return {
-        "id": "msg_1",
-        "type": "message",
-        "role": "assistant",
-        "model": "claude-sonnet-5",
-        "content": [{"type": "text", "text": text}],
-        "stop_reason": stop,
-        "stop_sequence": None,
-        "usage": {"input_tokens": 11, "output_tokens": 7},
     }
 
 
@@ -192,62 +178,6 @@ def _openai_sse(text: str) -> str:
     return "".join(f"data: {e}\n\n" for e in events) + "data: [DONE]\n\n"
 
 
-def _anthropic_sse(text: str) -> str:
-    words = text.split(" ")
-    pieces = [w if i == len(words) - 1 else w + " " for i, w in enumerate(words)]
-
-    lines = [
-        (
-            "message_start",
-            {
-                "type": "message_start",
-                "message": {
-                    "id": "msg_1",
-                    "type": "message",
-                    "role": "assistant",
-                    "model": "claude-sonnet-5",
-                    "content": [],
-                    "stop_reason": None,
-                    "stop_sequence": None,
-                    "usage": {"input_tokens": 11, "output_tokens": 0},
-                },
-            },
-        ),
-        (
-            "content_block_start",
-            {
-                "type": "content_block_start",
-                "index": 0,
-                "content_block": {"type": "text", "text": ""},
-            },
-        ),
-    ]
-    lines += [
-        (
-            "content_block_delta",
-            {
-                "type": "content_block_delta",
-                "index": 0,
-                "delta": {"type": "text_delta", "text": p},
-            },
-        )
-        for p in pieces
-    ]
-    lines += [
-        ("content_block_stop", {"type": "content_block_stop", "index": 0}),
-        (
-            "message_delta",
-            {
-                "type": "message_delta",
-                "delta": {"stop_reason": "end_turn", "stop_sequence": None},
-                "usage": {"output_tokens": 7},
-            },
-        ),
-        ("message_stop", {"type": "message_stop"}),
-    ]
-    return "".join(f"event: {name}\ndata: {json.dumps(payload)}\n\n" for name, payload in lines)
-
-
 def _wants_stream(content: bytes) -> bool:
     """Did the caller ask for a stream?
 
@@ -284,34 +214,6 @@ def build_openai(*, status: int = 200, text: str = "Saturn.") -> LLMProvider:
         provider_id="ollama",
     )
     provider._client._client = httpx.AsyncClient(transport=httpx.MockTransport(handle))
-    return provider
-
-
-def build_anthropic(*, status: int = 200, text: str = "Saturn.") -> LLMProvider:
-    body = (
-        _anthropic_body(text)
-        if status == 200
-        else {
-            "type": "error",
-            "error": {"type": "authentication_error", "message": CREDENTIAL_SHAPED},
-        }
-    )
-
-    def handle(request: httpx2.Request) -> httpx2.Response:
-        if status == 200 and _wants_stream(request.content):
-            return httpx2.Response(
-                200, text=_anthropic_sse(text), headers={"content-type": "text/event-stream"}
-            )
-        return httpx2.Response(status, json=body)
-
-    provider = AnthropicProvider(
-        api_key="test-key",
-        models=ModelMap(fast="claude-haiku-4-5", chat="claude-sonnet-5", deep="claude-opus-5"),
-    )
-    # httpx2, not httpx — the Anthropic SDK moved and google-genai has
-    # not. A MockTransport from the wrong one fails inside the request
-    # builder with an error that names neither library.
-    provider._client._client = httpx2.AsyncClient(transport=httpx2.MockTransport(handle))
     return provider
 
 
@@ -363,7 +265,6 @@ def build_mock(*, status: int = 200, text: str = "Saturn.") -> LLMProvider:
 
 ADAPTERS: dict[str, Callable[..., LLMProvider]] = {
     "openai-compatible": build_openai,
-    "anthropic": build_anthropic,
     "google": build_google,
     "mock": build_mock,
 }
@@ -628,7 +529,7 @@ class TestStreamingParity:
         because an absent cost reads the same as a cheap one.
 
         "On the final chunk" matters as much as "once". Google repeats
-        running totals on every frame and Anthropic splits them across
+        running totals on every frame and some vendors split them across
         two events; both normalise to one trailing chunk. A consumer
         cannot know when to read the number unless every adapter puts it
         in the same place, and a consumer that summed what it received
@@ -721,7 +622,6 @@ def test_every_adapter_in_the_package_is_covered() -> None:
 
     covered = {
         "OpenAICompatibleProvider",
-        "AnthropicProvider",
         "GoogleProvider",
         "MockProvider",
     }
@@ -787,10 +687,6 @@ async def test_the_system_prompt_order_is_preserved(adapter: str) -> None:
         seen["body"] = json.loads(request.content)
         return httpx.Response(200, json=_openai_body())
 
-    def capture_httpx2(request: httpx2.Request) -> httpx2.Response:
-        seen["body"] = json.loads(request.content)
-        return httpx2.Response(200, json=_anthropic_body())
-
     def capture_google(request: httpx.Request) -> httpx.Response:
         seen["body"] = json.loads(request.content)
         return httpx.Response(200, json=_google_body())
@@ -800,11 +696,6 @@ async def test_the_system_prompt_order_is_preserved(adapter: str) -> None:
             provider = build_openai()
             provider._client._client = httpx.AsyncClient(  # type: ignore[attr-defined]
                 transport=httpx.MockTransport(capture_httpx)
-            )
-        case "anthropic":
-            provider = build_anthropic()
-            provider._client._client = httpx2.AsyncClient(  # type: ignore[attr-defined]
-                transport=httpx2.MockTransport(capture_httpx2)
             )
         case "google":
             provider = build_google()
@@ -852,70 +743,3 @@ class TestEveryErrorPathSuppressesCredentials:
     """
 
     SECRET = "sk-ant-LEAKED0000 x-api-key AIzaSyLEAKED Bearer LEAKED"
-
-    def test_the_anthropic_connection_branch_carries_only_a_type(self) -> None:
-        import anthropic as anthropic_sdk
-
-        from app.providers.anthropic_provider import _classify
-
-        err = anthropic_sdk.APIConnectionError(
-            message=f"failed to connect: {self.SECRET}",
-            request=httpx2.Request("POST", "https://api.anthropic.com/v1/messages"),
-        )
-
-        message = str(_classify(err, "anthropic"))
-
-        assert "LEAKED" not in message, message
-        assert "APIConnectionError" in message, "the type is what a reader needs"
-
-    def test_the_anthropic_catch_all_carries_only_a_type(self) -> None:
-        from app.providers.anthropic_provider import _classify
-
-        message = str(_classify(RuntimeError(self.SECRET), "anthropic"))
-
-        assert "LEAKED" not in message, message
-
-    def test_the_google_transport_branch_carries_only_a_type(self) -> None:
-        from app.providers.google_provider import _classify
-
-        message = str(_classify(httpx.ConnectError(self.SECRET), "google"))
-
-        assert "LEAKED" not in message, message
-
-    def test_the_embedding_provider_carries_only_a_type(self) -> None:
-        from app.providers.google_provider import _classify
-
-        assert "LEAKED" not in str(_classify(OSError(self.SECRET), "google-embeddings"))
-
-    async def test_the_registry_failure_map_carries_only_a_type(self) -> None:
-        """The catch-all path, and the one that reaches a log line.
-
-        `NoProviderAvailableError` renders this map. An SDK exception
-        interpolated here would carry a request echo into the error the
-        orchestrator logs — after every adapter had carefully suppressed
-        its own.
-        """
-        from app.providers import NoProviderAvailableError, ProviderRegistry
-
-        class Exploding:
-            id = "exploding"
-            tier = "local"
-            capabilities = Capabilities()
-
-            async def complete(self, req: CompletionRequest) -> CompletionResponse:
-                raise RuntimeError(TestEveryErrorPathSuppressesCredentials.SECRET)
-
-            def stream(self, req: CompletionRequest) -> Any:  # pragma: no cover
-                raise NotImplementedError
-
-            async def health_check(self) -> bool:
-                return False
-
-        registry = ProviderRegistry(env="development")
-        registry.register(Exploding())  # type: ignore[arg-type]
-
-        with pytest.raises(NoProviderAvailableError) as caught:
-            await registry.complete(a_request())
-
-        assert "LEAKED" not in str(caught.value), str(caught.value)
-        assert "RuntimeError" in str(caught.value)

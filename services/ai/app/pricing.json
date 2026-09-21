@@ -11,26 +11,6 @@
   "the same as a model being absent: absent raises, so a model nobody",
   "priced can never be silently billed at nothing."
  ],
- "anthropic": {
-  "claude-sonnet-5": {
-   "input": 3000000,
-   "output": 15000000,
-   "cache_write": 3750000,
-   "cache_read": 300000
-  },
-  "claude-haiku-4-5": {
-   "input": 1000000,
-   "output": 5000000,
-   "cache_write": 1250000,
-   "cache_read": 100000
-  },
-  "claude-opus-5": {
-   "input": 15000000,
-   "output": 75000000,
-   "cache_write": 18750000,
-   "cache_read": 1500000
-  }
- },
  "google": {
   "gemini-2.5-flash": {
    "input": 300000,

@@ -29,15 +29,10 @@ DEFAULT_MODELS: dict[str, tuple[str, str, str]] = {
     "openai-compatible": ("llama3.2:3b", "qwen2.5:7b", "qwen2.5:7b"),
     # §3 routes by job: classification and extraction go to the cheapest
     # model that can do them, conversation to the middle one, and paid
-    # interpretation to the largest.
-    # The undated alias, matching the other two and app/pricing.json.
-    # `cost_micros` looks up an exact string and RAISES on a miss, so
-    # `claude-haiku-4-5-20251001` here would make every fast-tier
-    # Anthropic call fail at billing time rather than answer.
-    "anthropic": ("claude-haiku-4-5", "claude-sonnet-5", "claude-opus-5"),
-    # `deep` is Pro, which has thin-to-absent free-tier quota — expected,
-    # because `deep` is the PAID interpretation tier. A free-hosted run
-    # exercises `fast` and `chat`, both Flash.
+    # interpretation to the largest. `deep` is Pro, which has thin-to-
+    # absent free-tier quota — expected, because `deep` IS the paid
+    # interpretation tier. A free-hosted run exercises fast and chat,
+    # both Flash.
     "google": ("gemini-2.5-flash", "gemini-2.5-flash", "gemini-2.5-pro"),
     # MockProvider ignores this map and reports `mock-{tier}` from the
     # fixture. These are those names, so `describe()` prints what the
@@ -68,7 +63,7 @@ class Settings(BaseSettings):
     ai_database_url: str = "postgresql://astro_ro:astro_ro@localhost:5432/astro_dev"
 
     # ─── LLM provider ─────────────────────────────────────────────
-    llm_provider: Literal["openai-compatible", "anthropic", "google", "mock"] = "openai-compatible"
+    llm_provider: Literal["openai-compatible", "google", "mock"] = "openai-compatible"
     llm_base_url: str = "http://localhost:11434/v1"
     llm_api_key: str = ""
     llm_provider_tier: ProviderTier = "local"
@@ -92,7 +87,7 @@ class Settings(BaseSettings):
     # no second base URL, so such a fallback would point at the endpoint
     # the primary just failed at, and would collide with it on provider
     # id — a "fallback" that is the primary wearing a different name.
-    llm_fallback_provider: Literal["", "anthropic", "google", "mock"] = ""
+    llm_fallback_provider: Literal["", "google", "mock"] = ""
     llm_fallback_api_key: str = ""
 
     # ─── Resilience (PHASE-04 §2, task 4.9) ───────────────────────
@@ -112,7 +107,9 @@ class Settings(BaseSettings):
     delivered 2 — ten right answers thrown away by 0.6.
 
     WHY IT IS A SETTING. Because 0.4 is tuned to a weak local model and
-    production runs Claude, whose calibration is different and unmeasured.
+    a hosted model calibrates differently — measured: `qwen3.8-27b`
+    reports an honest 0.3 on genuinely vague messages where
+    `llama3.2:3b` reported 0.0 on answers it got right.
     A constant would make re-tuning a deploy; this makes it
     `INTENT_MIN_CONFIDENCE=0.6` in an env file. Phase 6's eval harness is
     where the production value gets chosen on evidence, and this is the
@@ -128,16 +125,14 @@ class Settings(BaseSettings):
     """Per-provider HTTP budget. §11's documented default is 60.
 
     It is a FLOOR for the paid provider rather than an absolute: see
-    `effective_llm_timeout_seconds`. Wiring this straight through took
-    AnthropicProvider from its own 120s default down to 60s, and the
-    deep tier — a paid interpretation on the largest model — is exactly
-    the call that needs the longer budget. A regression that only shows
-    up on the most expensive request in the product is the worst kind to
-    ship silently.
+    `effective_llm_timeout_seconds`. The deep tier — a paid
+    interpretation on the largest model — is exactly the call that needs
+    the longer budget, and a regression that only shows up on the most
+    expensive request in the product is the worst kind to ship silently.
     """
 
     llm_paid_timeout_floor_seconds: float = Field(default=120.0, gt=0)
-    """The floor. Matches AnthropicProvider's own former default.
+    """The floor for a paid provider.
 
     Applied only when the provider tier is `paid`: a local model that
     has not answered in 60s is not going to, and waiting two minutes for

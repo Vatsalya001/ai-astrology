@@ -14,7 +14,7 @@ from app.prompts import (
     all_modules,
     load_module,
 )
-from app.prompts.registry import ANTHROPIC_MIN_CACHEABLE_TOKENS
+from app.prompts.registry import MIN_CACHEABLE_PREFIX_TOKENS
 
 LOCKFILE = Path(__file__).parent.parent / "app" / "prompts" / "published.lock.json"
 
@@ -272,9 +272,9 @@ def test_the_shipped_prefix_is_still_below_anthropics_minimum() -> None:
 
     tokens = builder.cacheable_prefix_tokens
 
-    assert tokens < ANTHROPIC_MIN_CACHEABLE_TOKENS, (
+    assert tokens < MIN_CACHEABLE_PREFIX_TOKENS, (
         f"the cacheable prefix is now ~{tokens} tokens, at or above Anthropic's "
-        f"~{ANTHROPIC_MIN_CACHEABLE_TOKENS}-token minimum. The breakpoint has begun "
+        f"~{MIN_CACHEABLE_PREFIX_TOKENS}-token minimum. The breakpoint has begun "
         f"to engage — which is good news. Flip this assertion to >= and record the "
         f"date in docs/PROJECT_STATUS.md."
     )

@@ -6,7 +6,6 @@ an orchestrator cannot quietly `from openai import ...` and turn a
 configuration change back into a code change.
 """
 
-from app.providers.anthropic_provider import AnthropicProvider
 from app.providers.base import (
     CallStats,
     Capabilities,
@@ -35,7 +34,6 @@ from app.providers.registry import NoProviderAvailableError, ProviderRegistry
 from app.providers.resilience import BreakerState, CircuitOpenError, ResilientProvider
 
 __all__ = [
-    "AnthropicProvider",
     "BreakerState",
     "CallStats",
     "Capabilities",

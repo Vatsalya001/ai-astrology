@@ -60,7 +60,11 @@ def assert_provider_allowed(
             f'Refusing to start: LLM provider "{provider_id}" is tier "{tier}". '
             f"Production requires a paid provider with a no-training commitment, "
             f"because requests carry birth data and personal conversation content. "
-            f"Set LLM_PROVIDER=anthropic and LLM_PROVIDER_TIER=paid."
+            f"Point LLM_PROVIDER at a vendor you pay, and set "
+            f"LLM_PROVIDER_TIER=paid. Note that `google` cannot be blessed "
+            f"this way: its adapter declares its own free-hosted tier, "
+            f"because a key string cannot be inspected for whether billing "
+            f"is attached."
         )
 
 

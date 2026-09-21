@@ -46,7 +46,7 @@ from app.providers.resilience import UnsafeToReplayError, is_retryable_status
 # The table itself lives in `resilience.py` so all the adapters share one
 # — this file used to keep a private 5xx enumeration that omitted 501,
 # 520, 522, 524 and 529, and marked every one of them permanent while
-# Anthropic and Google called the same code retryable.
+# other adapters called the same code retryable.
 
 
 def _timeout_reached_the_provider(err: Exception) -> bool:
@@ -195,8 +195,8 @@ class OpenAICompatibleProvider:
         The blocks are joined with a blank line rather than sent
         separately: this wire format has no per-block cache control, so
         the only thing that survives is ORDER, and order is what makes a
-        byte-stable prefix. The Anthropic adapter, which does have
-        breakpoints, keeps them separate.
+        byte-stable prefix. An adapter with real per-block cache
+        control would keep them separate.
         """
         out: list[dict[str, str]] = []
 

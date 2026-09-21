@@ -115,7 +115,7 @@ def _micros(tokens: int, per_million: int) -> int:
 def cost_micros(model: str, usage: Usage) -> int:
     """What one call cost, in micro-USD.
 
-    Note `input_tokens` is the FRESH input only. Anthropic reports the
+    Note `input_tokens` is the FRESH input only. Some vendors report the
     three input classes disjointly and `Usage` preserves that, so adding
     the cached counts here is correct rather than double-counting — and
     the price differs per class by a factor of about twelve, which is the

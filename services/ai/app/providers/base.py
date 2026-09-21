@@ -2,7 +2,7 @@
 
 Nothing outside this package may import a vendor SDK. That is not a
 style preference: the whole point of Phase 4 is that swapping Ollama for
-Anthropic is a configuration change, and it stops being one the moment
+another vendor is a configuration change, and it stops being one the moment
 `from openai import ...` appears in an orchestrator. `.importlinter`
 enforces it in CI, because conventions erode and a contract does not.
 
@@ -132,7 +132,7 @@ class Usage(BaseModel):
     input_tokens: int = Field(default=0, ge=0)
     """Fresh input tokens: neither read from cache nor written to it.
 
-    Disjoint from the two cache counters below, matching how Anthropic
+    Disjoint from the two cache counters below, matching how vendors
     reports them. Summing all three gives the true input size; using this
     one alone understates a cached request by the whole prefix, which is
     the great majority of it in this product.

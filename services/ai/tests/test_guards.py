@@ -39,7 +39,7 @@ class TestProviderPIIGuard:
             assert_provider_allowed("ollama", tier, "production")  # type: ignore[arg-type]
 
     def test_production_accepts_paid_provider(self) -> None:
-        assert_provider_allowed("anthropic", "paid", "production")
+        assert_provider_allowed("some-paid-vendor", "paid", "production")
 
     @pytest.mark.parametrize("env", ["development", "staging"])
     @pytest.mark.parametrize("tier", ["local", "free-hosted", "paid"])
@@ -126,13 +126,13 @@ class TestChainProviderTierGuard:
         """
         with pytest.raises(UnsafeConfigurationError, match="google"):
             assert_chain_providers_allowed(
-                [StubProvider("anthropic", "paid"), StubProvider("google", "free-hosted")],  # type: ignore[list-item]
+                [StubProvider("paid-primary", "paid"), StubProvider("google", "free-hosted")],  # type: ignore[list-item]
                 "production",
             )
 
     def test_production_accepts_a_fully_paid_chain(self) -> None:
         assert_chain_providers_allowed(
-            [StubProvider("anthropic", "paid"), StubProvider("anthropic-eu", "paid")],  # type: ignore[list-item]
+            [StubProvider("paid-primary", "paid"), StubProvider("paid-eu", "paid")],  # type: ignore[list-item]
             "production",
         )
 
@@ -223,9 +223,13 @@ class TestStartupGuardsCheckTheConstructedProvider:
         self, _production_config: None, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """The whole chain is built and checked, not only the primary."""
-        monkeypatch.setattr(settings, "llm_provider", "anthropic")
+        # `openai-compatible` + a declared paid tier is the only
+        # production-legal primary the settings can express: it is the
+        # one adapter with no vendor identity to infer a tier from, so
+        # the declaration is the only signal there is.
+        monkeypatch.setattr(settings, "llm_provider", "openai-compatible")
         monkeypatch.setattr(settings, "llm_provider_tier", "paid")
-        monkeypatch.setattr(settings, "llm_api_key", "sk-ant-not-a-real-key")
+        monkeypatch.setattr(settings, "llm_api_key", "")
         monkeypatch.setattr(settings, "llm_fallback_provider", "google")
         monkeypatch.setattr(settings, "llm_fallback_api_key", "not-a-real-key")
 

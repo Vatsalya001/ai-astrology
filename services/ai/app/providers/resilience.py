@@ -44,7 +44,8 @@ from app.providers.base import (
 # loop reads the resulting `retryable` and NOTHING else. Three adapters
 # keeping three private tables is therefore three chances to disagree
 # about the same outage — and they did: the OpenAI adapter listed 5xx
-# code by code and so marked a 529 (Anthropic "overloaded") and a
+# code by code and so marked a 529 ("overloaded", which some
+# vendors and proxies send) and a
 # Cloudflare 520/522/524 from an OpenRouter-style proxy permanent, which
 # stops the chain walking to a provider that was up the whole time.
 #
@@ -75,7 +76,7 @@ def is_retryable_status(status: int) -> bool:
     Every 5xx, plus the four client codes above. The 5xx clause is a
     RANGE rather than an enumeration on purpose: the enumeration is what
     broke, because the interesting codes are the ones nobody thinks of —
-    529 from an overloaded Anthropic, 520/522/524 from a Cloudflare edge
+    529 from an overloaded upstream, 520/522/524 from a Cloudflare edge
     in front of a proxy. A range cannot omit next year's.
 
     501 "Not Implemented" sits inside that range and is deliberately left

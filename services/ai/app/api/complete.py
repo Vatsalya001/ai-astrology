@@ -40,7 +40,6 @@ from app.orchestrator import (
     Orchestrator,
 )
 from app.providers import (
-    AnthropicProvider,
     Capabilities,
     CompletionChunk,
     CompletionRequest,
@@ -99,8 +98,8 @@ def _fallback_provider() -> LLMProvider | None:
     and a retention policy no one reviewed.
 
     Note what is NOT passed: `tier`. Each adapter reports its own
-    (`AnthropicProvider` is `paid`, `GoogleProvider` is `free-hosted`,
-    `MockProvider` is `local`), and handing it the primary's DECLARED
+    (`GoogleProvider` is `free-hosted`, `MockProvider` is `local`),
+    and handing it the primary's DECLARED
     tier is precisely how a free Gemini key gets blessed as "paid" and
     receives birth data in production. `ProviderRegistry.register` reads
     that tier, so a free-tier fallback refuses to boot in production
@@ -113,12 +112,6 @@ def _fallback_provider() -> LLMProvider | None:
     match settings.llm_fallback_provider:
         case "":
             return None
-        case "anthropic":
-            return AnthropicProvider(
-                api_key=settings.llm_fallback_api_key,
-                models=_models(),
-                timeout_seconds=settings.effective_llm_timeout_seconds,
-            )
         case "google":
             return GoogleProvider(
                 api_key=settings.llm_fallback_api_key,

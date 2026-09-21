@@ -108,7 +108,7 @@ class BuilderOrderError(RuntimeError):
     """
 
 
-# Anthropic ignores `cache_control` on a prefix below roughly this many
+# Hosted providers ignore prompt caching on a prefix below roughly this many
 # tokens — 2048 on Haiku. Below it the breakpoint is a no-op: no write,
 # no read, and no error saying so.
 #
@@ -123,7 +123,7 @@ class BuilderOrderError(RuntimeError):
 # and a cache that never STARTED working looks identical from the
 # outside. When Phase 5 pushes the prefix over the line, that test
 # fails and somebody notices it began working.
-ANTHROPIC_MIN_CACHEABLE_TOKENS = 1024
+MIN_CACHEABLE_PREFIX_TOKENS = 1024
 
 
 class PromptBuilder:

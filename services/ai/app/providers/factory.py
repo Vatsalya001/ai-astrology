@@ -24,7 +24,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from app.providers.anthropic_provider import AnthropicProvider
 from app.providers.base import LLMProvider, ModelMap
 from app.providers.google_provider import GoogleProvider
 from app.providers.mock import MockProvider
@@ -67,13 +66,6 @@ def provider_from_settings(
     timeout = config.effective_llm_timeout_seconds
 
     match config.llm_provider:
-        case "anthropic":
-            return AnthropicProvider(
-                api_key=config.llm_api_key,
-                models=models,
-                timeout_seconds=timeout,
-                provider_id=provider_id or "anthropic",
-            )
         case "google":
             # `tier` deliberately NOT passed, so the adapter's own
             # `free-hosted` stands and `LLM_PROVIDER_TIER=paid` cannot

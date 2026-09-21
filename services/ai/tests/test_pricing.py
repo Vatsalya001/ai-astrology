@@ -11,7 +11,7 @@ from __future__ import annotations
 import pytest
 
 from app import pricing
-from app.pricing import PRICES, UnpricedModelError, cost_micros, is_priced, priced
+from app.pricing import PRICES, ModelPrice, UnpricedModelError, cost_micros, is_priced, priced
 from app.providers.base import Usage
 from app.settings import Settings
 
@@ -45,10 +45,42 @@ class TestTheUnpricedModelIsLoud:
             cost_micros("nothing", Usage())
 
 
+# A SYNTHETIC price row, registered for this module only.
+#
+# These tests are about integer arithmetic, not about any vendor's
+# prices, and pointing them at a real row coupled them to a commercial
+# decision made by someone else. That coupling came due when the
+# Anthropic adapter was removed: fourteen arithmetic tests failed
+# because a price list changed, which tells you nothing about whether
+# `cost_micros` can still add up.
+#
+# The numbers are the ones the arithmetic cares about — a cache read of
+# 0.3 micros per token is the fraction that exposes a float
+# implementation — and they no longer move when a vendor's do.
+SYNTHETIC = "test-model-with-four-distinct-classes"
+SYNTHETIC_PRICE = ModelPrice(
+    input=3_000_000,
+    output=15_000_000,
+    cache_write=3_750_000,
+    cache_read=300_000,
+)
+
+
+@pytest.fixture(autouse=True)
+def _synthetic_price(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Autouse so every test in the module sees it.
+
+    Registered rather than written to pricing.json: that file is
+    production data, and a fake model in it would be priced for real
+    requests too.
+    """
+    monkeypatch.setitem(PRICES, SYNTHETIC, SYNTHETIC_PRICE)
+
+
 class TestIntegerArithmetic:
     def test_the_result_is_always_an_int(self) -> None:
         cost = cost_micros(
-            "claude-sonnet-5",
+            SYNTHETIC,
             Usage(input_tokens=1234, output_tokens=567, cached_input_tokens=89),
         )
 
@@ -82,7 +114,7 @@ class TestIntegerArithmetic:
         keeps every intermediate an integer and every one of these
         exact.
         """
-        assert cost_micros("claude-sonnet-5", Usage(cached_input_tokens=tokens)) == expected
+        assert cost_micros(SYNTHETIC, Usage(cached_input_tokens=tokens)) == expected
 
     def test_rounding_is_half_up_not_truncating(self) -> None:
         """Truncation loses up to a micro on every call, always downward.
@@ -90,11 +122,11 @@ class TestIntegerArithmetic:
         Systematic in one direction is the difference between noise and a
         bias, and the point of tracking cost is to notice when it grows.
         """
-        assert cost_micros("claude-sonnet-5", Usage(cached_input_tokens=3)) == 1
+        assert cost_micros(SYNTHETIC, Usage(cached_input_tokens=3)) == 1
 
     def test_the_exact_case_is_exact(self) -> None:
         # 1M input tokens at $3/MTok is exactly $3 = 3_000_000 micro-USD.
-        assert cost_micros("claude-sonnet-5", Usage(input_tokens=1_000_000)) == 3_000_000
+        assert cost_micros(SYNTHETIC, Usage(input_tokens=1_000_000)) == 3_000_000
 
     def test_summing_is_order_independent(self) -> None:
         """The property a float cost does not have.
@@ -109,8 +141,8 @@ class TestIntegerArithmetic:
             Usage(output_tokens=1, cache_write_input_tokens=13),
         ]
 
-        forwards = sum(cost_micros("claude-sonnet-5", u) for u in calls)
-        backwards = sum(cost_micros("claude-sonnet-5", u) for u in reversed(calls))
+        forwards = sum(cost_micros(SYNTHETIC, u) for u in calls)
+        backwards = sum(cost_micros(SYNTHETIC, u) for u in reversed(calls))
 
         assert forwards == backwards
 
@@ -123,8 +155,8 @@ class TestTheClassesArePricedDifferently:
         cache that silently stopped working — which PHASE-04 §15 lists as
         a named risk.
         """
-        fresh = cost_micros("claude-sonnet-5", Usage(input_tokens=100_000))
-        cached = cost_micros("claude-sonnet-5", Usage(cached_input_tokens=100_000))
+        fresh = cost_micros(SYNTHETIC, Usage(input_tokens=100_000))
+        cached = cost_micros(SYNTHETIC, Usage(cached_input_tokens=100_000))
 
         assert cached * 5 < fresh
 
@@ -135,14 +167,14 @@ class TestTheClassesArePricedDifferently:
         direction, and because a caching change that increases write
         volume without increasing reads makes the bill go UP.
         """
-        fresh = cost_micros("claude-sonnet-5", Usage(input_tokens=100_000))
-        write = cost_micros("claude-sonnet-5", Usage(cache_write_input_tokens=100_000))
+        fresh = cost_micros(SYNTHETIC, Usage(input_tokens=100_000))
+        write = cost_micros(SYNTHETIC, Usage(cache_write_input_tokens=100_000))
 
         assert write > fresh
 
     def test_output_costs_more_than_input(self) -> None:
-        assert cost_micros("claude-sonnet-5", Usage(output_tokens=1000)) > cost_micros(
-            "claude-sonnet-5", Usage(input_tokens=1000)
+        assert cost_micros(SYNTHETIC, Usage(output_tokens=1000)) > cost_micros(
+            SYNTHETIC, Usage(input_tokens=1000)
         )
 
     def test_every_class_contributes(self) -> None:
@@ -158,9 +190,7 @@ class TestTheClassesArePricedDifferently:
             cache_write_input_tokens=1_000_000,
         )
 
-        assert cost_micros("claude-sonnet-5", usage) == (
-            3_000_000 + 15_000_000 + 300_000 + 3_750_000
-        )
+        assert cost_micros(SYNTHETIC, usage) == (3_000_000 + 15_000_000 + 300_000 + 3_750_000)
 
 
 class TestPricedHelper:
@@ -173,7 +203,7 @@ class TestPricedHelper:
         """
         original = Usage(input_tokens=1_000_000)
 
-        result = priced("claude-sonnet-5", original)
+        result = priced(SYNTHETIC, original)
 
         assert result.cost_micros == 3_000_000
         assert original.cost_micros == 0
@@ -183,7 +213,7 @@ class TestPricedHelper:
             input_tokens=10, output_tokens=20, cached_input_tokens=30, cache_write_input_tokens=40
         )
 
-        result = priced("claude-sonnet-5", usage)
+        result = priced(SYNTHETIC, usage)
 
         assert result.model_dump(exclude={"cost_micros"}) == usage.model_dump(
             exclude={"cost_micros"}
