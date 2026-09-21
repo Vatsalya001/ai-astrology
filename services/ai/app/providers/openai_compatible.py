@@ -227,6 +227,41 @@ class OpenAICompatibleProvider:
                     provider_id=self._id,
                     retryable=False,
                 )
+            # The OpenAI `json_object` contract has a requirement that is
+            # easy to miss and fails LOUDLY at the vendor rather than
+            # here: the messages must themselves mention JSON. Groq
+            # returns
+            #
+            #   400 'messages' must contain the word 'json' in some form,
+            #       to use 'response_format' of type 'json_object'
+            #
+            # and OpenAI enforces the same rule. Ollama does not, so a
+            # setup that works locally 400s the moment it points at a
+            # hosted backend.
+            #
+            # Today every prompt satisfies this by luck —
+            # `intent_classification.v4` opens its output section with "A
+            # single JSON object with exactly these keys". Nothing
+            # required that, and dropping the word while rewording a
+            # prompt would break structured output at runtime with an
+            # error naming neither the prompt nor the word.
+            #
+            # Refused here, in the same spirit as the capability check
+            # above: a vendor 400 three layers away is the expensive way
+            # to learn this. NOT fixed by injecting the word ourselves —
+            # appending to the system prompt would change the cacheable
+            # prefix, and a byte change early in the prefix invalidates
+            # the whole cache downstream (§2).
+            if not any("json" in m["content"].lower() for m in kwargs["messages"]):
+                raise ProviderError(
+                    f"{self._id} was asked for structured output, but no message "
+                    f"mentions JSON. OpenAI-compatible backends reject "
+                    f"response_format=json_object unless the word appears in the "
+                    f"prompt. Add it to the prompt module rather than here — "
+                    f"injecting it would change the cacheable prefix.",
+                    provider_id=self._id,
+                    retryable=False,
+                )
             kwargs["response_format"] = {"type": "json_object"}
 
         return kwargs

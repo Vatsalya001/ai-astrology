@@ -2,6 +2,14 @@
 
     uv run python -m scripts.verify_provider anthropic
     uv run python -m scripts.verify_provider google
+    uv run python -m scripts.verify_provider openai-compatible [model]
+
+The third exists because §17 asks for an adapter to be "verified once
+against a real key", and the only adapter this project can reach for
+FREE at a hosted vendor is the OpenAI-compatible one — Groq, Cerebras,
+OpenRouter and a local Ollama all speak it. Anthropic has no free tier
+at all, so that gate line cannot be closed without money; this one can,
+and it covers the adapter that is actually carrying traffic.
 
 Deliberately NOT a pytest module. `.claude/rules/testing.md` forbids CI
 from calling a language model, and a test file is a thing CI collects by
@@ -28,6 +36,7 @@ from app.providers import (
     LLMProvider,
     Message,
     ModelMap,
+    OpenAICompatibleProvider,
     ProviderError,
     RequestMetadata,
     SystemBlock,
@@ -150,12 +159,86 @@ async def verify_google() -> None:
     )
 
 
+async def verify_openai_compatible(model: str | None = None) -> None:
+    """The free path, and the one this project can actually exercise.
+
+    Same adapter for Ollama on localhost and for Groq — which is the
+    point, and also the risk: everything below is a place where a hosted
+    backend behaves differently from Ollama and our parsing would not
+    notice.
+    """
+    chosen = model or settings.llm_model_fast
+    provider = OpenAICompatibleProvider(
+        base_url=settings.llm_base_url,
+        api_key=settings.llm_api_key,
+        tier=settings.llm_provider_tier,
+        models=ModelMap(fast=chosen, chat=chosen, deep=chosen),
+        timeout_seconds=settings.effective_llm_timeout_seconds,
+    )
+
+    print(f"base_url={settings.llm_base_url}  model={chosen}")
+
+    print("\n═══ 1. it answers, and reports usage ═══")
+    print("    Ollama omits some usage fields; a hosted backend should not.")
+    print("    input_tokens 0 here means our parsing found nothing to read.")
+    await _usage_table(provider, "hello", _request("Name one planet."))
+
+    print("\n═══ 2. structured output is honoured ═══")
+    print("    The classifier depends on this. The adapter sends")
+    print("    response_format={'type':'json_object'} — the widely")
+    print("    supported form, NOT the strict json_schema form, because")
+    print("    most OpenAI-compatible hosts reject the latter.")
+    print("    Expect text that parses as JSON.")
+    await _usage_table(
+        provider,
+        "json mode",
+        _request(
+            'Reply with only {"planet": "<a planet>"}.',
+            json_schema={
+                "type": "object",
+                "properties": {"planet": {"type": "string"}},
+                "required": ["planet"],
+            },
+        ),
+    )
+
+    print("\n═══ 3. a rate limit is RETRYABLE, not a failure ═══")
+    print("    Groq's free tier meters tokens per minute AND per day.")
+    print("    A 429 must map to ProviderError(retryable=True) so the")
+    print("    resilience layer backs off instead of failing the user.")
+    print("    Measured the hard way: an unpaced run 429'd 115 of 118")
+    print("    calls and the number was nearly reported as accuracy.")
+    print("    This probe fires ~8 calls to try to provoke one.")
+    seen_429 = False
+    for attempt in range(8):
+        try:
+            await provider.complete(_request("Name one planet.", tier="fast"))
+        except ProviderError as err:
+            _row(f"call {attempt + 1}", f"{err} (retryable={err.retryable})")
+            seen_429 = "429" in str(err)
+            break
+    if not seen_429:
+        _row("result", "no rate limit hit in 8 calls — budget is healthy")
+
+    print("\n═══ 4. streaming ═══")
+    print("    Expect several chunks, then a final usage record.")
+    chunks = 0
+    try:
+        async for _ in provider.stream(_request("List three planets.")):
+            chunks += 1
+    except ProviderError as err:
+        _row("stream", f"FAILED — {err}")
+    else:
+        _row("chunks received", chunks)
+
+
 async def main() -> int:
-    if len(sys.argv) != 2 or sys.argv[1] not in {"anthropic", "google"}:
+    known = {"anthropic", "google", "openai-compatible"}
+    if len(sys.argv) < 2 or sys.argv[1] not in known:
         print(__doc__)
         return 2
 
-    if not settings.llm_api_key:
+    if not settings.llm_api_key and sys.argv[1] != "openai-compatible":
         print("LLM_API_KEY is empty. Put it in services/ai/.env — not on the command")
         print("line, where it lands in shell history.")
         return 2
@@ -165,8 +248,10 @@ async def main() -> int:
 
     if sys.argv[1] == "anthropic":
         await verify_anthropic()
-    else:
+    elif sys.argv[1] == "google":
         await verify_google()
+    else:
+        await verify_openai_compatible(sys.argv[2] if len(sys.argv) > 2 else None)
 
     print("\nRecord the date, SDK version and outcome in docs/PROJECT_STATUS.md.")
     return 0

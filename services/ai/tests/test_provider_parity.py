@@ -373,9 +373,9 @@ ADAPTERS: dict[str, Callable[..., LLMProvider]] = {
 every_adapter = pytest.mark.parametrize("adapter", list(ADAPTERS), ids=list(ADAPTERS))
 
 
-def a_request(**kwargs: Any) -> CompletionRequest:
+def a_request(text: str = "what does my chart say", **kwargs: Any) -> CompletionRequest:
     return CompletionRequest(
-        messages=[Message(role="user", content="what does my chart say")],
+        messages=[Message(role="user", content=text)],
         system=[
             SystemBlock(content="You are a Vedic astrology companion.", cacheable=True),
             SystemBlock(content="Chart: Saturn in the 4th."),
@@ -752,7 +752,17 @@ async def test_json_is_either_supported_or_refused_at_the_edge(adapter: str) -> 
     is not.
     """
     provider = ADAPTERS[adapter]()
-    request = a_request(json_schema={"type": "object"})
+    # The prompt mentions JSON deliberately. OpenAI-compatible backends
+    # reject `response_format=json_object` unless it does — Groq returns
+    # a 400 saying so — and `OpenAICompatibleProvider` now refuses at the
+    # edge rather than letting that surface from the vendor. The other
+    # three adapters do not care, so asking for it here keeps the shared
+    # contract honest instead of encoding one backend's quirk as
+    # "structured output is broken".
+    request = a_request(
+        text="Reply with a single JSON object.",
+        json_schema={"type": "object"},
+    )
 
     if provider.capabilities.json_mode:
         response = await provider.complete(request)

@@ -12,6 +12,7 @@ which is where the version-skew bugs actually live.
 from __future__ import annotations
 
 import json
+from typing import ClassVar
 
 import httpx
 import pytest
@@ -622,3 +623,107 @@ async def test_health_check_returns_true_when_the_backend_answers() -> None:
         httpx.MockTransport(lambda _r: httpx.Response(200, json={"object": "list", "data": []}))
     )
     assert await provider.health_check() is True
+
+
+class TestStructuredOutputNeedsTheWordJson:
+    """A vendor requirement that fails at the vendor, not at us.
+
+    OpenAI-compatible backends reject `response_format=json_object`
+    unless the messages themselves mention JSON. Groq is explicit:
+
+        400 'messages' must contain the word 'json' in some form, to
+            use 'response_format' of type 'json_object'
+
+    Ollama does not enforce it, so a setup that works locally breaks the
+    moment it points at a hosted backend — exactly the dev/prod
+    divergence §15 warns about.
+
+    Found by `scripts/verify_provider.py openai-compatible` on its first
+    real run against Groq. Every shipped prompt satisfies the rule today
+    by luck: `intent_classification.v4` opens its output section with "A
+    single JSON object with exactly these keys". Nothing required that,
+    and a reword would have broken structured output at runtime with an
+    error naming neither the prompt nor the word.
+    """
+
+    SCHEMA: ClassVar[dict] = {"type": "object", "properties": {"planet": {"type": "string"}}}
+
+    async def test_a_prompt_without_the_word_is_refused_locally(self) -> None:
+        provider = build(responding(200, completion()))
+        request = CompletionRequest(
+            messages=[Message(role="user", content="Reply with only a planet name.")],
+            system=[SystemBlock(content="You label things.")],
+            tier="chat",
+            json_schema=self.SCHEMA,
+            metadata=RequestMetadata(trace_id="t-1"),
+        )
+
+        with pytest.raises(ProviderError) as caught:
+            await provider.complete(request)
+
+        assert "mentions JSON" in str(caught.value)
+        # Not retryable: repeating a deterministic 400 changes nothing
+        # and burns the budget that a real outage would need.
+        assert caught.value.retryable is False
+
+    @pytest.mark.parametrize(
+        ("label", "system", "user"),
+        [
+            ("in the system prompt", "Answer with a single JSON object.", "hello"),
+            ("in the user message", "You label things.", "give me json please"),
+            ("mixed case", "Return a Json object.", "hello"),
+        ],
+    )
+    async def test_the_word_anywhere_is_enough(self, label: str, system: str, user: str) -> None:
+        """The positive case, without which the test above is satisfied
+        by an adapter that refuses every structured request."""
+        provider = build(responding(200, completion(text='{"planet": "Mars"}')))
+        request = CompletionRequest(
+            messages=[Message(role="user", content=user)],
+            system=[SystemBlock(content=system)],
+            tier="chat",
+            json_schema=self.SCHEMA,
+            metadata=RequestMetadata(trace_id="t-1"),
+        )
+
+        response = await provider.complete(request)
+
+        assert response.text == '{"planet": "Mars"}'
+
+    async def test_a_request_without_a_schema_is_unaffected(self) -> None:
+        # The rule only applies when response_format is set. An ordinary
+        # chat turn must not start requiring the word "json".
+        provider = build(responding(200, completion()))
+
+        response = await provider.complete(a_request())
+
+        assert response.text == "hi"
+
+
+class TestEveryShippedPromptSatisfiesTheRule:
+    """The guard that stops this being reintroduced by a reword.
+
+    The adapter refusal turns a vendor 400 into a clear local error. It
+    does not stop somebody shipping a prompt that triggers it — this
+    does, at build time rather than on a user's request.
+    """
+
+    @pytest.mark.parametrize(
+        ("module", "version_setting"),
+        [
+            ("intent_classification", "prompt_version_intent"),
+            ("safety_classification", "prompt_version_safety"),
+        ],
+    )
+    def test_a_structured_output_prompt_mentions_json(
+        self, module: str, version_setting: str
+    ) -> None:
+        from app.prompts import load_module
+        from app.settings import settings
+
+        content = load_module(module, getattr(settings, version_setting)).content
+
+        assert "json" in content.lower(), (
+            f"{module} is sent with a json_schema, so an OpenAI-compatible backend "
+            f"rejects the request unless the prompt mentions JSON. Add the word."
+        )
