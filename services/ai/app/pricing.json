@@ -12,6 +12,17 @@
   "priced can never be silently billed at nothing."
  ],
  "google": {
+  "_comment": [
+   "gemini-2.5-* carry transcribed list prices and are kept because",
+   "existing keys can still call them. The gemini-3.x rows are ZEROS and",
+   "that is a placeholder, not a price: they were added when a new key",
+   "proved 2.5 unreachable, and nobody has transcribed 3.x pricing.",
+   "",
+   "CORRECT THESE BEFORE ANY PAID USE. A zero bills nothing on the",
+   "dashboard and something real on the invoice, and unlike a MISSING",
+   "model it does not raise \u2014 UnpricedModelError cannot save you from a",
+   "wrong zero, only from an absent row."
+  ],
   "gemini-2.5-flash": {
    "input": 300000,
    "output": 2500000,
@@ -29,6 +40,24 @@
    "output": 400000,
    "cache_write": 0,
    "cache_read": 25000
+  },
+  "gemini-3.5-flash-lite": {
+   "input": 0,
+   "output": 0,
+   "cache_write": 0,
+   "cache_read": 0
+  },
+  "gemini-3.6-flash": {
+   "input": 0,
+   "output": 0,
+   "cache_write": 0,
+   "cache_read": 0
+  },
+  "gemini-3.1-pro-preview": {
+   "input": 0,
+   "output": 0,
+   "cache_write": 0,
+   "cache_read": 0
   }
  },
  "local": {

@@ -2910,3 +2910,83 @@ placement in its output as a fabrication.
 §16: all seven now met or superseded.
 
 **`task verify` green.**
+
+---
+
+# GoogleProvider verified against a real key — and it found three defects
+
+The one adapter never run against a live vendor. Offline tests only prove we parse a
+response shape *we wrote down*, and all three of these were invisible to them.
+
+## 1. Our default Google models could not be called at all
+
+`LLM_PROVIDER=google` + a fresh key returned **404 on every request**. Not the key —
+the models:
+
+> *"This model `models/gemini-2.5-flash` is no longer available to new users. Please
+> update your code to use `models/gemini-3.6-flash`"*
+
+The model **list** endpoint still returns `gemini-2.5-flash` (for existing users), so
+it looked available and was not. The failure arrives as a 404 that reads like a typo in
+a config file.
+
+Every candidate was then probed against the real key rather than read off the list,
+because the list is what lied:
+
+| | |
+|---|---|
+| `gemini-3.6-flash`, `3.8-flash`, `3.5-flash`, `3.5-flash-lite`, `flash-latest` | ✅ answer |
+| `gemini-3.1-pro-preview`, `gemini-pro-latest` | ❌ **429 quota exceeded** |
+
+Pro has no free-tier quota — which is not a bug and is what `deep` being the *paid*
+interpretation tier already said. Defaults are now
+`(gemini-3.5-flash-lite, gemini-3.6-flash, gemini-3.1-pro-preview)`.
+
+## 2. Thinking tokens were not counted — a 40× cost understatement
+
+Gemini 3.x reasons before answering and reports the two separately, but **bills both as
+output**. Measured, one two-sentence question:
+
+```
+promptTokenCount      11
+candidatesTokenCount  11     <- the only field we read
+thoughtsTokenCount   463
+totalTokenCount      485
+```
+
+`cost_micros` was a correct integer of a wrong number, on the single field the entire
+cost dashboard is built from. Confirmed fixed against the live API: the same call now
+records **514** output tokens where it used to record 14.
+
+This is the defect that most justifies the gate item existing. No fixture could have
+caught it — we did not know the field existed until a real key returned one.
+
+## 3. Reasoning text reached the answer once
+
+One live run returned, as `response.text`:
+
+```
+**Check against constraints:**
+    *   Option A Sentence 1: "Ast…
+```
+
+That is the model's reasoning, not its answer. **It did not reproduce on demand
+afterwards**, so the filter now in `_text()` is a *defence*, not a fix for a confirmed
+repro — stated that way deliberately rather than dressed up as a solved bug.
+
+It is worth having regardless. §7's output validator judges this string, and a draft
+the model is still arguing with itself about is exactly the kind of text carrying a
+claim it had not yet rejected.
+
+## What passed
+
+- **The classifier works on Gemini**: three messages, all correct, confidence 0.9,
+  ~72 output tokens each — comfortably inside the 256 budget, so thinking tokens do not
+  truncate classification.
+- `promptTokenCount` **is** inclusive of cached tokens, as the adapter assumed and
+  subtracts for. Implicit caching never engaged across the run, so `cached_input_tokens
+  > 0` remains unobserved.
+- Google returned **503 repeatedly** during the session. The adapter maps it retryable,
+  which is right, and it is why probes 2 and 3 show failures unrelated to our code.
+
+**874 tests, `task verify` green.**

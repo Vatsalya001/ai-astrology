@@ -9,6 +9,7 @@ names neither library.
 from __future__ import annotations
 
 import json
+from types import SimpleNamespace
 from typing import Any
 
 import httpx
@@ -550,3 +551,180 @@ class TestEmbeddings:
         await provider.embed(["a"])
 
         assert seen["requests"][0]["outputDimensionality"] == 512
+
+
+class TestThinkingTokensAreBilledOutput:
+    """Gemini 3.x reasons before answering, and bills both as output.
+
+    `usageMetadata` reports them separately:
+
+        promptTokenCount      11
+        candidatesTokenCount  11     <- what this adapter used to record
+        thoughtsTokenCount   463
+        totalTokenCount      485
+
+    Reading only `candidates_token_count` understated the cost of a
+    thinking model by whatever ratio it happened to reason at — 40x on
+    that measurement, on the single field the cost dashboard is built
+    from. `cost_micros` was a correct integer of a wrong number.
+
+    Nothing offline could have caught this. Every fixture in this file
+    describes a response shape WE wrote down, and nobody knew the field
+    existed until a real key returned one — which is the whole argument
+    for `scripts/verify_provider.py`.
+    """
+
+    def test_thinking_tokens_are_added_to_output(self) -> None:
+        provider = build(httpx.MockTransport(lambda _r: httpx.Response(200, json={})))
+
+        usage = provider._usage(
+            SimpleNamespace(
+                prompt_token_count=11,
+                candidates_token_count=11,
+                thoughts_token_count=463,
+                cached_content_token_count=0,
+            )
+        )
+
+        assert usage.output_tokens == 474, (
+            "thinking tokens are billed as output; recording only the visible "
+            "answer understates the bill by the model's reasoning ratio"
+        )
+        assert usage.input_tokens == 11
+
+    def test_a_model_that_does_not_think_is_unaffected(self) -> None:
+        """The negative case. Older models omit the field entirely, and
+        `getattr(..., 0) or 0` must not turn that into a crash or a
+        double count."""
+        provider = build(httpx.MockTransport(lambda _r: httpx.Response(200, json={})))
+
+        usage = provider._usage(
+            SimpleNamespace(
+                prompt_token_count=100,
+                candidates_token_count=20,
+                cached_content_token_count=0,
+            )
+        )
+
+        assert usage.output_tokens == 20
+
+    def test_a_null_thoughts_count_is_treated_as_zero(self) -> None:
+        # The SDK returns None rather than omitting the attribute on
+        # some responses, and `None + int` raises.
+        provider = build(httpx.MockTransport(lambda _r: httpx.Response(200, json={})))
+
+        usage = provider._usage(
+            SimpleNamespace(
+                prompt_token_count=100,
+                candidates_token_count=20,
+                thoughts_token_count=None,
+                cached_content_token_count=0,
+            )
+        )
+
+        assert usage.output_tokens == 20
+
+    def test_thinking_and_caching_compose(self) -> None:
+        """Both adjustments at once, because they touch different fields
+        and a fix to one has broken the other before."""
+        provider = build(httpx.MockTransport(lambda _r: httpx.Response(200, json={})))
+
+        usage = provider._usage(
+            SimpleNamespace(
+                prompt_token_count=1000,
+                candidates_token_count=30,
+                thoughts_token_count=200,
+                cached_content_token_count=800,
+            )
+        )
+
+        # prompt is INCLUSIVE of cached, so fresh input is the difference
+        assert usage.input_tokens == 200
+        assert usage.cached_input_tokens == 800
+        assert usage.output_tokens == 230
+
+
+class TestReasoningNeverReachesTheAnswer:
+    """A part Gemini marks `thought` is reasoning, not an answer.
+
+    This adapter never asks for thoughts to be included, so in principle
+    none arrive. One real run against a live key returned text beginning
+
+        **Check against constraints:**
+            *   Option A Sentence 1: "Ast…
+
+    as the answer — which is reasoning — and it did not reproduce on
+    demand afterwards. This is therefore a DEFENCE rather than a fix for
+    a confirmed repro, and worth having either way.
+
+    Reasoning reaching `text` is not just an ugly answer here. §7's
+    output validator judges this string, and a draft the model is still
+    arguing with itself about is exactly the kind of text that carries a
+    claim it had not yet rejected.
+    """
+
+    def test_a_thought_part_is_dropped(self) -> None:
+        provider = build(httpx.MockTransport(lambda _r: httpx.Response(200, json={})))
+
+        text = provider._text(
+            SimpleNamespace(
+                candidates=[
+                    SimpleNamespace(
+                        content=SimpleNamespace(
+                            parts=[
+                                SimpleNamespace(
+                                    text="**Check against constraints:**", thought=True
+                                ),
+                                SimpleNamespace(
+                                    text="Saturn is traditionally read as", thought=None
+                                ),
+                            ]
+                        )
+                    )
+                ]
+            )
+        )
+
+        assert text == "Saturn is traditionally read as"
+
+    def test_an_answer_only_response_is_unchanged(self) -> None:
+        """The negative case: a filter that dropped everything would pass
+        the test above and return empty for every real answer."""
+        provider = build(httpx.MockTransport(lambda _r: httpx.Response(200, json={})))
+
+        text = provider._text(
+            SimpleNamespace(
+                candidates=[
+                    SimpleNamespace(
+                        content=SimpleNamespace(
+                            parts=[
+                                SimpleNamespace(text="In astrology, ", thought=None),
+                                SimpleNamespace(text="Saturn represents time."),
+                            ]
+                        )
+                    )
+                ]
+            )
+        )
+
+        assert text == "In astrology, Saturn represents time."
+
+    def test_an_all_thought_response_yields_empty_not_reasoning(self) -> None:
+        """Empty is the correct answer here, and the pipeline already
+        handles an empty completion. Returning the reasoning instead
+        would hand the validator a draft to judge."""
+        provider = build(httpx.MockTransport(lambda _r: httpx.Response(200, json={})))
+
+        text = provider._text(
+            SimpleNamespace(
+                candidates=[
+                    SimpleNamespace(
+                        content=SimpleNamespace(
+                            parts=[SimpleNamespace(text="Option A vs Option B…", thought=True)]
+                        )
+                    )
+                ]
+            )
+        )
+
+        assert text == ""

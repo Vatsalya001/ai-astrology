@@ -242,7 +242,27 @@ class GoogleProvider:
             # cached request is priced as though the prefix were fresh —
             # which is the most expensive direction to be wrong in.
             input_tokens=max(prompt - cached, 0),
-            output_tokens=getattr(raw, "candidates_token_count", 0) or 0,
+            # `candidates_token_count` + `thoughts_token_count`.
+            #
+            # Gemini 3.x reasons before answering and reports the two
+            # separately, but BILLS BOTH AS OUTPUT. Reading only
+            # `candidates` understates the cost of a thinking model by
+            # whatever ratio it happens to reason at — measured on
+            # gemini-3.6-flash with a two-sentence question:
+            #
+            #   promptTokenCount      11
+            #   candidatesTokenCount  11     <- what we used to record
+            #   thoughtsTokenCount   463
+            #   totalTokenCount      485
+            #
+            # A 40x understatement, on the field the whole cost dashboard
+            # is built from. Nothing offline could catch it: our fixtures
+            # describe a response shape we wrote down, and we did not
+            # know this field existed until a real key returned one.
+            output_tokens=(
+                (getattr(raw, "candidates_token_count", 0) or 0)
+                + (getattr(raw, "thoughts_token_count", 0) or 0)
+            ),
             cached_input_tokens=cached,
             cost_micros=0,
         )
@@ -259,6 +279,22 @@ class GoogleProvider:
         for candidate in getattr(response, "candidates", None) or []:
             content = getattr(candidate, "content", None)
             for part in getattr(content, "parts", None) or []:
+                # A part Gemini marks `thought` is the model REASONING,
+                # not its answer. This adapter never asks for thoughts to
+                # be included, so in principle none arrive — but one real
+                # run returned text beginning "**Check against
+                # constraints:** Option A Sentence 1: ..." as the answer,
+                # which is reasoning, and the behaviour did not reproduce
+                # on demand afterwards.
+                #
+                # So this is a DEFENCE, not a fix for a confirmed repro,
+                # and it is worth having either way. Reasoning reaching
+                # `text` is not merely an ugly answer here: §7's output
+                # validator judges this string, and a draft the model was
+                # arguing with itself about is exactly the kind of text
+                # that contains a claim it had not yet rejected.
+                if getattr(part, "thought", None):
+                    continue
                 text = getattr(part, "text", None)
                 if text:
                     parts.append(text)

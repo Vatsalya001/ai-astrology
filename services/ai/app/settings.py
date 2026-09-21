@@ -29,11 +29,29 @@ DEFAULT_MODELS: dict[str, tuple[str, str, str]] = {
     "openai-compatible": ("llama3.2:3b", "qwen2.5:7b", "qwen2.5:7b"),
     # §3 routes by job: classification and extraction go to the cheapest
     # model that can do them, conversation to the middle one, and paid
-    # interpretation to the largest. `deep` is Pro, which has thin-to-
-    # absent free-tier quota — expected, because `deep` IS the paid
-    # interpretation tier. A free-hosted run exercises fast and chat,
-    # both Flash.
-    "google": ("gemini-2.5-flash", "gemini-2.5-flash", "gemini-2.5-pro"),
+    # interpretation to the largest.
+    #
+    # THESE NAMES WERE 2.5-flash/2.5-pro AND A NEW KEY COULD NOT CALL
+    # THEM. Google's model LIST still returns `gemini-2.5-flash` — for
+    # existing users — while `generateContent` answers:
+    #
+    #   404 NOT_FOUND. This model models/gemini-2.5-flash is no longer
+    #   available to new users. Please update your code to use
+    #   models/gemini-3.6-flash
+    #
+    # So the model appeared available, was not, and the failure arrived
+    # as a 404 that reads like a typo in a config file. Nothing offline
+    # can catch that: it is a fact about the vendor's account policy, not
+    # about our code. `scripts/verify_provider.py google` caught it on
+    # its first real run, which is the entire argument for that script
+    # existing.
+    #
+    # `deep` is Pro, which returns 429 "exceeded your current quota" on a
+    # free key — expected, and not a bug: `deep` IS the paid
+    # interpretation tier. A free-hosted run exercises fast and chat.
+    # Verified by probing every candidate against a real key rather than
+    # by reading the model list, because the list is what lied.
+    "google": ("gemini-3.5-flash-lite", "gemini-3.6-flash", "gemini-3.1-pro-preview"),
     # MockProvider ignores this map and reports `mock-{tier}` from the
     # fixture. These are those names, so `describe()` prints what the
     # responses will actually say — and so they are priced, since an

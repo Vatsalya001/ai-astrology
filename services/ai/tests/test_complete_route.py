@@ -422,7 +422,7 @@ class TestTheModelsFollowTheProvider:
     @pytest.mark.parametrize(
         ("provider", "expected"),
         [
-            ("google", ("gemini-2.5-flash", "gemini-2.5-flash", "gemini-2.5-pro")),
+            ("google", ("gemini-3.5-flash-lite", "gemini-3.6-flash", "gemini-3.1-pro-preview")),
             ("openai-compatible", ("llama3.2:3b", "qwen2.5:7b", "qwen2.5:7b")),
             ("mock", ("mock-fast", "mock-chat", "mock-deep")),
         ],

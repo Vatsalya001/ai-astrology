@@ -1,17 +1,17 @@
 {
   "tier": "0",
-  "mode": "full_feature",
+  "mode": "design_review_only",
   "confidence": 0.7,
   "source": "classifier-rules.json",
-  "timestamp": "2026-09-21T06:00:16Z",
-  "classification_id": "cls_1789970416_ba764f46",
-  "active_task_id": "cls_1789970416_ba764f46",
-  "prompt_hash": "ba764f46",
-  "task_origin_prompt_hash": "ba764f46",
-  "last_prompt_hash": "ba764f46",
+  "timestamp": "2026-09-21T17:50:35Z",
+  "classification_id": "cls_1790013035_c31d388e",
+  "active_task_id": "cls_1790013035_c31d388e",
+  "prompt_hash": "c31d388e",
+  "task_origin_prompt_hash": "c31d388e",
+  "last_prompt_hash": "c31d388e",
   "last_prompt_event": "task",
-  "last_prompt_ts": "2026-09-21T06:00:16Z",
+  "last_prompt_ts": "2026-09-21T17:50:35Z",
   "reasoning": [
-    "matched full_feature mode keyword"
+    "no mode keyword matched — defaulted to design_review_only per workflow rule"
   ]
 }
