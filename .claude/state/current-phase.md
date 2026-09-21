@@ -223,6 +223,29 @@ constrain anybody until a machine other than this one runs them.
 
 ## Carried debt
 
+### The Go linker panics on a stale build cache (seen twice, 2026-09-21)
+
+`task verify` failed twice with the linker crashing rather than a test failing:
+
+```
+panic: bad alignment value
+panic: runtime error: index out of range [33554444] with length 35
+        cmd/link/internal/loader.(*Loader).resolve
+```
+
+Both times on the largest test binary (`internal/httpapi.test`), both times with 27 GB
+free and no OOM — so not memory pressure. `go clean -cache` fixed it both times and the
+same commit then passed.
+
+`mypy` failed the same way in the same session (`ValueError: reading past the buffer
+end` from `mypy/cache.py`), fixed by `rm -rf .mypy_cache`.
+
+**If `task verify` fails with a panic inside the toolchain rather than an assertion,
+clear the caches before believing it is your code.** ADR-007 already pins the Go
+toolchain because this machine's system Go has a corrupted stdlib byte; this looks
+related and is worth a proper diagnosis before it costs somebody an afternoon.
+
+
 - Web CSP still has `script-src 'unsafe-inline'` (from Phase 1; blocks a **Phase 5** item).
 - No ADR for hand-rolled auth.
 - `memtest86+` unrun, against nine recorded data-corruption events. 👤
