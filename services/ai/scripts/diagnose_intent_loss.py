@@ -20,16 +20,78 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import pathlib
 import sys
 import time
-from collections import Counter
+from collections import Counter, deque
 
 from app.classification import IntentClassifier, classify_by_keywords, min_confidence
 from app.providers import describe, provider_from_settings
 from app.settings import settings
 
 DATASET = pathlib.Path(__file__).parent.parent / "tests" / "fixtures" / "intents.jsonl"
+
+# Tokens per minute this run is allowed to spend, 0 for unpaced.
+#
+# Free hosted tiers meter TOKENS, not requests, and the difference is the
+# whole problem. Groq's free tier allows 1000 requests but only 8000
+# tokens/minute; one classification costs ~1250, so the sixth call in a
+# minute is a 429 while 994 of the request budget sit unused.
+#
+# Unpaced, that produced a full 118-message run in 90 seconds where the
+# model answered 3 times and errored 115 — and the script still printed
+# "56.0%" as an accuracy, because a provider error falls back to
+# GENERAL_ASTROLOGY and 27 rows carry that label. A rate limit read as a
+# model evaluation.
+TOKENS_PER_MINUTE = int(os.environ.get("MEASURE_TOKENS_PER_MINUTE", "0"))
+
+
+class TokenPacer:
+    """Sleeps just enough to stay inside a tokens-per-minute budget.
+
+    Adaptive rather than a fixed delay: it charges what each call
+    ACTUALLY cost, so a run does not spend twenty minutes pacing for a
+    worst case that never happens.
+
+    Not a general-purpose limiter — it assumes one caller in one process
+    and a rolling 60-second window, which is what this script is.
+    """
+
+    WINDOW = 60.0
+
+    def __init__(self, tokens_per_minute: int) -> None:
+        self._budget = tokens_per_minute
+        self._spent: deque[tuple[float, int]] = deque()
+        # Seeds the first call's estimate. Replaced by the real running
+        # mean as soon as anything has been measured.
+        self._estimate = 1400
+
+    def charge(self, tokens: int) -> None:
+        if not self._budget or tokens <= 0:
+            return
+        self._spent.append((time.monotonic(), tokens))
+        self._estimate = (self._estimate + tokens) // 2
+
+    async def wait(self) -> float:
+        """Block until the next call fits. Returns seconds slept."""
+        if not self._budget:
+            return 0.0
+
+        slept = 0.0
+        while True:
+            now = time.monotonic()
+            while self._spent and now - self._spent[0][0] >= self.WINDOW:
+                self._spent.popleft()
+
+            used = sum(tokens for _, tokens in self._spent)
+            if used + self._estimate <= self._budget or not self._spent:
+                return slept
+
+            # Sleep until the oldest charge ages out of the window.
+            pause = self.WINDOW - (now - self._spent[0][0]) + 0.25
+            await asyncio.sleep(pause)
+            slept += pause
 
 
 async def main() -> int:
@@ -84,8 +146,20 @@ async def main() -> int:
     )
 
     started = time.monotonic()
+    pacer = TokenPacer(TOKENS_PER_MINUTE)
     for index, row in enumerate(deferred, 1):
+        await pacer.wait()
         result = await classifier.classify(row["message"], trace_id=f"diag-{row['id']}")
+
+        # One retry on a provider error, after a full window. A 429 is
+        # the pacer's estimate having been too low, not a property of
+        # the model — and counting it as a failed classification is how
+        # the unpaced run reported a rate limit as a 56% accuracy.
+        if result.source == "provider_error":
+            await asyncio.sleep(TokenPacer.WINDOW + 1 if TOKENS_PER_MINUTE else 0)
+            result = await classifier.classify(row["message"], trace_id=f"diag-{row['id']}r")
+
+        pacer.charge(result.stats.usage.input_tokens + result.stats.usage.output_tokens)
         sources[result.source] += 1
 
         # What the MODEL said, before policy — or None when there was no

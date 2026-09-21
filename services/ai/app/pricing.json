@@ -1,127 +1,161 @@
 {
-  "_comment": [
-    "Published list prices in micro-USD per MILLION tokens.",
-    "",
-    "These are transcribed from vendor pricing pages, and a transcribed",
-    "price is a claim about the world that goes stale without any code",
-    "changing. Check them against the first real invoice and correct them",
-    "here \u2014 that is why this is a JSON file and not a dict in a module.",
-    "",
-    "A model that is genuinely free carries explicit zeros. That is not",
-    "the same as a model being absent: absent raises, so a model nobody",
-    "priced can never be silently billed at nothing."
-  ],
-  "anthropic": {
-    "claude-sonnet-5": {
-      "input": 3000000,
-      "output": 15000000,
-      "cache_write": 3750000,
-      "cache_read": 300000
-    },
-    "claude-haiku-4-5": {
-      "input": 1000000,
-      "output": 5000000,
-      "cache_write": 1250000,
-      "cache_read": 100000
-    },
-    "claude-opus-5": {
-      "input": 15000000,
-      "output": 75000000,
-      "cache_write": 18750000,
-      "cache_read": 1500000
-    }
+ "_comment": [
+  "Published list prices in micro-USD per MILLION tokens.",
+  "",
+  "These are transcribed from vendor pricing pages, and a transcribed",
+  "price is a claim about the world that goes stale without any code",
+  "changing. Check them against the first real invoice and correct them",
+  "here \u2014 that is why this is a JSON file and not a dict in a module.",
+  "",
+  "A model that is genuinely free carries explicit zeros. That is not",
+  "the same as a model being absent: absent raises, so a model nobody",
+  "priced can never be silently billed at nothing."
+ ],
+ "anthropic": {
+  "claude-sonnet-5": {
+   "input": 3000000,
+   "output": 15000000,
+   "cache_write": 3750000,
+   "cache_read": 300000
   },
-  "google": {
-    "gemini-2.5-flash": {
-      "input": 300000,
-      "output": 2500000,
-      "cache_write": 0,
-      "cache_read": 75000
-    },
-    "gemini-2.5-pro": {
-      "input": 1250000,
-      "output": 10000000,
-      "cache_write": 0,
-      "cache_read": 312500
-    },
-    "gemini-2.0-flash": {
-      "input": 100000,
-      "output": 400000,
-      "cache_write": 0,
-      "cache_read": 25000
-    }
+  "claude-haiku-4-5": {
+   "input": 1000000,
+   "output": 5000000,
+   "cache_write": 1250000,
+   "cache_read": 100000
   },
-  "local": {
-    "_comment": [
-      "Everything Ollama serves, plus the mock. Zero because electricity is",
-      "not billed per token, and because a zero here makes the dev/prod cost",
-      "delta visible in one table rather than needing a second code path.",
-      "",
-      "The list below is longer than the three models settings.py defaults to,",
-      "and that is not padding. UnpricedModelError fired on a real dev machine",
-      "the first time all three tiers were exercised: llama3.2:1b was pulled",
-      "and unpriced, so the request raised. That is the guard working \u2014 and the",
-      "fix is exactly this, a line of JSON. Add any model you pull."
-    ],
-    "llama3.2:3b": {
-      "input": 0,
-      "output": 0,
-      "cache_write": 0,
-      "cache_read": 0
-    },
-    "qwen2.5:7b": {
-      "input": 0,
-      "output": 0,
-      "cache_write": 0,
-      "cache_read": 0
-    },
-    "nomic-embed-text": {
-      "input": 0,
-      "output": 0,
-      "cache_write": 0,
-      "cache_read": 0
-    },
-    "mock-fast": {
-      "input": 0,
-      "output": 0,
-      "cache_write": 0,
-      "cache_read": 0
-    },
-    "mock-chat": {
-      "input": 0,
-      "output": 0,
-      "cache_write": 0,
-      "cache_read": 0
-    },
-    "mock-deep": {
-      "input": 0,
-      "output": 0,
-      "cache_write": 0,
-      "cache_read": 0
-    },
-    "llama3.2:1b": {
-      "input": 0,
-      "output": 0,
-      "cache_write": 0,
-      "cache_read": 0
-    },
-    "qwen2.5:3b": {
-      "input": 0,
-      "output": 0,
-      "cache_write": 0,
-      "cache_read": 0
-    },
-    "nomic-embed-text:latest": {
-      "input": 0,
-      "output": 0,
-      "cache_write": 0,
-      "cache_read": 0
-    },
-    "gemini-embedding-001": {
-      "input": 0,
-      "output": 0,
-      "cache_write": 0,
-      "cache_read": 0
-    }
+  "claude-opus-5": {
+   "input": 15000000,
+   "output": 75000000,
+   "cache_write": 18750000,
+   "cache_read": 1500000
   }
+ },
+ "google": {
+  "gemini-2.5-flash": {
+   "input": 300000,
+   "output": 2500000,
+   "cache_write": 0,
+   "cache_read": 75000
+  },
+  "gemini-2.5-pro": {
+   "input": 1250000,
+   "output": 10000000,
+   "cache_write": 0,
+   "cache_read": 312500
+  },
+  "gemini-2.0-flash": {
+   "input": 100000,
+   "output": 400000,
+   "cache_write": 0,
+   "cache_read": 25000
+  }
+ },
+ "local": {
+  "_comment": [
+   "Everything Ollama serves, plus the mock. Zero because electricity is",
+   "not billed per token, and because a zero here makes the dev/prod cost",
+   "delta visible in one table rather than needing a second code path.",
+   "",
+   "The list below is longer than the three models settings.py defaults to,",
+   "and that is not padding. UnpricedModelError fired on a real dev machine",
+   "the first time all three tiers were exercised: llama3.2:1b was pulled",
+   "and unpriced, so the request raised. That is the guard working \u2014 and the",
+   "fix is exactly this, a line of JSON. Add any model you pull."
+  ],
+  "llama3.2:3b": {
+   "input": 0,
+   "output": 0,
+   "cache_write": 0,
+   "cache_read": 0
+  },
+  "qwen2.5:7b": {
+   "input": 0,
+   "output": 0,
+   "cache_write": 0,
+   "cache_read": 0
+  },
+  "nomic-embed-text": {
+   "input": 0,
+   "output": 0,
+   "cache_write": 0,
+   "cache_read": 0
+  },
+  "mock-fast": {
+   "input": 0,
+   "output": 0,
+   "cache_write": 0,
+   "cache_read": 0
+  },
+  "mock-chat": {
+   "input": 0,
+   "output": 0,
+   "cache_write": 0,
+   "cache_read": 0
+  },
+  "mock-deep": {
+   "input": 0,
+   "output": 0,
+   "cache_write": 0,
+   "cache_read": 0
+  },
+  "llama3.2:1b": {
+   "input": 0,
+   "output": 0,
+   "cache_write": 0,
+   "cache_read": 0
+  },
+  "qwen2.5:3b": {
+   "input": 0,
+   "output": 0,
+   "cache_write": 0,
+   "cache_read": 0
+  },
+  "nomic-embed-text:latest": {
+   "input": 0,
+   "output": 0,
+   "cache_write": 0,
+   "cache_read": 0
+  },
+  "gemini-embedding-001": {
+   "input": 0,
+   "output": 0,
+   "cache_write": 0,
+   "cache_read": 0
+  }
+ },
+ "groq": {
+  "_comment": [
+   "Groq's FREE tier, which is why these are explicit zeros rather than",
+   "transcribed list prices. They are correct for a free-tier key and WRONG",
+   "for a paid one: the same model ids are billed on Groq's paid plans.",
+   "",
+   "If this project ever puts a paid Groq key in LLM_API_KEY, replace these",
+   "with the published per-million prices BEFORE the first request. A zero",
+   "here bills nothing on the dashboard and something real on the invoice,",
+   "which is the one failure UnpricedModelError exists to prevent \u2014 and a",
+   "wrong zero slips past it, because the model is priced.",
+   "",
+   "free-hosted only: app/guards.py refuses to boot production on this tier",
+   "because a free tier may train on its inputs."
+  ],
+  "openai/gpt-oss-120b": {
+   "input": 0,
+   "output": 0,
+   "cache_write": 0,
+   "cache_read": 0
+  },
+  "openai/gpt-oss-20b": {
+   "input": 0,
+   "output": 0,
+   "cache_write": 0,
+   "cache_read": 0
+  },
+  "qwen/qwen3.8-27b": {
+   "input": 0,
+   "output": 0,
+   "cache_write": 0,
+   "cache_read": 0
+  }
+ }
 }
