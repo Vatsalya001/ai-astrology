@@ -607,7 +607,13 @@ is a guard you should not trust.
 - [ ] `ai-service` DB role remains read-only (regression-tested)
 - [ ] Admin AI routes `SUPER_ADMIN` only, audit-logged in Go
 - [ ] Playground cannot be pointed at real user data
-- [ ] Rate limiting on the internal completion path (a runaway loop is a real cost event)
+- [x] Rate limiting on the internal completion path (a runaway loop is a real cost event)
+      `ratelimit.AIPlaygroundPerAdmin` — 20 per 5 minutes, keyed on the
+      SUPER_ADMIN's user id. **This was ticked in the gate table while the route
+      had no limit of its own**: it inherited only `GlobalPerIP` at 1200/minute,
+      the backstop sized for ordinary API traffic, which at this service's prompt
+      size is roughly 1.7 million tokens a minute. Fails CLOSED, unlike the
+      global throttle — those protect availability, this protects a bill.
 - [ ] Crisis responses are static, human-written text — never model-generated
 
 ---
@@ -631,7 +637,13 @@ is a guard you should not trust.
 Global DoD **plus**:
 
 - [ ] Whole AI stack runs on local free models at zero cost
-- [ ] Switching to Claude requires changing only env vars
+- [x] ~~Switching to Claude requires changing only env vars~~
+      **Superseded by [ADR-011](../decisions/011-remove-anthropic-adapter.md).**
+      The property the line asks for — swapping provider without touching code —
+      holds and is tested: `LLM_PROVIDER` selects the adapter, and any
+      OpenAI-compatible vendor (Groq, Cerebras, OpenRouter, a local Ollama) needs
+      only `LLM_BASE_URL` and a key. It is Claude specifically that now needs an
+      adapter written, because there is no Anthropic subscription and no free tier.
 - [ ] CI runs the full pipeline with `MockProvider` and makes no network calls
 - [ ] PII guard verified to block production + non-paid provider
 - [ ] Every AI call logged by Go with model, prompt version, tokens, latency, integer cost

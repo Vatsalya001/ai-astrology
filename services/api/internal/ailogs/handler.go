@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/google/uuid"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/Vatsalya001/ai-astrology/services/api/internal/platform/clients"
 	"github.com/Vatsalya001/ai-astrology/services/api/internal/platform/clients/aiclient"
+	"github.com/Vatsalya001/ai-astrology/services/api/internal/platform/redis/ratelimit"
 )
 
 // Handler serves the admin AI views.
@@ -31,6 +33,25 @@ type Handler struct {
 	// against the production provider left no record of who ran it.
 	audit AuditRecorder
 	ipOf  func(*http.Request) []byte
+
+	// Nil in tests that do not exercise the playground's cost limit.
+	// §14: "Rate limiting on the internal completion path (a runaway
+	// loop is a real cost event)" — this is that path.
+	limiter Limiter
+}
+
+// Limiter is the slice of the rate limiter this package uses.
+//
+// Declared by the CONSUMER, per .claude/rules/go.md, so a test double
+// is one method.
+type Limiter interface {
+	Allow(ctx context.Context, rule ratelimit.Rule, subject string) (ratelimit.Result, error)
+}
+
+// WithLimiter attaches the playground's cost limit.
+func (h *Handler) WithLimiter(l Limiter) *Handler {
+	h.limiter = l
+	return h
 }
 
 // AuditRecorder is the slice of platform/audit this package uses.
@@ -230,6 +251,38 @@ func (h *Handler) Playground(w http.ResponseWriter, r *http.Request) {
 	if body.Message == "" {
 		h.writeErr(w, r, http.StatusBadRequest, "invalid_body", "A message is required.", nil)
 		return
+	}
+
+	// BEFORE the audit write and before the provider call: the point of
+	// this limit is that the money is never spent, and an audit row for a
+	// run that was refused would misreport what the operator actually
+	// did.
+	//
+	// Keyed on the SUPER_ADMIN's id, not the IP — the cost is per
+	// operator, and two admins behind one office NAT must not share a
+	// budget.
+	if h.limiter != nil {
+		subject := "unknown"
+		if principal, ok := auth.PrincipalFrom(r.Context()); ok {
+			subject = principal.UserID.String()
+		}
+		result, err := h.limiter.Allow(r.Context(), ratelimit.AIPlaygroundPerAdmin, subject)
+		if err != nil {
+			// Fails CLOSED, unlike the global throttle and unlike
+			// /recompute. Those protect availability; this protects a
+			// bill. If Redis cannot tell us whether this operator has
+			// already run twenty completions, the safe assumption on a
+			// route that spends real money is that they have.
+			h.writeErr(w, r, http.StatusServiceUnavailable, "RATE_LIMITER_DOWN",
+				"The playground is unavailable while rate limiting is degraded.", err)
+			return
+		}
+		if !result.Allowed {
+			w.Header().Set("Retry-After", strconv.Itoa(int(result.RetryAfter.Seconds())+1))
+			h.writeErr(w, r, http.StatusTooManyRequests, "RATE_LIMITED",
+				"The playground has been run several times recently. Please wait.", nil)
+			return
+		}
 	}
 
 	req := aiclient.CompleteRequest{Message: body.Message}

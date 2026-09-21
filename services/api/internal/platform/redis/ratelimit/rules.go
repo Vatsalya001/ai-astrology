@@ -55,6 +55,21 @@ var (
 	// because it is the same act for the same reason.
 	ChallengePerUser = Rule{Name: "challenge_user", Max: 3, Window: 15 * time.Minute}
 
+	// The playground, and the only route in this service that spends
+	// money per call.
+	//
+	// PHASE-04 §14: "Rate limiting on the internal completion path (a
+	// runaway loop is a real cost event)." Until this existed the route
+	// inherited only GlobalPerIP — 1200/minute, which is the backstop for
+	// ordinary API traffic and roughly 1.7 MILLION tokens a minute at this
+	// service's prompt size. A stuck browser tab would have been a bill.
+	//
+	// Keyed on the SUPER_ADMIN's user id, not the IP: the cost is per
+	// operator, and two admins behind one office NAT must not share a
+	// budget. 20 in five minutes is generous for a human comparing prompt
+	// versions by hand and nowhere near a loop.
+	AIPlaygroundPerAdmin = Rule{Name: "ai_playground", Max: 20, Window: 5 * time.Minute}
+
 	// The backstop. Applies to every request under /api/v1 regardless of
 	// route, so endpoints with no rule of their own — logout, providers,
 	// the read-only profile routes, anything a later phase mounts — are

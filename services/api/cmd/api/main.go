@@ -285,7 +285,13 @@ func run() error {
 			// would make the rows incomparable.
 			WithAudit(recorder, func(r *http.Request) []byte {
 				return auth.HashIP(auth.ClientIP(r, trustProxy), cfg.IPHashSalt)
-			}),
+			}).
+			// §14: "Rate limiting on the internal completion path (a
+			// runaway loop is a real cost event)". The playground
+			// inherited only the 1200/minute global backstop, which is
+			// sized for ordinary API traffic — roughly 1.7 million tokens
+			// a minute at this service's prompt size.
+			WithLimiter(limiter),
 	})
 
 	srv := &http.Server{

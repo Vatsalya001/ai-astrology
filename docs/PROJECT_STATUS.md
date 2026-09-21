@@ -2844,3 +2844,69 @@ to confirm the bit pattern.
 **Worth adding:** a `task verify` step that hashes every committed binary, not just the
 ephemeris. The ephemeris was caught because somebody wrote a checksum test for it; no
 other binary in this repo has one.
+
+---
+
+# §14 and §16 had never been audited — and §14 had a real hole
+
+"Is this phase completed now?" asked twice. The first answer checked §17. The second
+checked the two checklists §17 *summarises*, which nobody had executed:
+
+| Section | Items | Audited before today |
+|---|---|---|
+| §14 Security checklist | 14 | **no** |
+| §16 Definition of Done | 7 | **no** |
+| §17 Phase Gate | 19 | yes |
+
+This is the Phase 0 pattern exactly: a green gate table sitting on top of checklists
+nobody had run.
+
+## The hole: no rate limit on the one route that spends money
+
+> §14: *"Rate limiting on the internal completion path (a runaway loop is a real cost
+> event)."*
+
+`POST /api/v1/admin/ai/test` — the playground — had **no limit of its own**. It
+inherited only `GlobalPerIP`: **1200 requests/minute**, the backstop sized for ordinary
+API traffic. At this service's ~1,400-token prompt that is roughly **1.7 million tokens
+a minute** from one address. A stuck browser tab was a bill.
+
+The router's own comment says narrow limits "live in their handlers". This handler had
+none, and the gate table had the item ticked.
+
+`ratelimit.AIPlaygroundPerAdmin` — **20 per 5 minutes**, keyed on the SUPER_ADMIN's
+user id rather than the IP, because the cost is per operator and two admins behind one
+office NAT must not share a budget.
+
+It **fails CLOSED**, which is the opposite of the global throttle and of
+`/charts/{id}/recompute`. Those protect availability, and a Redis blip must not take
+the product down. This one protects a bill: if Redis cannot say whether this operator
+has already run twenty completions, the safe assumption on a money-spending route is
+that they have.
+
+Break-tested three ways — check removed, fail-open instead of closed, and the *global*
+rule substituted for the narrow one. The third matters most: a test asserting only
+"some limiter was called" would pass at 1200/minute, so the assertion is on the rule
+itself.
+
+## §16 item 2 was made false by ADR-011
+
+> *"Switching to Claude requires changing only env vars"*
+
+The property it asks for — swap provider without touching code — holds and is tested:
+`LLM_PROVIDER` selects the adapter, and any OpenAI-compatible vendor needs only
+`LLM_BASE_URL` and a key. It is *Claude specifically* that now needs an adapter written.
+Marked superseded rather than quietly reinterpreted.
+
+## Everything else in both checklists verified by execution
+
+§14: keys absent from logs and Sentry (34 tests), prompt-injection/leak/system-prompt
+rules (196), `X-Internal-Token` (24), no message content in `ai_request_logs`,
+read-only DB role against real Postgres, SUPER_ADMIN + audit-logged, crisis responses
+static. The playground was already well-built against item 12 — no `user_id` field at
+all, no chart context, so the validator's empty-index rule treats any personal
+placement in its output as a fabrication.
+
+§16: all seven now met or superseded.
+
+**`task verify` green.**

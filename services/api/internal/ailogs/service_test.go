@@ -13,6 +13,8 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/Vatsalya001/ai-astrology/services/api/internal/platform/redis/ratelimit"
+
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/Vatsalya001/ai-astrology/services/api/internal/platform/clients/aiclient"
@@ -498,4 +500,145 @@ func TestAnUnauditedHandlerDoesNotPanic(t *testing.T) {
 	})
 
 	h.GetIncidents(httptest.NewRecorder(), anonymousRequest(t, http.MethodGet, "/incidents", ""))
+}
+
+// ─── §14: rate limiting on the path that spends money ────────────────
+
+// fakeLimiter answers however a test asks, and counts calls.
+type fakeLimiter struct {
+	allowed bool
+	err     error
+	calls   int
+	rules   []ratelimit.Rule
+	subject string
+}
+
+func (f *fakeLimiter) Allow(
+	_ context.Context, rule ratelimit.Rule, subject string,
+) (ratelimit.Result, error) {
+	f.calls++
+	f.rules = append(f.rules, rule)
+	f.subject = subject
+	if f.err != nil {
+		return ratelimit.Result{}, f.err
+	}
+	return ratelimit.Result{Allowed: f.allowed, RetryAfter: 90 * time.Second}, nil
+}
+
+// Unlike `auditedHandler`, this one's error writer actually WRITES the
+// status. The shared harness passes a no-op, which is fine for tests
+// that assert on the audit trail and useless for tests that assert a
+// request was refused — through it, a 429 and a 200 look identical.
+func limitedHandler(t *testing.T, limiter Limiter) (*Handler, *fakeAudit) {
+	t.Helper()
+	trail := &fakeAudit{}
+	h := NewHandler(New(&fakeQuerier{}), nil, func(
+		w http.ResponseWriter, _ *http.Request, status int, _ string, _ string, _ error,
+	) {
+		w.WriteHeader(status)
+	}).
+		WithAudit(trail, func(*http.Request) []byte { return []byte("hashed-ip") }).
+		WithLimiter(limiter)
+	return h, trail
+}
+
+// PHASE-04 §14: "Rate limiting on the internal completion path (a
+// runaway loop is a real cost event)."
+//
+// Until AIPlaygroundPerAdmin existed this route inherited only
+// GlobalPerIP — 1200/minute, the backstop sized for ordinary API
+// traffic, which at this service's prompt size is roughly 1.7 MILLION
+// tokens a minute. A stuck browser tab was a bill.
+//
+// The checklist item was ticked in the gate table. Executing it was
+// what showed the route had no limit of its own; the router's own
+// comment says narrow limits "live in their handlers", and this
+// handler had none.
+func TestThePlaygroundIsRateLimited(t *testing.T) {
+	limiter := &fakeLimiter{allowed: false}
+	h, trail := limitedHandler(t, limiter)
+
+	rec := httptest.NewRecorder()
+	h.Playground(rec, anonymousRequest(t, http.MethodPost, "/admin/ai/test",
+		`{"message":"hello"}`))
+
+	if rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("want 429 when the limiter refuses, got %d", rec.Code)
+	}
+	if got := rec.Header().Get("Retry-After"); got == "" {
+		t.Error("a 429 without Retry-After tells the caller nothing about when to return")
+	}
+	// The whole point: the provider was never reached, so nothing was
+	// spent. `h.ai` is nil in this harness, so a call would panic — the
+	// absence of a panic IS the assertion.
+	if len(trail.events) != 0 {
+		t.Errorf("a refused run was audited as if it happened: %v", trail.events)
+	}
+}
+
+func TestTheLimitIsTheOneDeclaredForThePlayground(t *testing.T) {
+	// Asserted on the RULE, not just on "some limiter was called".
+	// Passing GlobalPerIP here would rate-limit at 1200/minute and this
+	// test would still see a limiter call.
+	limiter := &fakeLimiter{allowed: true}
+	h, _ := limitedHandler(t, limiter)
+
+	rec := httptest.NewRecorder()
+	// `h.ai` is nil in this harness, so an ALLOWED run panics at the
+	// provider call. That is the proof it got past the limit; the
+	// recover is so the assertions below still run.
+	func() {
+		defer func() { _ = recover() }()
+		h.Playground(rec, anonymousRequest(t, http.MethodPost, "/admin/ai/test",
+			`{"message":"hello"}`))
+	}()
+
+	if limiter.calls != 1 {
+		t.Fatalf("want exactly one limiter call, got %d", limiter.calls)
+	}
+	if limiter.rules[0] != ratelimit.AIPlaygroundPerAdmin {
+		t.Errorf("want AIPlaygroundPerAdmin, got %+v", limiter.rules[0])
+	}
+}
+
+// Unlike the global throttle and /recompute, which fail OPEN.
+//
+// Those protect availability; this protects a bill. If Redis cannot say
+// whether this operator has already run twenty completions, the safe
+// assumption on a money-spending route is that they have.
+func TestTheLimiterFailsClosedOnThisRoute(t *testing.T) {
+	limiter := &fakeLimiter{err: errors.New("redis is down")}
+	h, trail := limitedHandler(t, limiter)
+
+	rec := httptest.NewRecorder()
+	h.Playground(rec, anonymousRequest(t, http.MethodPost, "/admin/ai/test",
+		`{"message":"hello"}`))
+
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("want 503 when the limiter itself fails, got %d", rec.Code)
+	}
+	if len(trail.events) != 0 {
+		t.Errorf("a run that never happened was audited: %v", trail.events)
+	}
+}
+
+// The negative case for the whole feature: a handler with no limiter
+// attached must still work, or every test using auditedHandler breaks
+// and nothing says why.
+func TestAHandlerWithNoLimiterStillServes(t *testing.T) {
+	h, _ := auditedHandler(t)
+
+	rec := httptest.NewRecorder()
+	// `h.ai` is nil, so this panics past the limit check. Reaching the
+	// panic proves the request got PAST the guard rather than being
+	// refused by it, which is what this test is about.
+	func() {
+		defer func() { _ = recover() }()
+		h.Playground(rec, anonymousRequest(t, http.MethodPost, "/admin/ai/test",
+			`{"message":"hello"}`))
+	}()
+
+	if rec.Code == http.StatusTooManyRequests || rec.Code == http.StatusServiceUnavailable {
+		t.Errorf("a handler with no limiter refused the request: %d", rec.Code)
+	}
 }
