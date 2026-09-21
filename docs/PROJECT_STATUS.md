@@ -2680,7 +2680,94 @@ One clean run once the daily budget resets (~45 min at the per-minute pacing):
 
 ```bash
 cd services/ai
-MEASURE_TOKENS_PER_MINUTE=7200 uv run python -m scripts.diagnose_intent_loss
+MEASURE_TOKENS_PER_MINUTE=7200 uv run python -m scripts.diagnose_intent_loss openai/gpt-oss-120b
 ```
 
 **916 Python tests. `task verify` green.**
+
+---
+
+# Phase 4 gate MET — 180/200 = 90.0%
+
+`qwen/qwen3.8-27b` on Groq's free tier, prompt v4, 118 deferred messages, 4 provider
+errors (under the 5% the script tolerates before it refuses to report a number).
+
+| | llama3.2:3b (local) | qwen3.8-27b (hosted) |
+|---|---|---|
+| Model accuracy | 60.6% | **87.7%** (100/114) |
+| **As shipped, whole set** | 67.0% | **90.0%** (180/200) |
+| Ceiling | 69.5% | 91.0% |
+
+§17 asked for ≥85%. That is the last gate item, and it is closed.
+
+## The daily budget is per MODEL, which is what made this possible today
+
+`openai/gpt-oss-120b` scored 92.9% on the 70 messages it answered before Groq's
+200,000-tokens-per-day cap stopped it, and the cap is a rolling window that refills at
+roughly one classification every six minutes — twelve hours to retry. But the cap is
+**per model**: `qwen/qwen3.8-27b` had an untouched budget, and 27B is far past the
+point where the prompt-copying failure of a 3B model appears.
+
+## The threshold is the only thing left, and it is behaving correctly
+
+Eight correct answers were discarded, every one at exactly **0.3**: *"hi"*, *"ok"*,
+*"tell me more"*, *"what should i know"*, *"will i be happy"*. Read them — they really
+are ambiguous, and 0.3 is the right confidence to report. That is calibration working,
+and the exact opposite of `llama3.2:3b`, whose discarded answers all read `0.0`
+because it was copying the prompt template.
+
+Dropping `intent_min_confidence` to 0.25 recovers all eight and reaches 188/200 = 94%.
+**Deliberately not done.** These 200 messages are the regression suite; §17 is met
+without fitting to them, and Phase 6's harness picks that value on held-out data.
+
+## Two gate rows did not survive being re-executed
+
+The checklist said both were verified. Running them said otherwise.
+
+**The PII guard had a hole in the position that takes all the traffic.**
+`ENV=production LLM_PROVIDER=google LLM_PROVIDER_TIER=paid` **booted**. The fallback
+path withholds the declared tier on purpose, and its docstring names the exact risk —
+*"precisely how a free Gemini key gets blessed as paid and receives birth data in
+production"* — while the primary passed it. The hole the fallback refused to open was
+open one line away, and both the gate report and a test docstring asserted it was
+impossible. A key string cannot be inspected for whether billing is attached, so the
+only safe reading of a Google key is the free one; paid Gemini is an ADR, not a tier
+string. `openai-compatible` still takes its declared tier deliberately — it reaches
+both localhost Ollama and paid inference hosts, so there is no vendor identity to
+infer from — and that asymmetry is now pinned by a test so it does not read as an
+oversight.
+
+**The "no CI network call" plugin had never been committed.** It was run once and the
+row recorded the result. `tests/conftest.py` now blocks every non-loopback connection
+for the whole suite, autouse. 931 tests pass under it. This matters more than it used
+to: `services/ai/.env` holds a real key that pydantic reads at import, so an unmocked
+provider spends real quota **and still reports PASS** — failure in the one direction
+nothing reports.
+
+## A test that read the machine instead of its fixture, again
+
+`test_a_live_provider_call_is_stopped` built the provider from settings "the way a
+careless test would". Run directly it pointed at a vendor and raised; run under `task
+verify`, which loads the repo-root `.env`, it pointed at `localhost:11434` — which the
+guard deliberately allows — and Ollama answered. Green alone, red in the suite.
+
+It was also asserting the wrong property: the rule is *no EXTERNAL call*, not *no
+call*. A local Ollama answering is correct behaviour. The endpoint is pinned in the
+test now, and a sibling test asserts loopback is **not** blocked.
+
+That is the second time this phase a test depended on ambient environment rather than
+its own fixture. Both were found by running the project's real gate rather than a bare
+`pytest`.
+
+## Also fixed
+
+- `mypy --strict` crashed with `ValueError: reading past the buffer end` — a corrupted
+  incremental cache from a killed process, not a type error. `rm -rf .mypy_cache`.
+- Pinning `LLM_MODEL_FAST` in `services/ai/.env` is a trap and the file now says so:
+  `Taskfile.yml` loads the repo-root `.env` into every task and an OS variable beats a
+  `.env` file, so provider, base URL and tier all correctly fall back to local Ollama
+  under `task dev:ai` — while a model pinned in the service's own file is the one thing
+  that does *not* get overridden. It leaks across and sends `openai/gpt-oss-120b` to
+  `localhost:11434`. A model name is not a secret; it belongs on the command line.
+
+**931 Python tests. `task verify` green.**

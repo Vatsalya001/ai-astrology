@@ -4,8 +4,14 @@ Every item in `docs/specs/PHASE-04-AI-INFRASTRUCTURE.md` §17, checked by
 **executing it** rather than by reading the code. Where a check is a command, the
 command is here so anyone can re-run it.
 
-**One gate item is not met.** It is called out in full below rather than folded into
-a summary, because a gate report that buries its one failure is worth nothing.
+**Every §17 gate item is now met.** The accuracy item was the last one open and closed
+at **180/200 = 90.0%** on 2026-09-21.
+
+Two rows below were marked met by an earlier pass and did **not** survive being
+re-executed at phase close — the PII guard had a hole in the primary position, and the
+"no CI network call" plugin had never been committed. Both are fixed and both are now
+enforced by a committed test rather than by a run somebody remembers doing. That is the
+argument for auditing a checklist by running it: reading it found neither.
 
 ---
 
@@ -15,8 +21,8 @@ a summary, because a gate report that buries its one failure is worth nothing.
 |---|---|
 | `LLMProvider` implemented by all four adapters, all passing the parity suite | `tests/test_provider_parity.py` — 4 adapters × the full contract, each through its own SDK against a fake transport. A guard compares `ADAPTERS` against `app.providers.__all__`, so a fifth adapter cannot be added and quietly skipped |
 | Ollama runs `fast`, `chat` and `deep` locally at **zero cost** | All three tiers answered from Ollama; `pricing.cost_micros` returned **0 micro-USD** for the lot |
-| `MockProvider` powers all CI; **no CI job makes a network call** | The whole suite run under a pytest plugin that raises on `socket.connect` / `create_connection`. 836 passed, zero sockets. The blocker was itself proven to fire |
-| **PII guard blocks `production` + non-paid provider** | Executed: `ENV=production` with `tier=local` and `tier=free-hosted` both refused to boot; `tier=paid` booted. The guard now reads the **constructed provider's** tier, not the declared setting — `LLM_PROVIDER=mock LLM_PROVIDER_TIER=paid` used to boot a production service answering with canned fixtures |
+| `MockProvider` powers all CI; **no CI job makes a network call** | This row used to describe a plugin that was run once and **never committed** — true the day somebody checked, enforced by nothing after. `tests/conftest.py` now blocks every non-loopback `connect` / `connect_ex` / `create_connection` for the whole suite, autouse so a new file is covered without opting in. **931 pass under it.** Loopback stays allowed on purpose: `test_a_dead_primary_is_served_by_the_fallback` needs a real `ConnectionRefusedError` from a closed local port. It matters more than it did — `services/ai/.env` now holds a real key that pydantic reads at import, so an unmocked provider spends real quota **and still reports PASS** |
+| **PII guard blocks `production` + non-paid provider** | Re-executed at phase close, and it found a hole this row previously denied. `ENV=production LLM_PROVIDER=google LLM_PROVIDER_TIER=paid` **booted** — the fallback path withheld the declared tier (its docstring names the risk: *"precisely how a free Gemini key gets blessed as paid and receives birth data in production"*) while the primary passed it, so the refusal only covered the position that takes outage traffic, not the one that takes all of it. Fixed; `google` and `mock` now refuse in production whatever the setting claims, `anthropic` boots, and `openai-compatible` still takes its declared tier **deliberately** — it reaches both Ollama on localhost and paid inference hosts, so there is no vendor identity to infer from. All four are pinned in `TestADeclaredTierCannotBlessAFreeKey` |
 | Model router maps all 10 job types; **overridable from admin without deploy** | `GET`/`PATCH /api/v1/admin/ai/routing`. This did not exist — see *Fixed during review* |
 | Prompt registry immutable; editing a published module fails CI | Executed: appending one line to `safety_rules.v1.md` failed with *"these published prompt modules were edited in place"* |
 | Cache breakpoint ordering verified by a prefix-stability test | Two different users' charts produce a byte-identical prefix; a stable module changing moves it. **See the caveat below — the breakpoint does not yet engage** |
@@ -32,15 +38,55 @@ a summary, because a gate report that buries its one failure is worth nothing.
 
 ---
 
-## ❌ NOT met — intent classifier accuracy
+## ✅ MET — intent classifier accuracy
 
 > §17: *"Intent classifier ≥85% on 200 labelled messages, keyword pre-pass working."*
 
-The pre-pass half is met and then some. The model half is not.
+**180/200 = 90.0%**, measured end to end on a hosted model, with 4 of 118 calls lost
+at the provider — below the 5% the script tolerates before it refuses to report.
 
-**The as-shipped number is now measured, not bounded.** Four earlier attempts died on
-a wedged machine; three full 118-message runs completed on 2026-09-21, all on
-`llama3.2:3b` — the model that actually serves the `fast` tier locally.
+| | result |
+|---|---|
+| Keyword pre-pass | **82/82 correct — 100% precision at 41% coverage** |
+| Model accuracy, `qwen/qwen3.8-27b` | **100/114 = 87.7%** |
+| **As shipped, whole set** | **180/200 = 90.0% — MEETS the gate** |
+| Ceiling if the threshold discarded nothing | 182/200 = 91.0% |
+
+Reproduce it:
+
+```bash
+cd services/ai
+MEASURE_TOKENS_PER_MINUTE=7200 uv run python -m scripts.diagnose_intent_loss qwen/qwen3.8-27b
+```
+
+### The threshold is now the only thing left on the table, and it is well-calibrated
+
+Eight correct answers were discarded, every one of them at exactly **0.3**:
+
+```
+115  what should i know          ->  general_astrology @ 0.3  CORRECT, discarded
+124  hi                          ->  other             @ 0.3  CORRECT, discarded
+144  tell me more                ->  general_astrology @ 0.3  CORRECT, discarded
+158  Am I going to be successful?->  general_astrology @ 0.3  CORRECT, discarded
+```
+
+Read the messages. *"hi"*, *"ok"*, *"tell me more"*, *"what should i know"* — these
+genuinely are ambiguous, and 0.3 is the **right** confidence for them. That is a model
+reporting uncertainty accurately, which is the opposite of the `llama3.2:3b` failure
+where every discarded answer read exactly `0.0` because it was copying the prompt.
+
+Dropping `intent_min_confidence` to 0.25 would recover all eight and reach 188/200 =
+94%. **That has deliberately not been done.** These 200 messages are the regression
+suite; a threshold fitted to them is a number that does not generalise, and §17 is
+already met without it. Phase 6's eval harness chooses that value on held-out data.
+
+---
+
+## Superseded: what the local model scored, and why it is recorded anyway
+
+The local `fast` tier cannot reach the gate, and the record of finding that out is
+worth more than the number. Four attempts died on a wedged machine; three full
+118-message runs then completed on 2026-09-21, all on `llama3.2:3b`.
 
 | | result |
 |---|---|
@@ -88,8 +134,18 @@ without provider errors, so a contaminated run cannot be mistaken for a result a
 
 ```bash
 cd services/ai
-MEASURE_TOKENS_PER_MINUTE=7200 uv run python -m scripts.diagnose_intent_loss
+MEASURE_TOKENS_PER_MINUTE=7200 uv run python -m scripts.diagnose_intent_loss openai/gpt-oss-120b
 ```
+
+The model is named on the command line, not pinned in `services/ai/.env`. Pinning it
+there is a trap: `Taskfile.yml` loads the repo-root `.env` into every task, and an OS
+variable beats a `.env` file — so provider, base URL and tier all correctly fall back
+to local Ollama under `task dev:ai`, while a model pinned in the service's own file is
+the one thing that does *not* get overridden. It leaks across, and `task dev:ai` sends
+`openai/gpt-oss-120b` to `localhost:11434`: a 404 on every request.
+
+A model name is not a secret, so the command line is the right place for it. Only the
+key lives in `.env`.
 
 An earlier version of this report said *"the prompt is not the explanation"* and
 listed it as ruled out. **That was wrong, twice**, and the corrections are the most

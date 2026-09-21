@@ -75,10 +75,32 @@ def provider_from_settings(
                 provider_id=provider_id or "anthropic",
             )
         case "google":
+            # `tier` deliberately NOT passed, so the adapter's own
+            # `free-hosted` stands and `LLM_PROVIDER_TIER=paid` cannot
+            # bless a free Gemini key into serving production traffic.
+            #
+            # This matches `_fallback_provider` in app/api/complete.py,
+            # whose docstring already named the risk: "handing it the
+            # primary's DECLARED tier is precisely how a free Gemini key
+            # gets blessed as paid and receives birth data in
+            # production." The fallback withheld the tier; the primary
+            # passed it, so the hole the fallback refused to open was
+            # open one line away, in the position that takes ALL the
+            # traffic rather than the outage traffic.
+            #
+            # Found by executing the gate check rather than reading it:
+            # `ENV=production LLM_PROVIDER=google LLM_PROVIDER_TIER=paid`
+            # booted, while both this report and the test docstring
+            # claimed the adapter made that impossible.
+            #
+            # Invariant 3 is "no real user data reaches a free model
+            # tier", and a key string cannot be inspected for whether
+            # billing is attached — so the only safe reading of a Google
+            # key is the free one. Paid Gemini (Vertex) is an ADR and a
+            # distinct adapter, not a tier string.
             return GoogleProvider(
                 api_key=config.llm_api_key,
                 models=models,
-                tier=config.llm_provider_tier,
                 timeout_seconds=timeout,
                 provider_id=provider_id or "google",
             )

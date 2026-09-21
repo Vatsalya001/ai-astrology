@@ -126,9 +126,14 @@ class TestChainConstruction:
 
         `ProviderRegistry.register` runs the PII guard per provider, and
         building the chain through it is what makes that guard reach the
-        fallback at all. Google's adapter declares its own
-        `free-hosted` tier, so no declared `LLM_PROVIDER_TIER=paid` can
-        bless it.
+        fallback at all.
+
+        This covers the FALLBACK position only. An earlier version of
+        this docstring generalised to "no declared `LLM_PROVIDER_TIER=
+        paid` can bless it", which was false of the PRIMARY until
+        `TestADeclaredTierCannotBlessAFreeKey` was written — the
+        fallback withheld the tier and the primary passed it. Keep the
+        claim here scoped to what this test actually exercises.
         """
         _configure(
             monkeypatch,
@@ -565,3 +570,98 @@ class TestTheModelsFollowTheProvider:
         assert "google" in line
         assert "gemini-2.5-flash" in line
         assert "11434" not in line, "it still names the local Ollama endpoint"
+
+
+class TestADeclaredTierCannotBlessAFreeKey:
+    """§17's PII guard, checked in the PRIMARY position.
+
+    `TestChainConstruction.test_production_refuses_a_free_tier_fallback`
+    covers the FALLBACK, and its docstring generalised from that to "no
+    declared `LLM_PROVIDER_TIER=paid` can bless it". Executing the check
+    rather than reading it showed that was false where it matters most:
+
+        ENV=production LLM_PROVIDER=google LLM_PROVIDER_TIER=paid  -> BOOTED
+
+    `_fallback_provider` withholds `tier` on purpose and says why —
+    "handing it the primary's DECLARED tier is precisely how a free
+    Gemini key gets blessed as paid and receives birth data in
+    production" — while the primary passed it. The hole the fallback
+    refused to open was open one line away, in the position that takes
+    ALL the traffic rather than only the outage traffic.
+
+    A key string cannot be inspected for whether billing is attached, so
+    the only safe reading of a Google key is the free one. Invariant 3
+    is not an assertion an operator gets to make on the vendor's behalf.
+    """
+
+    @pytest.mark.parametrize(
+        ("provider", "key"),
+        [("google", "not-a-real-key"), ("mock", "")],
+    )
+    def test_production_refuses_a_free_provider_declared_paid(
+        self, monkeypatch: pytest.MonkeyPatch, provider: str, key: str
+    ) -> None:
+        _configure(
+            monkeypatch,
+            env="production",
+            llm_provider=provider,
+            # The lie under test.
+            llm_provider_tier="paid",
+            llm_api_key=key,
+        )
+
+        with pytest.raises(UnsafeConfigurationError):
+            get_provider_chain()
+
+    def test_a_genuinely_paid_provider_still_boots(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Without this the test above is satisfied by refusing everything,
+        and production could not run at all."""
+        _configure(
+            monkeypatch,
+            env="production",
+            llm_provider="anthropic",
+            llm_provider_tier="paid",
+            llm_api_key="sk-ant-not-a-real-key",
+        )
+
+        assert [p.id for p in get_provider_chain().chain] == ["anthropic"]
+
+    def test_development_still_allows_the_free_provider(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Free models in development are the premise of this phase.
+
+        A refusal here would mean the guard is rejecting the PROVIDER
+        rather than the environment.
+        """
+        _configure(
+            monkeypatch,
+            env="development",
+            llm_provider="google",
+            llm_provider_tier="free-hosted",
+            llm_api_key="not-a-real-key",
+        )
+
+        assert [p.id for p in get_provider_chain().chain] == ["google"]
+
+    def test_openai_compatible_still_takes_its_declared_tier(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The deliberate exception, pinned so it is not "fixed" later.
+
+        `openai-compatible` has no vendor identity to infer a tier from
+        — the same adapter reaches Ollama on localhost and a paid
+        inference host. Its tier can only be declared, so unlike Google
+        the declaration is the only signal there is.
+
+        Stated here rather than left implicit, because the asymmetry
+        looks like an oversight until you know why.
+        """
+        _configure(
+            monkeypatch,
+            env="production",
+            llm_provider="openai-compatible",
+            llm_provider_tier="paid",
+        )
+
+        assert [p.id for p in get_provider_chain().chain] == ["openai-compatible"]
