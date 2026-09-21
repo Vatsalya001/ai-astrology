@@ -28,38 +28,110 @@
 # The repo notes nine data-corruption events and an unrun memtest86+.
 # This is how the next one gets found.
 #
-# Exit 1 on any mismatch that is not an intentional edit, so CI can gate
-# on it. Locally, the files you are working on will show up too — that is
-# correct and unavoidable: this cannot tell an edit from a bit flip. Use
-# it on a clean tree.
+# ── --gate: why this can now run on a dirty tree ──
+#
+# This script used to be CI-and-clean-trees only, because on a working
+# tree it flags every file you are editing and "cannot tell an edit from
+# a bit flip". That had a fatal dependency: CI was the only place it ran,
+# and CI stopped running on 2026-09-16. On 2026-09-21 the ephemeris
+# kernel was corrupted again and reached a puzzling test failure rather
+# than a checksum, because the one thing that looks for this had not
+# executed in five days.
+#
+# `--gate` splits the mismatches instead of skipping any:
+#
+#   differs, and git REPORTS it modified  -> an edit. Listed, not fatal.
+#   differs, and git says NOTHING         -> git could not see it. FATAL.
+#
+# The second bucket is the corruption signature, because git decides
+# "unchanged" from stat before it will hash — so a file whose bytes
+# changed underneath it is exactly the file git stays silent about. That
+# silence is the signal, and it is what happened to de421.bsp: `git
+# status` printed nothing while `git hash-object` disagreed.
+#
+# ── What this mode CANNOT do, stated plainly ──
+#
+# Corruption that arrives through a write() — anything that updates
+# ctime — IS visible to git, lands in the "edit" bucket, and does not
+# fail the gate. Attempting to simulate a bit flip by rewriting the file
+# demonstrates exactly that: git notices, and `--gate` correctly calls
+# it an edit.
+#
+# So `--gate` detects the class of corruption actually observed here
+# (silent, in place, git blind) and cannot detect corruption
+# indistinguishable from an edit. The full mode — no flag, clean tree,
+# CI — remains the stronger check and is still the one CI runs. This
+# mode exists so that SOMETHING runs when CI does not.
 set -euo pipefail
 
 cd "$(git rev-parse --show-toplevel)"
 
-mismatches=0
+gate=0
+if [ "${1:-}" = "--gate" ]; then
+  gate=1
+fi
+
+# Git's own view of what differs, stat cache and all. A silently
+# corrupted file is absent from this list by construction — that absence
+# is the whole discriminator.
+known_edits="$(
+  {
+    git diff --name-only
+    git diff --cached --name-only
+  } | sort -u
+)"
+
+is_known_edit() {
+  printf '%s\n' "$known_edits" | grep -Fxq "$1"
+}
+
+silent=0
+edits=0
+silent_paths=""
+
 while read -r _mode indexhash _stage path; do
   [ -f "$path" ] || continue
   disk="$(git hash-object "$path")"
-  if [ "$disk" != "$indexhash" ]; then
-    printf '  %s\n    index %s\n    disk  %s\n' "$path" "$indexhash" "$disk"
-    mismatches=$((mismatches + 1))
+  [ "$disk" = "$indexhash" ] && continue
+
+  if is_known_edit "$path"; then
+    edits=$((edits + 1))
+    [ "$gate" -eq 1 ] || printf '  (edit) %s\n' "$path"
+  else
+    silent=$((silent + 1))
+    silent_paths="${silent_paths}${path}"$'\n'
+    printf '  SILENT MISMATCH  %s\n    index %s\n    disk  %s\n' \
+      "$path" "$indexhash" "$disk"
   fi
 done < <(git ls-files -s)
 
-if [ "$mismatches" -eq 0 ]; then
-  echo "✓ every tracked file matches the index byte for byte"
-  exit 0
+if [ "$silent" -eq 0 ]; then
+  if [ "$gate" -eq 1 ]; then
+    echo "✓ no silent mismatches ($edits edited file(s) skipped, as intended)"
+    exit 0
+  fi
+  if [ "$edits" -eq 0 ]; then
+    echo "✓ every tracked file matches the index byte for byte"
+    exit 0
+  fi
+  echo
+  echo "$edits file(s) differ and git reports every one of them as modified."
+  echo "That is ordinary uncommitted work, not corruption."
+  exit 1
 fi
 
 echo
-echo "$mismatches file(s) differ from the index."
+echo "$silent file(s) differ from the index while git reports them CLEAN."
 echo
-echo "If you edited them, that is this script working as intended — it"
-echo "cannot distinguish an edit from a flipped bit. If you did NOT edit"
-echo "one of them, the bytes on disk are damaged and git cannot see it:"
+echo "That is not an edit — git lists edits. The bytes on disk are"
+echo "damaged and git cannot see it. Restore each with:"
 echo
 echo "    rm <path> && git checkout -- <path>"
 echo
-echo "A plain 'git checkout' will not do it — git believes the file is"
-echo "already correct. And run memtest86+."
+echo "A plain 'git checkout' will NOT do it: git believes the file is"
+echo "already correct, so the checkout is a no-op."
+echo
+echo "Then run memtest86+. Two single-bit flips were found in"
+echo "services/astro/data/de421.bsp on 2026-09-21 and two more in a"
+echo "golden dasha fixture on 2026-09-18. This machine has a history."
 exit 1

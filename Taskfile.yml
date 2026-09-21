@@ -296,12 +296,32 @@ tasks:
 
   integrity:
     desc: Re-hash every tracked file against the index — finds bit flips git cannot see
-    # Not in `verify`: on a working tree with edits in it this reports
-    # every file you are changing, which is correct and useless as a
-    # gate. It belongs on a clean tree and in CI, where the checkout is
-    # fresh by construction.
+    # The FULL check: every mismatch, edits included. Belongs on a clean
+    # tree and in CI, where the checkout is fresh by construction.
     cmds:
       - ./scripts/check-integrity.sh
+
+  integrity:gate:
+    desc: The dirty-tree-safe half — fails only on mismatches git cannot see
+    # Was "not in verify" because on a working tree the full check flags
+    # everything you are editing. That reasoning was sound and had a
+    # fatal dependency: CI was the only place it ran, and CI stopped on
+    # 2026-09-16. On 2026-09-21 the ephemeris kernel was corrupted and
+    # surfaced as a puzzling test failure instead of a checksum, because
+    # the one thing that looks for this had not run in five days.
+    #
+    # `--gate` classifies rather than skips: a mismatch git REPORTS is an
+    # edit and is ignored; a mismatch git is SILENT about is corruption
+    # and fails. Silence is the signal — git decides "unchanged" from
+    # stat before it will hash, so the file whose bytes changed
+    # underneath it is exactly the one it says nothing about.
+    #
+    # It cannot catch corruption that arrives through a write(), because
+    # that updates ctime and git then reports it as an edit. The full
+    # check above remains the stronger one. This exists so that
+    # SOMETHING runs when CI does not.
+    cmds:
+      - ./scripts/check-integrity.sh --gate
 
   verify:
     desc: The commit gate — lint, test and build everything
@@ -310,6 +330,10 @@ tasks:
     # verify assumed node_modules already existed.
     cmds:
       - task: setup
+      # First, and deliberately: every check below reads files from disk,
+      # and a silently corrupted one makes all of them answer questions
+      # about bytes nobody wrote. Cheap — a re-hash of the tree.
+      - task: integrity:gate
       - task: contracts
       # NOTE: the "did regeneration change anything?" check lives in CI,
       # not here. `git diff --exit-code` cannot distinguish contract drift

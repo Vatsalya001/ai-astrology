@@ -3042,3 +3042,68 @@ work moves, and nothing fails when it does.** It is the one gate item with no te
 behind it.
 
 **`task verify` green. Go integration suite green. 874 Python tests.**
+
+---
+
+# The corruption detector only ran in a system that was down
+
+Asked to fix the caveats in code. Three of the four cannot be: failing RAM, a billing
+setting and a native speaker are not software defects. The fourth — the push — is
+credentials, and fork-workflow rules forbid routing around it.
+
+But one *was* code-shaped, and it is the reason the ephemeris corruption reached a
+puzzling test failure instead of a checksum.
+
+`scripts/check-integrity.sh` already existed and is good. Its header records the same
+thing happening on **2026-09-18** to two files, including a golden dasha fixture with
+two single-bit flips 220 bytes apart. It was deliberately excluded from `task verify`:
+
+> *"Not in `verify`: on a working tree with edits in it this reports every file you are
+> changing, which is correct and useless as a gate. It belongs on a clean tree and in
+> CI, where the checkout is fresh by construction."*
+
+Sound reasoning with a fatal dependency. **CI stopped running on 2026-09-16.** So from
+that date the repository had a corruption detector that never executed, and five days
+later a 16.8 MB kernel was silently damaged.
+
+## The discriminator was already there
+
+An edit and a bit flip are distinguishable, using the very blind spot that makes the
+bug possible:
+
+| | |
+|---|---|
+| differs from index, git **reports** it modified | an edit — ignore |
+| differs from index, git is **silent** | git could not see it — **corruption** |
+
+Git decides "unchanged" from stat before it will hash, so the file whose bytes changed
+underneath it is exactly the one it says nothing about. That silence is the signal, and
+it is what `de421.bsp` looked like: `git status` printed nothing while `git hash-object`
+disagreed.
+
+`--gate` classifies instead of skipping, and now runs **first** in `task verify` —
+before anything else reads a file from disk, because every check below it is answering
+questions about bytes nobody wrote.
+
+## What it cannot do, stated rather than buried
+
+**The first version of this fix was wrong and the test caught it.** It *skipped* files
+git reported as modified. Simulating a bit flip by rewriting the file proved it missed
+the planted corruption entirely — because a write updates ctime, git then notices, and
+the skip-mode threw it away as an edit. That design was strictly worse than the full
+check for any corruption git *can* see.
+
+So: `--gate` detects the class actually observed here (silent, in place, git blind) and
+**cannot** detect corruption that arrives through a write. The full check remains
+stronger and is still what CI runs. This exists so that *something* runs when CI does
+not.
+
+Verified by planting a corruption git genuinely cannot see (`--assume-unchanged`):
+`git status` reports 0 changes, and `task verify` exits non-zero naming the file. An
+ordinary edit does not trip it.
+
+## Still not fixable in code
+
+`memtest86+` remains unrun, and every number in this phase was measured on this machine.
+This change does not make the hardware sound — it makes the next failure **loud** rather
+than a mystery three days later.
