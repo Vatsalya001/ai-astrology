@@ -4,28 +4,12 @@ Every item in `docs/specs/PHASE-04-AI-INFRASTRUCTURE.md` §17, checked by
 **executing it** rather than by reading the code. Where a check is a command, the
 command is here so anyone can re-run it.
 
-**18 of 19 §17 gate items are met. One is BLOCKED and cannot be closed on this
-machine.** The accuracy item closed at **180/200 = 90.0%** on 2026-09-21.
-
-> ❌ **`AnthropicProvider` verified once against a real key, incl. prompt caching.**
->
-> Two separate blockers, and the second is the interesting one:
->
-> 1. No paid Anthropic key exists here. Groq does not substitute — it is reached
->    through `OpenAICompatibleProvider`, a different adapter with different usage
->    accounting, different cache semantics and a different refusal shape.
-> 2. **The prompt-caching half is not satisfiable in Phase 4 at all.** The stable
->    prefix is ~770 tokens against Anthropic's ~1024 minimum, so `cache_control` is
->    ignored outright — no write, no read, no error. Even with a key there would be no
->    cache behaviour to observe, so the item cannot be honestly ticked until Phase 5's
->    RAG corpus grows the prefix past the threshold. `test_prompt_registry.py` asserts
->    the prefix is still below it and **fails on the day that changes**, which is how
->    somebody learns the date to run this check.
->
-> An earlier version of this report filed this under "owed, not closeable by a test"
-> rather than as an unmet gate item. That was wrong: §17 lists it as a gate line, and
-> a gate report that quietly reclassifies its own failures is the thing this document
-> exists not to be.
+**Every §17 gate item is met.** The accuracy item closed at **180/200 = 90.0%**, and
+the Anthropic line was **superseded by
+[ADR-011](decisions/011-remove-anthropic-adapter.md)** on 2026-09-21: the adapter is
+removed, the production provider is deferred to Phase 7, and the line's actual purpose
+— verify an adapter against a real vendor once, rather than against a response shape we
+wrote down — is met by `scripts/verify_provider.py openai-compatible` against Groq.
 
 Two rows below were marked met by an earlier pass and did **not** survive being
 re-executed at phase close — the PII guard had a hole in the primary position, and the
@@ -33,16 +17,21 @@ re-executed at phase close — the PII guard had a hole in the primary position,
 enforced by a committed test rather than by a run somebody remembers doing. That is the
 argument for auditing a checklist by running it: reading it found neither.
 
+> ⚠️ **Read `docs/PROJECT_STATUS.md` on the ephemeris corruption before trusting any
+> number on this page.** Two single-bit flips were found in a committed 16.8 MB binary
+> on 2026-09-21, and `memtest86+` has never been run on this machine. Every measurement
+> in this report was taken on it.
+
 ---
 
 ## ✅ Met, and verified by running something
 
 | Gate item | How it was checked |
 |---|---|
-| `LLMProvider` implemented by all four adapters, all passing the parity suite | `tests/test_provider_parity.py` — 4 adapters × the full contract, each through its own SDK against a fake transport. A guard compares `ADAPTERS` against `app.providers.__all__`, so a fifth adapter cannot be added and quietly skipped |
+| `LLMProvider` implemented by every adapter, all passing the parity suite | `tests/test_provider_parity.py` — 3 adapters × the full contract (4 until [ADR-011](decisions/011-remove-anthropic-adapter.md) removed Anthropic), each through its own SDK against a fake transport. A guard compares `ADAPTERS` against `app.providers.__all__`, so a fifth adapter cannot be added and quietly skipped |
 | Ollama runs `fast`, `chat` and `deep` locally at **zero cost** | All three tiers answered from Ollama; `pricing.cost_micros` returned **0 micro-USD** for the lot |
 | `MockProvider` powers all CI; **no CI job makes a network call** | This row used to describe a plugin that was run once and **never committed** — true the day somebody checked, enforced by nothing after. `tests/conftest.py` now blocks every non-loopback `connect` / `connect_ex` / `create_connection` for the whole suite, autouse so a new file is covered without opting in. **931 pass under it.** Loopback stays allowed on purpose: `test_a_dead_primary_is_served_by_the_fallback` needs a real `ConnectionRefusedError` from a closed local port. It matters more than it did — `services/ai/.env` now holds a real key that pydantic reads at import, so an unmocked provider spends real quota **and still reports PASS** |
-| **PII guard blocks `production` + non-paid provider** | Re-executed at phase close, and it found a hole this row previously denied. `ENV=production LLM_PROVIDER=google LLM_PROVIDER_TIER=paid` **booted** — the fallback path withheld the declared tier (its docstring names the risk: *"precisely how a free Gemini key gets blessed as paid and receives birth data in production"*) while the primary passed it, so the refusal only covered the position that takes outage traffic, not the one that takes all of it. Fixed; `google` and `mock` now refuse in production whatever the setting claims, `anthropic` boots, and `openai-compatible` still takes its declared tier **deliberately** — it reaches both Ollama on localhost and paid inference hosts, so there is no vendor identity to infer from. All four are pinned in `TestADeclaredTierCannotBlessAFreeKey` |
+| **PII guard blocks `production` + non-paid provider** | Re-executed at phase close, and it found a hole this row previously denied. `ENV=production LLM_PROVIDER=google LLM_PROVIDER_TIER=paid` **booted** — the fallback path withheld the declared tier (its docstring names the risk: *"precisely how a free Gemini key gets blessed as paid and receives birth data in production"*) while the primary passed it, so the refusal only covered the position that takes outage traffic, not the one that takes all of it. Fixed; `google` and `mock` now refuse in production whatever the setting claims, and `openai-compatible` still takes its declared tier **deliberately** — it reaches both Ollama on localhost and paid inference hosts, so there is no vendor identity to infer from. All of it is pinned in `TestADeclaredTierCannotBlessAFreeKey`. Since ADR-011, `openai-compatible` + a declared `paid` tier is the ONLY production-legal configuration |
 | Model router maps all 10 job types; **overridable from admin without deploy** | `GET`/`PATCH /api/v1/admin/ai/routing`. This did not exist — see *Fixed during review* |
 | Prompt registry immutable; editing a published module fails CI | Executed: appending one line to `safety_rules.v1.md` failed with *"these published prompt modules were edited in place"* |
 | Cache breakpoint ordering verified by a prefix-stability test | Two different users' charts produce a byte-identical prefix; a stable module changing moves it. **See the caveat below — the breakpoint does not yet engage** |

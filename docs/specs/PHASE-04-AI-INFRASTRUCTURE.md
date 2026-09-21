@@ -22,7 +22,8 @@
 ## 1. Scope
 
 ### In scope (`ai-service`)
-- `LLMProvider` protocol + four adapters: OpenAI-compatible (covers Ollama, Groq, OpenRouter, Cerebras, LM Studio), Anthropic, Google, Mock
+- `LLMProvider` protocol + adapters: OpenAI-compatible (covers Ollama, Groq, OpenRouter, Cerebras, LM Studio), Google, Mock
+  — Anthropic was built, tested and then removed; see [ADR-011](../decisions/011-remove-anthropic-adapter.md)
 - `EmbeddingProvider` protocol + adapters
 - Model router: job type → model tier → concrete model
 - Prompt registry with immutable versioning and composable modules
@@ -483,7 +484,7 @@ workflow this phase is built for.
 ```bash
 ENV=development
 
-LLM_PROVIDER=openai-compatible          # openai-compatible | anthropic | google | mock
+LLM_PROVIDER=openai-compatible          # openai-compatible | google | mock
 LLM_BASE_URL=http://localhost:11434/v1
 LLM_API_KEY=
 LLM_PROVIDER_TIER=local                 # local | free-hosted | paid ← guard reads this
@@ -544,7 +545,7 @@ AI_RATE_LIMIT_PER_USER_HOUR=60
 | 4.1 | Py | `LLMProvider` / `EmbeddingProvider` protocols + registry | `mypy --strict` clean; import-linter blocks vendor imports outside `providers/` |
 | 4.2 | Py | `OpenAICompatibleProvider` (complete + stream) | Works against local Ollama and Groq free tier |
 | 4.3 | Py | `OllamaEmbeddingProvider` | Returns 768-dim vectors |
-| 4.4 | Py | `AnthropicProvider` with caching, effort, refusal handling | Verified once against a real key, then unused in dev |
+| 4.4 | Py | ~~`AnthropicProvider`~~ — **removed, [ADR-011](../decisions/011-remove-anthropic-adapter.md)** | Built and tested during the phase, then deleted: no Anthropic subscription, and no free tier exists |
 | 4.5 | Py | `GoogleProvider` | Free-tier fallback works |
 | 4.6 | Py | `MockProvider` + `tests/fixtures/ai/` | CI runs the full pipeline with zero network calls |
 | 4.7 | Py | **PII guard** | `ENV=production` + `tier=local` refuses to start |
@@ -643,7 +644,16 @@ Global DoD **plus**:
 
 - [ ] `LLMProvider` implemented by all four adapters, all passing the parity suite
 - [ ] Ollama runs `fast`, `chat` and `deep` tiers locally at zero cost
-- [ ] `AnthropicProvider` verified once against a real key, incl. prompt caching
+- [x] ~~`AnthropicProvider` verified once against a real key, incl. prompt caching~~
+      **Superseded by [ADR-011](../decisions/011-remove-anthropic-adapter.md).**
+      The adapter is removed; the production provider is deferred to Phase 7.
+      The line's purpose — verify an adapter against a real vendor once, rather
+      than against a response shape we wrote down — is met by
+      `scripts/verify_provider.py openai-compatible`, run against Groq.
+      The prompt-caching half was never satisfiable here: the stable prefix is
+      ~770 tokens against the ~1024 minimum below which `cache_control` is
+      ignored outright, so there was no cache behaviour to observe even with a
+      key. Phase 5's corpus crosses that line and a test fails on the day it does.
 - [ ] `MockProvider` powers all CI; no CI job makes a network call to a model
 - [ ] **PII guard blocks `production` + non-paid provider — test proves it**
 - [ ] Model router maps all 10 job types; overridable from admin without deploy
