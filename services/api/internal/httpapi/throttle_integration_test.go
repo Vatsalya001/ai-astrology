@@ -207,3 +207,99 @@ func TestGlobalThrottleFailsOpenWhenRedisIsGone(t *testing.T) {
 		t.Fatalf("status = %d; the backstop must fail open, not take the site down", rec.Code)
 	}
 }
+
+// ─── the playground's own limit, against real Redis ──────────────────
+
+// PHASE-04 §13 asks for a Go INTEGRATION test that "rate limiting
+// fires". The tests above cover the global backstop. They did not cover
+// `AIPlaygroundPerAdmin`, which was added late and whose unit tests use
+// a fake limiter — so they prove the handler calls a limiter and reacts
+// to its answer, and prove nothing about whether the rule's Max and
+// Window survive a round trip through Redis.
+//
+// That distinction has bitten this phase repeatedly: a green unit test
+// over a fake, sitting on top of a real dependency nobody exercised.
+func TestTheAIPlaygroundRuleFiresAgainstRealRedis(t *testing.T) {
+	client, stop := startRedis(context.Background(), t)
+	defer stop()
+
+	limiter := ratelimit.New(client)
+	rule := ratelimit.AIPlaygroundPerAdmin
+	const admin = "11111111-2222-3333-4444-555555555555"
+
+	var allowed, denied int
+	for range rule.Max + 5 {
+		res, err := limiter.Allow(context.Background(), rule, admin)
+		if err != nil {
+			t.Fatalf("limiter: %v", err)
+		}
+		if res.Allowed {
+			allowed++
+		} else {
+			denied++
+			if res.RetryAfter <= 0 {
+				t.Error("a refusal with no RetryAfter leaves the caller guessing")
+			}
+		}
+	}
+
+	if allowed != rule.Max {
+		t.Errorf("%d completions allowed, want %d — the declared Max is not what Redis enforces",
+			allowed, rule.Max)
+	}
+	if denied != 5 {
+		t.Errorf("%d refused, want 5", denied)
+	}
+}
+
+// Keyed on the operator, not the address.
+//
+// Two SUPER_ADMINs behind one office NAT must not share a budget — an
+// IP-keyed limit would make the second one's playground stop working
+// because the first had used it.
+func TestTheAIPlaygroundLimitIsPerAdminNotShared(t *testing.T) {
+	client, stop := startRedis(context.Background(), t)
+	defer stop()
+
+	limiter := ratelimit.New(client)
+	rule := ratelimit.AIPlaygroundPerAdmin
+
+	// Exhaust the first admin entirely.
+	for range rule.Max {
+		if _, err := limiter.Allow(context.Background(), rule, "admin-one"); err != nil {
+			t.Fatalf("limiter: %v", err)
+		}
+	}
+	spent, err := limiter.Allow(context.Background(), rule, "admin-one")
+	if err != nil {
+		t.Fatalf("limiter: %v", err)
+	}
+	if spent.Allowed {
+		t.Fatal("the first admin was not exhausted, so the rest of this test proves nothing")
+	}
+
+	fresh, err := limiter.Allow(context.Background(), rule, "admin-two")
+	if err != nil {
+		t.Fatalf("limiter: %v", err)
+	}
+	if !fresh.Allowed {
+		t.Error("a second admin was refused because the first had spent the budget")
+	}
+}
+
+// The window is what makes the Max mean anything.
+//
+// A rule with the right Max and a window of zero would pass the test
+// above on the first burst and never limit anything afterwards.
+func TestTheAIPlaygroundWindowIsNotDegenerate(t *testing.T) {
+	if ratelimit.AIPlaygroundPerAdmin.Window <= 0 {
+		t.Fatalf("window is %v; a non-positive window limits nothing",
+			ratelimit.AIPlaygroundPerAdmin.Window)
+	}
+	// Tight enough to matter on a route that spends money, wide enough
+	// not to obstruct a human comparing prompt versions by hand.
+	if ratelimit.AIPlaygroundPerAdmin.Max > 60 {
+		t.Errorf("Max is %d per %v — too generous for a route that bills per call",
+			ratelimit.AIPlaygroundPerAdmin.Max, ratelimit.AIPlaygroundPerAdmin.Window)
+	}
+}

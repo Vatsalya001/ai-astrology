@@ -2990,3 +2990,55 @@ claim it had not yet rejected.
   which is right, and it is why probes 2 and 3 show failures unrelated to our code.
 
 **874 tests, `task verify` green.**
+
+---
+
+# §13 asked for an integration test the new rate limit did not have
+
+"Is this phase completed?" asked a third time. Each ask has found something, and the
+pattern is consistent: the gap is always in whatever section had not been *executed*
+yet.
+
+| Ask | Audited | Found |
+|---|---|---|
+| 1st | §17 gate table | state file stale — and item 19 IS "state files updated" |
+| 2nd | §14, §16 — never audited | **no rate limit on the route that spends money** |
+| 3rd | §12, §13 — never audited | **the new limit had no integration test** |
+
+## The gap
+
+> §13: *"**Go integration** — envelope telemetry lands in `ai_request_logs` correctly;
+> a Python 5xx maps to a clean 503 with a retryable flag; **rate limiting fires**."*
+
+`AIPlaygroundPerAdmin` was added yesterday with unit tests over a **fake** limiter.
+Those prove the handler calls a limiter and reacts to its answer. They prove nothing
+about whether the rule's `Max` and `Window` survive a round trip through Redis — which
+is the thing §13 asks for, and the exact shape of failure this phase keeps producing: a
+green unit test over a fake, sitting on a real dependency nobody exercised.
+
+Three integration tests now run against a real Redis container:
+
+- the rule allows exactly `Max` and then refuses, with a usable `RetryAfter`
+- two admins do **not** share a budget — an IP-keyed limit would make the second
+  operator's playground stop working because the first had used it
+- the window is not degenerate, and `Max` is not absurd for a route that bills per call
+
+Break-tested: a zero window fails all three; `Max: 5000` fails the third with *"too
+generous for a route that bills per call"*.
+
+The other two §13 Go-integration clauses were already covered — telemetry round-trip
+against real Postgres, and 503/retryable mapping in `clients/retry_test.go` and
+`errors_test.go`.
+
+## The state file went stale for the third time
+
+It still listed "GoogleProvider never run against a real key" as open, and task 4.5 as
+"free-tier run still owed". Both were closed hours earlier. §17 item 19 is *"
+`PROJECT_STATUS.md` and `.claude/state/current-phase.md` updated"*, so a stale state
+file is not bookkeeping — it is an open gate item, and it has now been one three times.
+
+**The lesson worth keeping: a state file that summarises work is stale the moment the
+work moves, and nothing fails when it does.** It is the one gate item with no test
+behind it.
+
+**`task verify` green. Go integration suite green. 874 Python tests.**

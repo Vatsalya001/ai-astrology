@@ -19,11 +19,19 @@ Gate:  ✅ 19 of 19 §17 items closed (2026-09-21)
        this machine, memtest86+ has never been run, and every number
        above was measured here.
 
-       Open, none of them §17 gate items:
-         · GoogleProvider never run against a real key (free, ~5 min)
+       GoogleProvider verified against a real key 2026-09-21. It found
+       three defects offline tests could not: our default Gemini models
+       were unreachable to a new key (404 "no longer available to new
+       users" while the model LIST still returned them), thinking tokens
+       were uncounted (40x output-cost understatement), and reasoning
+       text reached `response.text` once (not reproducible; the filter
+       is a defence, not a confirmed fix).
+
+       Open, none of them §17 gate items, none of them code:
+         · memtest86+ UNRUN — the one that matters
          · CI has not run since 2026-09-16 (GitHub Actions billing)
          · Hinglish crisis phrases need a native speaker
-         · 6 commits unpushed — the remote 404s
+         · commits unpushed — the remote 404s
 ```
 
 Phase 3 closed 16 of 16 on 2026-09-19. Its record is `docs/TESTING-PHASE-3.md` and
@@ -46,7 +54,7 @@ at `58fe1f2`. Three §11 security items were carried forward — see below.
 | 4.10 | Prompt registry, immutable versions, `PromptBuilder` | ✅ lockfile of 8 module digests; editing one fails, break-tested |
 | 4.11 | Cache-breakpoint ordering + prefix stability | ✅ ordering enforced structurally, not by convention |
 | 4.4 | `AnthropicProvider` — caching, effort, refusal | ✅ offline; **one real-key run still owed** — `docs/PROVIDER-VERIFICATION.md` |
-| 4.5 | `GoogleProvider` + free embeddings | ✅ offline; free-tier run still owed |
+| 4.5 | `GoogleProvider` + free embeddings | ✅ offline **and against a real key** — that run found 3 defects; see PROJECT_STATUS |
 | — | `app/pricing.py` — tokens to integer micro-USD | ✅ unpriced model raises rather than costing 0 |
 | 4.12 | Intent classifier + keyword pre-pass | ✅ pre-pass **100% precision at 41% coverage**, asserted in CI |
 | 4.13 | Safety input classifier + crisis short-circuit | ✅ static response, never generated; startup guard |
