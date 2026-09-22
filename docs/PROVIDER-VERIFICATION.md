@@ -1,9 +1,22 @@
 # Provider verification — the parts a mock cannot prove
 
-Two Phase 4 gate items cannot be closed by the test suite, by design:
+Some gate items cannot be closed by the test suite, by design.
 
-> - `AnthropicProvider` verified once against a real key, **incl. prompt caching**
-> - `GoogleProvider` — free-tier fallback works
+> ⚠️ **`AnthropicProvider` is gone** — [ADR-011](decisions/011-remove-anthropic-adapter.md).
+> There is no Anthropic subscription and no free tier, so that line was superseded
+> rather than met, and `verify_provider anthropic` no longer exists.
+>
+> The modes that DO exist:
+>
+> ```bash
+> uv run python -m scripts.verify_provider google
+> uv run python -m scripts.verify_provider openai-compatible [model]
+> ```
+>
+> The second is the one ADR-011 names as the gate evidence: it covers the adapter
+> actually carrying traffic, and it is the only one reachable at a hosted vendor for
+> free. Both were run on 2026-09-21; between them they found four defects that every
+> offline test had passed.
 
 **Settled without a key:** whether `temperature` may be sent alongside `effort`.
 `messages.create` has no `temperature` parameter in anthropic 1.7.0 at all — the
@@ -28,14 +41,16 @@ You need one key for whichever provider you are verifying. Put it in
 
 ```bash
 # services/ai/.env   (gitignored)
-LLM_API_KEY=sk-ant-...
+LLM_PROVIDER=google            # or openai-compatible + LLM_BASE_URL
+LLM_PROVIDER_TIER=free-hosted
+LLM_API_KEY=AIza...            # https://aistudio.google.com/apikey
 ```
 
 Then, from `services/ai`:
 
 ```bash
-uv run python -m scripts.verify_provider anthropic
 uv run python -m scripts.verify_provider google
+uv run python -m scripts.verify_provider openai-compatible qwen/qwen3.8-27b
 ```
 
 The script prints a table. **Read the table — do not read the exit code.** Every
@@ -44,54 +59,12 @@ which is precisely why these are not assertions.
 
 ---
 
-## Anthropic — the five facts
+## ~~Anthropic — the five facts~~ (adapter removed, ADR-011)
 
-### 1. A second identical request reads from the cache
-
-The one that matters most, because it is worth roughly a 10x reduction on the
-input side of every request this product makes, and because it fails **silently**:
-the responses stay perfect and the bill doubles.
-
-The script sends the same request twice and prints usage for both.
-
-| | first call | second call |
-|---|---|---|
-| `cache_write_input_tokens` | **> 0** | 0 |
-| `cached_input_tokens` | 0 | **> 0, and large** |
-| `input_tokens` | small | small |
-
-**If `cached_input_tokens` is 0 on the second call**, in likely order:
-
-- The prefix was under ~1024 tokens, so Anthropic declined to cache it at all.
-  The script pads the prefix past that; a real short prompt genuinely will not
-  cache and that is not a bug.
-- The two prefixes were not byte-identical. `PromptBuilder` exists to prevent
-  this, and `tests/test_prompt_registry.py::test_two_charts_share_a_prefix`
-  covers it — but a volatile block that crept in **before** the breakpoint
-  reproduces it exactly.
-- The breakpoint landed in the wrong place. Covered offline by
-  `TestCacheBreakpoint`, so this would be surprising.
-
-### 2. `effort` is accepted on all three tiers
-
-`fast`/`chat`/`deep` map to `low`/`medium`/`high`. A rejected value is a 400 on
-every request at that tier, so a dev machine that only ever exercises `chat`
-would ship a broken `deep` path.
-
-### 3. A refusal arrives as `stop_reason: "refusal"`
-
-Send something the model will decline. Confirm `finish_reason == "refusal"` and
-**not** `error`, and that `text` is non-empty — the safety path renders that
-text, and a refusal that arrives with nothing to show is a blank bubble.
-
-### 4. Thinking blocks are present and excluded
-
-With effort engaged, confirm the raw response contains a `thinking` block and
-that `response.text` does not contain any of it. Offline this is tested against
-a fixture we authored; here it is tested against a block Claude actually
-produced.
-
----
+Kept as a record of what a real-key run is FOR, not as instructions: there is no
+`AnthropicProvider` to run them against. If Claude is ever added back, these five
+are the checks that mattered — every one of them is a way for the call to succeed
+while the answer is wrong.
 
 ## Google — the three facts
 

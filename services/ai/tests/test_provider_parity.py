@@ -743,3 +743,66 @@ class TestEveryErrorPathSuppressesCredentials:
     """
 
     SECRET = "sk-ant-LEAKED0000 x-api-key AIzaSyLEAKED Bearer LEAKED"
+
+    def test_the_google_transport_branch_carries_only_a_type(self) -> None:
+        from app.providers.google_provider import _classify
+
+        message = str(_classify(httpx.ConnectError(self.SECRET), "google"))
+
+        assert "LEAKED" not in message, message
+
+    def test_the_embedding_provider_carries_only_a_type(self) -> None:
+        from app.providers.google_provider import _classify
+
+        assert "LEAKED" not in str(_classify(OSError(self.SECRET), "google-embeddings"))
+
+    async def test_the_registry_failure_map_carries_only_a_type(self) -> None:
+        """The catch-all path, and the one that reaches a log line.
+
+        `NoProviderAvailableError` renders this map. An SDK exception
+        interpolated here would carry a request echo into the error the
+        orchestrator logs — after every adapter had carefully suppressed
+        its own.
+        """
+        from app.providers import NoProviderAvailableError, ProviderRegistry
+
+        class Exploding:
+            id = "exploding"
+            tier = "local"
+            capabilities = Capabilities()
+
+            async def complete(self, req: CompletionRequest) -> CompletionResponse:
+                raise RuntimeError(TestEveryErrorPathSuppressesCredentials.SECRET)
+
+            def stream(self, req: CompletionRequest) -> Any:  # pragma: no cover
+                raise NotImplementedError
+
+            async def health_check(self) -> bool:
+                return False
+
+        registry = ProviderRegistry(env="development")
+        registry.register(Exploding())  # type: ignore[arg-type]
+
+        with pytest.raises(NoProviderAvailableError) as caught:
+            await registry.complete(a_request())
+
+        assert "LEAKED" not in str(caught.value), str(caught.value)
+        assert "RuntimeError" in str(caught.value)
+
+    def test_this_class_is_not_empty(self) -> None:
+        """Because for one day it was, and nothing said so.
+
+        Removing the Anthropic adapter took five methods out of this
+        class — two that were about Anthropic and THREE that were not.
+        What remained was a docstring still advertising coverage of the
+        transport, embedding and registry paths, over zero tests. pytest
+        reports an empty class as success.
+
+        Mutating `registry.py` to interpolate `str(err)` into the failure
+        map left the whole suite green for that day. A Gemini transport
+        error carries the request URL, and Gemini puts the key in it as
+        `?key=AIza...`.
+        """
+        mine = [n for n in dir(self) if n.startswith("test_")]
+
+        assert len(mine) >= 4, f"only {mine} — the leak guards have been deleted again"

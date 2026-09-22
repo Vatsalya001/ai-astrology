@@ -53,7 +53,7 @@ at `58fe1f2`. Three §11 security items were carried forward — see below.
 | 4.9 | Retry, timeout, circuit breaker, fallback | ✅ 12 tests on a fake clock; both breaker decisions break-tested |
 | 4.10 | Prompt registry, immutable versions, `PromptBuilder` | ✅ lockfile of 8 module digests; editing one fails, break-tested |
 | 4.11 | Cache-breakpoint ordering + prefix stability | ✅ ordering enforced structurally, not by convention |
-| 4.4 | `AnthropicProvider` — caching, effort, refusal | ✅ offline; **one real-key run still owed** — `docs/PROVIDER-VERIFICATION.md` |
+| 4.4 | ~~`AnthropicProvider`~~ | **REMOVED, [ADR-011](../../docs/decisions/011-remove-anthropic-adapter.md).** Built and tested during the phase, then deleted: no subscription, and Anthropic sells no free tier |
 | 4.5 | `GoogleProvider` + free embeddings | ✅ offline **and against a real key** — that run found 3 defects; see PROJECT_STATUS |
 | — | `app/pricing.py` — tokens to integer micro-USD | ✅ unpriced model raises rather than costing 0 |
 | 4.12 | Intent classifier + keyword pre-pass | ✅ pre-pass **100% precision at 41% coverage**, asserted in CI |
@@ -94,7 +94,8 @@ completion capped at 10s under a comment claiming 90.
 Owed to the Phase 4 gate and **not closeable by the suite**:
 
 - One real-key run per paid provider — `docs/PROVIDER-VERIFICATION.md`,
-  `uv run python -m scripts.verify_provider anthropic`.
+  `uv run python -m scripts.verify_provider google` — done 2026-09-21, and it
+  found three defects. `verify_provider anthropic` no longer exists (ADR-011).
 - The ≥85% intent-accuracy number — `uv run python -m scripts.measure_intent_accuracy`
   against local Ollama. CI asserts the keyword pre-pass only, which is the half that
   is pure code.

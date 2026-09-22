@@ -74,6 +74,31 @@ class TestTheBlockerIsNotTooBroad:
             assert s.getsockname()[0] == "127.0.0.1"
 
 
+def _caused_by_the_guard(err: BaseException | None, seen: list[str]) -> bool:
+    """Is `ExternalNetworkCallError` anywhere in this exception's history?
+
+    A linear `__cause__` walk is not enough. anyio runs the SDK's
+    transport in a task group, so the guard's exception arrives nested
+    inside a `BaseExceptionGroup`, and following `__cause__` from the
+    outside walks into the `CancelledError` sibling instead. The real
+    chain observed here is:
+
+        ProviderError -> APIConnectionError -> ExceptionGroup -> [ ... ]
+
+    which is why the first attempt at tightening this test failed against
+    a guard that was working perfectly.
+    """
+    if err is None:
+        return False
+    seen.append(type(err).__name__)
+    if isinstance(err, ExternalNetworkCallError):
+        return True
+    for nested in getattr(err, "exceptions", ()):  # BaseExceptionGroup
+        if _caused_by_the_guard(nested, seen):
+            return True
+    return _caused_by_the_guard(err.__cause__ or err.__context__, seen)
+
+
 class TestTheRealProviderIsNotReachable:
     async def test_a_live_provider_call_is_stopped(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """The scenario this file exists for, end to end.
@@ -93,7 +118,6 @@ class TestTheRealProviderIsNotReachable:
         from app.providers import (
             CompletionRequest,
             Message,
-            ProviderError,
             RequestMetadata,
             provider_from_settings,
         )
@@ -111,11 +135,26 @@ class TestTheRealProviderIsNotReachable:
             metadata=RequestMetadata(trace_id="net-guard"),
         )
 
-        # Either the guard surfaces directly or the adapter wraps it as
-        # a connection failure. What must NOT happen is a real answer —
-        # without the guard this reaches the vendor and spends quota.
-        with pytest.raises((ExternalNetworkCallError, ProviderError, OSError)):
+        # ONLY ExternalNetworkCallError, and the tuple it replaced is the
+        # reason. `(ExternalNetworkCallError, ProviderError, OSError)`
+        # was satisfied by the fake key's 401 (wrapped as ProviderError)
+        # and by any runner without egress (OSError) — so this test
+        # PASSED with the guard fully neutered, while making a real
+        # outbound TCP attempt to the vendor. The one test whose
+        # docstring calls itself "the scenario this file exists for" was
+        # the one that proved nothing.
+        #
+        # The adapter wraps the guard's exception, so unwrap the cause
+        # chain rather than widening the expectation again.
+        with pytest.raises(Exception) as caught:
             await provider.complete(request)
+
+        seen: list[str] = []
+        assert _caused_by_the_guard(caught.value, seen), (
+            f"the call failed, but not because the guard stopped it: {seen}. "
+            f"A 401 from a fake key or a runner with no egress would look "
+            f"identical, which is how this test used to pass with the guard off."
+        )
 
     async def test_a_local_provider_is_still_reachable(
         self, monkeypatch: pytest.MonkeyPatch
@@ -150,8 +189,17 @@ class TestTheRealProviderIsNotReachable:
         with pytest.raises(Exception) as caught:
             await provider.complete(request)
 
-        assert not isinstance(caught.value, ExternalNetworkCallError), (
-            "the guard blocked a LOOPBACK connection. It must not: "
-            "test_a_dead_primary_is_served_by_the_fallback needs a real "
-            "ConnectionRefusedError from a closed local port."
+        # Searched through the cause chain and any ExceptionGroup, for
+        # the same reason as the sibling test. The old assertion was
+        # `not isinstance(caught.value, ExternalNetworkCallError)` —
+        # which could NEVER fail: the adapter always wraps, so the
+        # outermost exception is a ProviderError whatever happened
+        # underneath. It would have stayed green with the guard
+        # over-reaching onto loopback, which is the one thing it exists
+        # to detect.
+        seen: list[str] = []
+        assert not _caused_by_the_guard(caught.value, seen), (
+            f"the guard blocked a LOOPBACK connection ({seen}). It must not: "
+            f"test_a_dead_primary_is_served_by_the_fallback needs a real "
+            f"ConnectionRefusedError from a closed local port."
         )

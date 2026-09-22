@@ -626,7 +626,11 @@ func TestTheLimiterFailsClosedOnThisRoute(t *testing.T) {
 // attached must still work, or every test using auditedHandler breaks
 // and nothing says why.
 func TestAHandlerWithNoLimiterStillServes(t *testing.T) {
-	h, _ := auditedHandler(t)
+	// `limitedHandler(t, nil)`, not `auditedHandler`. The latter's error
+	// writer is a NO-OP, so the recorder stays 200 whatever the handler
+	// decided — the assertion below could never fail, and would have
+	// stayed green with the handler refusing every request.
+	h, trail := limitedHandler(t, nil)
 
 	rec := httptest.NewRecorder()
 	// `h.ai` is nil, so this panics past the limit check. Reaching the
@@ -640,5 +644,12 @@ func TestAHandlerWithNoLimiterStillServes(t *testing.T) {
 
 	if rec.Code == http.StatusTooManyRequests || rec.Code == http.StatusServiceUnavailable {
 		t.Errorf("a handler with no limiter refused the request: %d", rec.Code)
+	}
+	// Positive evidence that the request got PAST the limit check rather
+	// than the writer simply staying silent: the audit row is recorded
+	// after the guard and before the provider call.
+	if len(trail.events) != 1 {
+		t.Errorf("want 1 audit event from a request that passed the guard, got %d",
+			len(trail.events))
 	}
 }

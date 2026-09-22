@@ -385,6 +385,19 @@ class GoogleProvider:
                 candidates = getattr(event, "candidates", None) or []
                 if candidates and getattr(candidates[0], "finish_reason", None):
                     finish = self._finish(event)
+                elif getattr(getattr(event, "prompt_feedback", None), "block_reason", None):
+                    # A PROMPT-level block: HTTP 200, an EMPTY candidates
+                    # list, and the reason in `promptFeedback`. The guard
+                    # above is false, so `finish` stayed at its "stop"
+                    # initialiser and the caller could not tell a refused
+                    # prompt from a model with nothing to say — an empty
+                    # bubble streamed to the user instead of the safety
+                    # response.
+                    #
+                    # `complete()` never had this: it goes through
+                    # `_finish`, which reads promptFeedback. Only the
+                    # streaming path was missing it.
+                    finish = "refusal"
                 if text:
                     yield CompletionChunk(text=text)
         except Exception as err:

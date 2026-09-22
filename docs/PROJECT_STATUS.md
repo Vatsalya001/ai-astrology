@@ -3174,3 +3174,85 @@ from settings, spec §11, the example and the tests. Phase 5 can add it back at 
 where it would mean something.
 
 **877 tests, `task verify` green.**
+
+---
+
+# A 62-agent adversarial review of today's own work found 21 defects
+
+I said I had no fifth place to look. There was one: **the 13 commits I made today** —
+each break-tested in isolation, none reviewed as a whole. 43 files, +2349/−1249, and
+nobody but me had read any of it.
+
+Eight review dimensions, every finding put to two independent skeptics with distinct
+lenses (*does-it-reproduce* and *is-it-already-handled*), both instructed to default to
+refuting. **27 findings, 21 survived verification.** The worst were mine from today.
+
+## CRITICAL — my Anthropic cleanup deleted three security guards
+
+`TestEveryErrorPathSuppressesCredentials` was left as **a docstring over zero tests**,
+still advertising coverage of three error paths. pytest reports an empty class as
+success.
+
+The removal took out five methods — two about Anthropic and **three that were not**:
+the Google transport branch, the embedding provider, and the registry failure map.
+Verified by mutation: changing `registry.py` to `failures[provider.id] = str(err)` — a
+natural "make this error more useful" edit — left the **entire suite green**. A Gemini
+transport error carries the request URL, and Gemini puts the key in it as `?key=AIza…`.
+That map is rendered into `NoProviderAvailableError`, which reaches a log line.
+
+Restored, plus a guard asserting the class is never empty again. All three mutations now
+fail.
+
+## CRITICAL — the corruption gate I added this morning was blind to staged files
+
+`git diff --cached` was in the known-edits set. It compares the index against HEAD,
+which says **nothing** about whether disk matches the index — so after any `git add`,
+an in-place corruption of that file was classified as an edit and skipped. One
+`git add -A` blinded the whole gate, and gate mode suppresses the edit list, so it was
+doubly invisible.
+
+Two more in the same script: every tracked **symlink** would report as a silent mismatch
+forever (`git hash-object` follows the link; the index holds the target-path's hash),
+hard-failing `task verify` with advice that cannot clear it — a gate nobody can pass gets
+deleted. And **non-ASCII paths** were C-quoted by git, so the quoted name did not exist
+on disk and the file was skipped without a word.
+
+All three proven fixed against the exact scenarios.
+
+## MAJOR — the fallback provider was configured to fail
+
+`LLM_FALLBACK_PROVIDER=google` was handed the **primary's** model names. With the
+shipped default that is `llama3.2:3b`, so every failover request asked Gemini for an
+Ollama tag → 404 → treated as permanent. The fallback died at precisely the moment it
+existed for, having booted cleanly with nothing to warn anyone.
+
+## MAJOR — a streamed safety block read as a normal stop
+
+`stream()` only recomputed `finish` when `candidates[0].finish_reason` existed. A
+**prompt-level** block arrives as HTTP 200 with an empty candidates list and the reason
+in `promptFeedback` — so `finish` stayed `"stop"` and the caller could not tell a
+refused prompt from a model with nothing to say. An empty bubble to the user instead of
+the safety response. `complete()` never had this bug; only the streaming path.
+
+## Four tests of mine that could not fail
+
+| test | why it was vacuous |
+|---|---|
+| `test_a_live_provider_call_is_stopped` | accepted `ProviderError`/`OSError`, so a fake key's 401 satisfied it — **it passed with the guard fully disabled**, while making a real outbound call |
+| `test_a_local_provider_is_still_reachable` | asserted the outermost exception was not the guard's; the adapter always wraps, so never |
+| `test_the_route_uses_the_effective_value` | grepped `complete.py`, but the primary's timeout wiring moved to `factory.py` that same day — it passed on the fallback path while the primary went unchecked |
+| `TestAHandlerWithNoLimiterStillServes` | its harness's error writer is a no-op, so the recorder stayed 200 whatever the handler decided |
+
+The first needed a real fix, not just a tightened assertion: the guard's exception
+arrives nested in an anyio **ExceptionGroup**, so a linear `__cause__` walk finds a
+`CancelledError` sibling instead. Neutering the guard now fails 7 tests where it used to
+fail 3.
+
+## Also fixed
+
+`verify_provider`'s structured-output probe was refused by the JSON-word check I added
+hours earlier — the one gate check meant to prove hosted structured output works had been
+verifying nothing since. Plus stale docs ordering the next session to run
+`verify_provider anthropic`, a command ADR-011 deleted.
+
+**881 Python tests, Go integration green, `task verify` green.**

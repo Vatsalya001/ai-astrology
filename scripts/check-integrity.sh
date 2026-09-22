@@ -71,15 +71,17 @@ if [ "${1:-}" = "--gate" ]; then
   gate=1
 fi
 
-# Git's own view of what differs, stat cache and all. A silently
-# corrupted file is absent from this list by construction — that absence
-# is the whole discriminator.
-known_edits="$(
-  {
-    git diff --name-only
-    git diff --cached --name-only
-  } | sort -u
-)"
+# Git's own view of what differs BETWEEN THE INDEX AND THE WORKTREE,
+# stat cache and all. A silently corrupted file is absent from this list
+# by construction — that absence is the whole discriminator.
+#
+# `git diff --cached` is deliberately NOT consulted, and including it was
+# a real bug: it compares the index against HEAD, which says nothing
+# about whether the bytes on disk match the index. After `git add`, the
+# index holds the staged content, so a subsequent in-place corruption is
+# a genuine index-vs-disk mismatch — while `--cached` lists the file as
+# "changed" and made it immune. One `git add -A` blinded the whole gate.
+known_edits="$(git diff --name-only | sort -u)"
 
 is_known_edit() {
   printf '%s\n' "$known_edits" | grep -Fxq "$1"
@@ -89,9 +91,24 @@ silent=0
 edits=0
 silent_paths=""
 
-while read -r _mode indexhash _stage path; do
+while IFS=$'\t' read -r -d '' meta path; do
+  mode="${meta%% *}"
+  rest="${meta#* }"
+  indexhash="${rest%% *}"
+
+  # 120000 is a symlink and 160000 a gitlink. `git hash-object` FOLLOWS a
+  # symlink and hashes the target's contents, while the index holds the
+  # hash of the link's target-PATH string — so every tracked symlink
+  # would report as a silent mismatch forever, hard-failing the gate with
+  # advice that cannot clear it (`rm` + checkout restores an identical
+  # link). The first symlink committed here would have made the gate
+  # unusable, and an unusable gate gets deleted.
+  case "$mode" in
+    120000 | 160000) continue ;;
+  esac
+
   [ -f "$path" ] || continue
-  disk="$(git hash-object "$path")"
+  disk="$(git hash-object -- "$path")"
   [ "$disk" = "$indexhash" ] && continue
 
   if is_known_edit "$path"; then
@@ -103,7 +120,11 @@ while read -r _mode indexhash _stage path; do
     printf '  SILENT MISMATCH  %s\n    index %s\n    disk  %s\n' \
       "$path" "$indexhash" "$disk"
   fi
-done < <(git ls-files -s)
+# `-z` because without it git C-quotes any path with non-ASCII or
+# unusual bytes ("sch\303\266n.txt"), and the quoted name does not exist
+# on disk — so `[ -f "$path" ]` failed and the file was skipped SILENTLY.
+# A corrupted file with an accented name was simply never checked.
+done < <(git ls-files -s -z)
 
 if [ "$silent" -eq 0 ]; then
   if [ "$gate" -eq 1 ]; then

@@ -55,7 +55,7 @@ from app.providers import (
 )
 from app.routing import DEFAULT_ROUTING, JobType, ModelRouter, RoutingOverride
 from app.safety import SafetyClassifier
-from app.settings import settings
+from app.settings import DEFAULT_MODELS, settings
 
 router = APIRouter(tags=["ai"], prefix="/v1")
 log = logging.getLogger(__name__)
@@ -113,9 +113,20 @@ def _fallback_provider() -> LLMProvider | None:
         case "":
             return None
         case "google":
+            # The FALLBACK's own model row, not `_models()`.
+            #
+            # `_models()` returns the PRIMARY's names. With the shipped
+            # default (`openai-compatible`) and LLM_MODEL_* left unset as
+            # .env.example instructs, that is `llama3.2:3b` — so every
+            # failover request asked Gemini for an Ollama tag, got a 404,
+            # and `is_retryable_status` treats 404 as permanent. The
+            # fallback died at exactly the moment it existed for, having
+            # booted cleanly with nothing to warn anyone.
+            fast, chat, deep = DEFAULT_MODELS["google"]
+            fallback_models = ModelMap(fast=fast, chat=chat, deep=deep)
             return GoogleProvider(
                 api_key=settings.llm_fallback_api_key,
-                models=_models(),
+                models=fallback_models,
                 timeout_seconds=settings.effective_llm_timeout_seconds,
             )
         case "mock":

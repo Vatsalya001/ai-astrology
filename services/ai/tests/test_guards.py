@@ -409,12 +409,27 @@ class TestTheTimeoutFloor:
         Both tests above would pass with `app/api/complete.py` still
         passing the raw setting — which is exactly the bug.
         """
-        source = (Path(__file__).parent.parent / "app" / "api" / "complete.py").read_text()
+        # BOTH files. The PRIMARY provider's construction moved to
+        # app/providers/factory.py, leaving only the google FALLBACK's
+        # timeout in complete.py — so this assertion went on passing on
+        # the strength of a path that only takes traffic during an
+        # outage, while the primary path went unchecked. A one-line
+        # change in factory.py would have put every paid deep-tier
+        # interpretation back on a 60s budget instead of the 120s floor,
+        # and this test would not have noticed.
+        root = Path(__file__).parent.parent / "app"
+        sources = {
+            "api/complete.py": (root / "api" / "complete.py").read_text(),
+            "providers/factory.py": (root / "providers" / "factory.py").read_text(),
+        }
 
-        assert "settings.llm_timeout_seconds" not in source, (
-            "the route passes the raw setting, so a paid provider still gets 60s"
-        )
-        assert source.count("settings.effective_llm_timeout_seconds") >= 1
+        for name, source in sources.items():
+            assert "settings.llm_timeout_seconds" not in source, (
+                f"{name} passes the raw setting, so a paid provider still gets 60s"
+            )
+        assert sum(s.count("effective_llm_timeout_seconds") for s in sources.values()) >= len(
+            sources
+        ), "every provider construction site must use the floored value"
 
 
 class TestTheExampleFileIsComplete:

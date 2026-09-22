@@ -171,7 +171,14 @@ async def verify_openai_compatible(model: str | None = None) -> None:
         provider,
         "json mode",
         _request(
-            'Reply with only {"planet": "<a planet>"}.',
+            # The word "json" is REQUIRED here, and not as a style
+            # preference: OpenAI-compatible backends reject
+            # response_format=json_object unless the messages mention it,
+            # and this adapter now refuses at the edge rather than let a
+            # vendor 400 surface three layers away. Without it this probe
+            # never reached the vendor and the section printed a local
+            # refusal while claiming to verify hosted structured output.
+            'Reply with only a JSON object: {"planet": "<a planet>"}.',
             json_schema={
                 "type": "object",
                 "properties": {"planet": {"type": "string"}},
