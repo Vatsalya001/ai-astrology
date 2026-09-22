@@ -3256,3 +3256,51 @@ verifying nothing since. Plus stale docs ordering the next session to run
 `verify_provider anthropic`, a command ADR-011 deleted.
 
 **881 Python tests, Go integration green, `task verify` green.**
+
+---
+
+# memtest86+ is not available: this is an office laptop
+
+The recommendation to reboot into memtest86+ is unusable — the machine is managed and
+cannot be taken down for a multi-hour offline test. That does not make the problem go
+away, so here is what replaces it and what the replacement is worth.
+
+## What the hardware already reports
+
+EDAC is live: `igen6_edac` v2.5.1, two controllers, **ce_count=0 / ue_count=0**.
+
+That is **not an all-clear**, for two reasons. The counters reset at boot and this
+machine booted at 11:07 on 2026-09-22, *after* the ephemeris corruption. And on a
+consumer i7-1355U the driver loads whether or not in-band ECC is actually enabled, so
+zero may mean "no errors" or "not watching".
+
+## `scripts/memcheck.go` — a memory test that needs no reboot
+
+```bash
+go run scripts/memcheck.go 8 60      # 8 GiB, 60 minutes
+```
+
+Allocates a buffer, writes six fixed patterns plus a seeded pseudo-random pass, reads
+every byte back, and reports any that changed with its offset and the XOR of the flip.
+No install, no root, no reboot; runs while you work.
+
+**What it is worth, stated honestly:**
+
+- A **dirty** run is *conclusive*. Userspace memory does not change on its own.
+- A **clean** run is *weaker* than a memtest86+ pass and must not be reported as one.
+  It cannot test memory held by the kernel or other processes — on a 40 GB machine with
+  5 GB free, that is most of it — nor cells behind pages the kernel moves or swaps.
+
+It is worth running anyway: the failures this repo saw were single-bit clears under
+sustained access, and a marginal cell has a real chance of landing inside a
+multi-gigabyte working set.
+
+## What actually protects the project meanwhile
+
+`task verify` runs `integrity:gate` first, before anything reads a file. That is the
+control that turns the next corruption from a puzzling test failure into a named file —
+and it is now the primary defence rather than the backstop, because the hardware check
+it was meant to complement cannot be run.
+
+**The honest position: this machine is unverified, not cleared.** Every number in Phase 4
+was measured on it.
