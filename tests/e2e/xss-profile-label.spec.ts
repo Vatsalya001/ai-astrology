@@ -117,13 +117,21 @@ test('a profile label full of markup renders as text, not as elements', async ({
     geography. Hardcoding a GeoNames id would also rot the day the
     gazetteer is reseeded, so it is looked up.
   */
+  // "Jaipur", not "Prayagraj". The comment above is right that a
+  // hardcoded GeoNames id would rot — but the QUERY has to name a city
+  // the CI gazetteer actually holds.
+  // tests/fixtures/places/cities-e2e.txt is twenty cities and Prayagraj
+  // is not among them, so this looked up nothing in CI and the test
+  // failed on geography, which is exactly the confusion the comment
+  // above set out to avoid. It passed locally only because this
+  // machine's places table still held a fuller seed.
   const places = await page.request.get(
-    `${API_URL}/api/v1/places/search?q=Prayagraj`,
+    `${API_URL}/api/v1/places/search?q=Jaipur`,
     { headers: { Authorization: `Bearer ${token}` }, failOnStatusCode: false },
   )
   expect(places.status(), 'place lookup failed, so the create below cannot be valid').toBe(200)
   const placeID = ((await places.json()) as { places: Array<{ id: number }> }).places[0]?.id
-  expect(placeID, 'no place matched "Prayagraj" — the gazetteer may not be seeded').toBeTruthy()
+  expect(placeID, 'no place matched "Jaipur" — the gazetteer may not be seeded').toBeTruthy()
 
   const created = await page.request.post(`${API_URL}/api/v1/birth-profiles`, {
     headers: { Authorization: `Bearer ${token}` },
