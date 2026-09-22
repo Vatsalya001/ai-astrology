@@ -25,6 +25,31 @@ if TYPE_CHECKING:
 # service-to-service auth is effectively off.
 DEV_INTERNAL_TOKEN = "dev-internal-token-change-me"
 
+# The environments that are NOT production, named explicitly.
+#
+# Every guard below used to ask `env == "production"`, which fails in the
+# one direction that costs something: any value that is not exactly that
+# string — "prod", "Production", "production " with a trailing space, or
+# "" — silently disabled the PII guard, the internal-token check and the
+# read-only-database check, all three at once.
+#
+# `Settings.env` is a pydantic Literal, so the BOOT path cannot produce
+# those values; an audit reached them by calling the guards directly.
+# That is the argument for fixing it rather than against: these functions
+# take a plain `str` and are the security boundary, so they should not
+# depend on every caller having been validated somewhere else.
+#
+# Inverted to an allowlist: anything not known to be safe is treated as
+# production. A new environment name then fails CLOSED — it demands a
+# paid provider and a rotated token until someone adds it here on
+# purpose — instead of quietly inheriting development's permissions.
+NON_PRODUCTION_ENVS = frozenset({"development", "staging"})
+
+
+def is_production(env: str) -> bool:
+    """True unless `env` is explicitly known to be non-production."""
+    return env.strip().lower() not in NON_PRODUCTION_ENVS
+
 
 class UnsafeConfigurationError(RuntimeError):
     """Raised at startup for a configuration that must never run."""
@@ -55,7 +80,7 @@ def assert_provider_allowed(
     machine — but is still blocked in production on reliability grounds.
     The single `tier != "paid"` check covers both cases.
     """
-    if env == "production" and tier != "paid":
+    if is_production(env) and tier != "paid":
         raise UnsafeConfigurationError(
             f'Refusing to start: LLM provider "{provider_id}" is tier "{tier}". '
             f"Production requires a paid provider with a no-training commitment, "
@@ -119,7 +144,7 @@ def assert_safety_layers_enabled(
 
 def assert_internal_token_changed(token: str, env: str) -> None:
     """Refuse the development shared secret in production."""
-    if env == "production" and token == DEV_INTERNAL_TOKEN:
+    if is_production(env) and token == DEV_INTERNAL_TOKEN:
         raise UnsafeConfigurationError(
             "Refusing to start: INTERNAL_TOKEN is still the development default "
             "in production. Generate one with: openssl rand -hex 32"
@@ -134,7 +159,7 @@ def assert_database_is_read_only(dsn: str, env: str) -> None:
     application code. This catches the honest mistake of copying the
     api-service DSN into this service's environment.
     """
-    if env == "production" and "astro_ro" not in dsn:
+    if is_production(env) and "astro_ro" not in dsn:
         raise UnsafeConfigurationError(
             "Refusing to start: AI_DATABASE_URL does not use the read-only role. "
             "ai-service must never write to the database (ADR-001). "

@@ -403,9 +403,7 @@ class TestEveryPhraseIsExercised:
         uncovered = [
             phrase
             for phrase in crisis_module._CRISIS_PHRASES
-            if not any(
-                re.search(phrase, message, re.IGNORECASE) for message in CRISIS_CORPUS
-            )
+            if not any(re.search(phrase, message, re.IGNORECASE) for message in CRISIS_CORPUS)
         ]
 
         assert not uncovered, (

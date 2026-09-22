@@ -24,6 +24,7 @@ from app.guards import (
     assert_internal_token_changed,
     assert_provider_allowed,
     assert_safety_layers_enabled,
+    is_production,
     run_all_startup_guards,
 )
 from app.providers import Capabilities, ProviderTier
@@ -56,6 +57,56 @@ class TestProviderPIIGuard:
         assert "groq" in message
         assert "free-hosted" in message
         assert "LLM_PROVIDER" in message  # tells you which var to change
+
+
+class TestAnUnrecognisedEnvironmentIsTreatedAsProduction:
+    """The guards used to ask `env == "production"`, exactly.
+
+    So every value that was not that literal string disabled all three
+    production guards at once — the PII guard, the internal-token check
+    and the read-only-database check. An audit walked in through
+    `"prod"`, `"Production"`, `"PRODUCTION"`, `""` and `"production "`
+    with a trailing space.
+
+    `Settings.env` is a pydantic Literal, so the boot path cannot produce
+    any of them, and that is the reason this was only ever reachable by
+    calling the guards directly. It is still worth closing: these
+    functions take a plain `str`, they are the security boundary, and a
+    boundary should not rely on every caller having been validated
+    somewhere else.
+
+    The list is now an allowlist of non-production names, so an
+    unrecognised environment fails CLOSED.
+    """
+
+    @pytest.mark.parametrize(
+        "env",
+        ["prod", "Production", "PRODUCTION", "production ", " production", "", "prd", "live"],
+    )
+    def test_a_free_tier_is_refused(self, env: str) -> None:
+        with pytest.raises(UnsafeConfigurationError, match="Refusing to start"):
+            assert_provider_allowed("ollama", "free-hosted", env)  # type: ignore[arg-type]
+
+    @pytest.mark.parametrize("env", ["prod", "Production", "", "live"])
+    def test_the_dev_internal_token_is_refused(self, env: str) -> None:
+        with pytest.raises(UnsafeConfigurationError, match="INTERNAL_TOKEN"):
+            assert_internal_token_changed(DEV_INTERNAL_TOKEN, env)
+
+    @pytest.mark.parametrize("env", ["prod", "Production", "", "live"])
+    def test_a_writable_database_role_is_refused(self, env: str) -> None:
+        with pytest.raises(UnsafeConfigurationError, match="read-only role"):
+            assert_database_is_read_only("postgresql://astro:astro@localhost/astro", env)
+
+    @pytest.mark.parametrize("env", ["development", "staging", "DEVELOPMENT", " Staging "])
+    def test_the_known_non_production_names_still_permit_free_models(self, env: str) -> None:
+        """The control.
+
+        Without it a guard that simply raised for every environment would
+        satisfy all three tests above, and local development — the whole
+        reason free tiers are allowed — would be broken.
+        """
+        assert_provider_allowed("ollama", "local", env)  # type: ignore[arg-type]
+        assert is_production(env) is False
 
 
 class TestInternalTokenGuard:
