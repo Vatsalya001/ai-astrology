@@ -314,6 +314,127 @@ class TestCrisisKeywords:
         assert len(hinglish) >= 5
 
 
+# ─── every phrase is exercised ───────────────────────────────────────
+
+# One realistic sentence per phrase in `_CRISIS_PHRASES`.
+#
+# This exists because half the list was unprotected. An audit deleted 26
+# of the 50 phrases — including `suicide`, `suicidal`, `self-harm`,
+# `hang myself`, `jump off`, and BOTH feminine Hinglish forms
+# (`marna chahti`, `jeena nahi chahti`) — and the whole suite stayed
+# green at 214 passed. Nothing would have told anyone.
+#
+# The phrases most at risk were the ones no message happened to contain,
+# and that is not a coincidence: a message written to test one phrase
+# tends to match the two beside it, so the list grows faster than the
+# corpus and the newest, least-exercised entries are the ones a
+# refactor drops.
+#
+# Sentences are written the way a distressed person actually types —
+# lowercase, unpunctuated, mid-thought — not as clean specimens of each
+# regex.
+CRISIS_CORPUS = (
+    # Direct intent, English.
+    "i want to kill myself",
+    "i keep thinking about killing myself",
+    "i want to end my life",
+    "i have been ending my life slowly for years",
+    "i am going to take my own life",
+    "i want to die",
+    "i just wanna die",
+    "i wish i was dead",
+    "i wish i were dead",
+    "everyone would be better off dead than like this",
+    "everyone would be better off without me",
+    "i have been reading about suicide",
+    "i am feeling suicidal",
+    "i do not want to live anymore",
+    "i don't want to live anymore",
+    "i dont want to live anymore",
+    "there is no reason to live anymore",
+    "there is no point living",
+    "there is no point in living",
+    "i can't go on like this",
+    "i cant go on",
+    "i want to end it all",
+    "i am scared i will harm myself",
+    "i want to hurt myself",
+    "i have been thinking about self harm",
+    "i have a history of self-harm",
+    "i have been cutting myself again",
+    "what if i took an overdose",
+    "i want to jump off the terrace",
+    "i am going to hang myself",
+    # The phrasings the block above misses, each with its lookahead.
+    "I'm going to take my life tonight",
+    "i have decided to end things",
+    "i have decided to end it with pills",
+    "i don't want to be here anymore",
+    "i want it all to stop",
+    "everyone would be better off if i was gone",
+    # Hinglish and Hindi transliteration.
+    "mujhe marna chahta hoon",
+    "main marna chahti hoon",
+    "ab jeena nahi chahta",
+    "main ab jeena nahi chahti",
+    "jeene ka mann nahi karta",
+    "khudkushi ke baare me soch raha hoon",
+    "aatmahatya karne ka mann hai",
+    "main apni jaan lena chahta hoon",
+    "zindagi khatam karni hai",
+    "mujhe ab jaan de dena hai",
+    "aaj jaan dena hai",
+    "mujhe nahi jeena",
+    "sab kuch khatam kar dunga",
+    "sab kuch khatam ho jaye",
+    "mere bina sab khush rahenge",
+)
+
+
+class TestEveryPhraseIsExercised:
+    """A phrase nothing tests is a phrase a refactor can delete.
+
+    `TestCrisisKeywords` asserts that certain MESSAGES flag, which is the
+    property users experience. It cannot notice that a phrase has no
+    message at all — and 26 of 50 had none.
+    """
+
+    def test_every_crisis_phrase_is_matched_by_some_message(self) -> None:
+        uncovered = [
+            phrase
+            for phrase in crisis_module._CRISIS_PHRASES
+            if not any(
+                re.search(phrase, message, re.IGNORECASE) for message in CRISIS_CORPUS
+            )
+        ]
+
+        assert not uncovered, (
+            f"{len(uncovered)} crisis phrase(s) are matched by no message in "
+            f"CRISIS_CORPUS, so deleting them would not fail a single test: "
+            f"{uncovered}. Add a sentence a real person would type."
+        )
+
+    @pytest.mark.parametrize("message", CRISIS_CORPUS)
+    def test_every_corpus_message_is_detected(self, message: str) -> None:
+        """The corpus must be real crisis text, not regex bait.
+
+        Without this, the coverage test above could be satisfied by
+        pasting each raw pattern into the list — which would prove the
+        phrases match themselves and nothing else.
+        """
+        verdict = detect_crisis(message)
+        assert verdict.category is SafetyCategory.CRISIS, (
+            f"{message!r} is in the crisis corpus but detect_crisis did not flag it"
+        )
+
+    def test_the_corpus_has_not_drifted_below_the_phrase_list(self) -> None:
+        # A blunt backstop: the corpus should grow when the phrase list
+        # does. Not equality — one sentence legitimately covers several
+        # phrases — but a corpus far smaller than the list means the
+        # coverage test above is being satisfied by accident.
+        assert len(CRISIS_CORPUS) >= len(crisis_module._CRISIS_PHRASES)
+
+
 # ─── the static response ─────────────────────────────────────────────
 
 
