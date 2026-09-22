@@ -3748,3 +3748,68 @@ eight characters.
 Worth keeping in mind for the `fact_index` work in Phase 5: substring checks against a
 payload full of generated numbers are close to useless, and they fail in the direction
 that looks like a passing test.
+
+# Phase 4 reopened by a 28-agent execution audit
+
+2026-09-23. The gate was recorded closed. It was not.
+
+Ninety-one claims from §14, §16 and §17 were re-checked by **running** them — one
+agent per theme, each then attacked by a second told to refute rather than confirm.
+**51 PASS · 30 FAIL · 10 UNPROVEN · 8 initial passes overturned.**
+
+The overturned eight are the interesting number. Every one failed for the same
+reason: the evidence could not have come out differently if the claim were false.
+One row was graded on `grep -c 'MockProvider' tests/*.py` — a grep cannot tell a
+provider that is CONSTRUCTED from one merely mentioned.
+
+## Seven real defects, fixed
+
+| Defect | Why it mattered |
+|---|---|
+| `_scrub_event` did not redact `llm_fallback_api_key` | The fallback exists to be used while the primary fails — exactly when Sentry collects. Both keys in one exception message: primary redacted, fallback verbatim |
+| The corrective retry was validated against the FIRST prompt | A model that repeated its correction was served to the user with `flags: []`. The correction quotes the user's chart back |
+| 26 of 50 crisis phrases had no test | `suicide`, `suicidal`, `self-harm`, `hang myself`, and both feminine Hinglish forms. Deleting all 26 left 214 tests green |
+| `test_telemetry_is_the_only_egress` could not fail | A subset check against the filter that built it. And `sentry_sdk` — the second egress path — was already there |
+| The SDK ban stopped only the convenient clients | 13 of 17 vectors went through, incl. `urllib.request`, `socket`, `subprocess`+curl, `groq`, `importlib.import_module("openai")` |
+| `NoProviderAvailableError` was not a `ProviderError` | Every graceful path missed it. A provider outage returned an unhandled **500 with a traceback** instead of the fallback |
+| Three production guards asked `env == "production"` exactly | `"prod"`, `"Production"`, `""` disabled the PII guard, the internal-token check and the read-only-DB check **all at once** |
+
+Each fix was proven by reverting it and watching its own test fail. The guard changes
+were proven the other way too — injecting each of the ten previously-missed vectors
+and watching the suite go red.
+
+## What the audit says about auditing
+
+The previous entry in this file records the lesson "audit the checklist, not the
+summary". This round found the same failure one level up: the checklist had been
+audited, a report written, and **the report itself became the summary nobody
+re-executed**. `PHASE-04-GATE.md` opens with "Every §17 gate item is met" while the
+spec it cites has 18 unticked boxes.
+
+The fix is not a better report. It is that a claim is worth exactly as much as the
+command you can re-run, which is why every corrected row now carries one.
+
+## Still open
+
+- **Ollama is bound to `127.0.0.1:11434`**, so no container can reach it. "Whole AI
+  stack runs on local free models at zero cost" (§16) is false on this machine until
+  someone starts it with `OLLAMA_HOST=0.0.0.0` — which exposes it beyond loopback and
+  is an operator's call, not a code change.
+- **The circuit breaker has no test on the shipped chain.** Making it incapable of
+  opening leaves all 881 tests green. The breaker tests use an in-memory stub with a
+  fake clock; nothing kills a process.
+- **A mid-run kill is replayed.** A provider that receives the completion in full and
+  then dies produces a `ReadError`, which `_classify` treats as retryable — the dying
+  provider received the same completion three times. Unsafe-to-replay is not
+  distinguished from never-sent.
+- **The admin routing override has no test.** Returning a copy — the exact defect its
+  docstring warns about — leaves 124 tests passing.
+- **`api-service /health` reports `"ai": ok` during a total AI outage.** The probe
+  does not exercise a provider.
+- **`services/ai/.env` holds a live Groq key.** The autouse socket blocker stops the
+  suite reaching it; it is still credential material on disk in a now-public repo.
+- **Hinglish crisis phrases remain unreviewed by a native speaker**, and Devanagari is
+  not matched at all — `मुझे नहीं जीना` returns `none`, with no test asserting it
+  either way.
+- **`memtest86+` still unrun**, and a Docker build during this session failed with
+  `unexpected digest ... copied` until the buildx cache was cleared.
