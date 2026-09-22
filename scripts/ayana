@@ -16,6 +16,25 @@
 
 set -euo pipefail
 
+# `docker compose` (plugin) or `docker-compose` (standalone) — whichever
+# this machine actually has.
+#
+# The Docker snap refreshed mid-session and came back WITHOUT the compose
+# plugin, so `docker compose up` began failing with "unknown shorthand
+# flag: 'd' in -d" — which reads like a bad argument rather than a
+# missing subcommand, and cost real time. The standalone binary was
+# present the whole while.
+#
+# Resolved once, here, rather than at seven call sites.
+if docker compose version >/dev/null 2>&1; then
+  COMPOSE="docker compose"
+elif command -v docker-compose >/dev/null 2>&1; then
+  COMPOSE="docker-compose"
+else
+  echo "neither 'docker compose' nor 'docker-compose' is available" >&2
+  exit 1
+fi
+
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO"
 
@@ -192,7 +211,7 @@ cmd_up() {
   #
   # Docker's layer cache makes this close to free when nothing changed.
   # CI never hit it because a fresh runner has no image to be stale.
-  docker compose up -d --build --wait > "$RUN_DIR/compose.log" 2>&1 \
+  $COMPOSE up -d --build --wait > "$RUN_DIR/compose.log" 2>&1 \
     || { tail -20 "$RUN_DIR/compose.log"; die "docker compose failed"; }
 
   # The bucket. A separate invocation because minio-init runs to
@@ -202,13 +221,13 @@ cmd_up() {
   #
   # `mc mb --ignore-existing` makes this a no-op on every run after the
   # first, so it costs a second and never needs a conditional.
-  docker compose --profile init up minio-init --exit-code-from minio-init \
+  $COMPOSE --profile init up minio-init --exit-code-from minio-init \
     >> "$RUN_DIR/compose.log" 2>&1 \
     || die "could not create the object-storage bucket — see $RUN_DIR/compose.log"
 
   while read -r name status; do
     if [[ "$status" == *healthy* ]]; then ok "$name"; else bad "$name — $status"; fi
-  done < <(docker compose ps --format '{{.Name}} {{.Status}}')
+  done < <($COMPOSE ps --format '{{.Name}} {{.Status}}')
 
   # 3. Schema
   #
@@ -525,8 +544,8 @@ cmd_smoke() {
   curl -sf --max-time 5 -H "X-Trace-Id: $tid" "http://localhost:$API_PORT/health" > /dev/null 2>&1 || true
   sleep 1
   check "trace id reaches api-service log" "grep -q '$tid' '$API_LOG'"
-  check "trace id reaches astro-service"   "docker compose logs astro --since 30s 2>/dev/null | grep -q '$tid'"
-  check "trace id reaches ai-service"      "docker compose logs ai    --since 30s 2>/dev/null | grep -q '$tid'"
+  check "trace id reaches astro-service"   "$COMPOSE logs astro --since 30s 2>/dev/null | grep -q '$tid'"
+  check "trace id reaches ai-service"      "$COMPOSE logs ai    --since 30s 2>/dev/null | grep -q '$tid'"
 
   # A poisoned trace ID must be rejected, not logged — birth details and
   # email addresses have both turned up in trace headers before.
@@ -624,7 +643,7 @@ cmd_test() {
 
 cmd_logs() {
   say "Tailing everything — Ctrl-C to stop"
-  docker compose logs -f --tail=20 &
+  $COMPOSE logs -f --tail=20 &
   local compose_pid=$!
   # shellcheck disable=SC2064
   trap "kill $compose_pid 2>/dev/null || true" EXIT
@@ -670,13 +689,13 @@ cmd_down() {
   # with it keeps a reference to the old network id, and the NEXT `up`
   # fails with "network ... not found" while every other service comes
   # up healthy. Diagnosed the hard way — twice.
-  docker compose --profile init down --remove-orphans \
+  $COMPOSE --profile init down --remove-orphans \
     > "$RUN_DIR/compose-down.log" 2>&1 \
     && ok "containers stopped" \
-    || warn "docker compose down reported a problem — see $RUN_DIR/compose-down.log"
+    || warn "$COMPOSE down reported a problem — see $RUN_DIR/compose-down.log"
 
   info "Postgres and MinIO data survive in named volumes."
-  info "To wipe them too: docker compose down -v"
+  info "To wipe them too: $COMPOSE down -v"
 }
 
 # ─── dispatch ────────────────────────────────────────────────────────

@@ -3641,3 +3641,40 @@ and Playwright's `chrome-headless-shell` began segfaulting on every launch until
 reinstalled (browsers live in `~/.cache/ms-playwright`, which `npm ci` does not touch).
 The second is consistent with the RAM fault; the first is a snap refresh. Both cost real
 time and neither is a defect in this repository.
+
+---
+
+# The CSP nonce does not work on Next 16.3.5 either — three routes tried
+
+`'unsafe-inline'` remains. Not for want of trying, and the attempts are worth recording
+so nobody repeats them.
+
+| Attempt | Result |
+|---|---|
+| `experimental.sri` | SRI stamps integrity on **external** scripts. Next's RSC payload rides in **2 inline** `<script>` tags that carry none → `script-src 'self'` blocks them, app does not hydrate |
+| Nonce via `middleware.ts` | File is **inert in Next 16** — the convention is `proxy.ts`. Nothing registered |
+| Nonce via `proxy.ts` | Registered (`ƒ Proxy (Middleware)` in the build output), header issued correctly — but **0 of 2 inline and 0 of 11 external scripts carried the nonce** |
+| …plus `force-dynamic` | All 25 routes became dynamic, static dropped 11 → 0. **Still 0 nonces stamped** |
+| …plus CSP on the *request* headers | Still 0 |
+
+So the cost was paid — every route dynamic — and the benefit never arrived. Next
+16.3.5 did not stamp the nonce onto its own inline scripts by any route found here.
+
+**Everything reverted.** `script-src 'self' 'unsafe-inline'` is back, 11 routes are
+static again, and all 4 CSP tests pass.
+
+The item is still open, but it is better understood than it was: the Phase 3 comment
+said the nonce "forces every page into dynamic rendering", and that is true — what it
+did not know is that paying that price does not currently buy a working nonce. Whoever
+picks this up in Phase 5 should start by establishing that Next stamps nonces at all on
+the version in use, before designing around the TTFB cost.
+
+# `docker compose` vanished mid-session
+
+The Docker snap auto-refreshed and came back without the compose plugin, so
+`./scripts/ayana up` failed with `unknown shorthand flag: 'd' in -d` — which reads like
+a bad argument rather than a missing subcommand, and cost real time. The standalone
+`docker-compose` (v5.5.1) was present throughout.
+
+`scripts/ayana` now resolves `docker compose` or `docker-compose` once, at the top,
+instead of assuming at seven call sites.
