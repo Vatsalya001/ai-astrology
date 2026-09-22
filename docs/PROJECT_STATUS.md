@@ -3382,3 +3382,61 @@ The two E2E failures are Phase 3 tests (place-search dropdown, OTP timing) and a
 environmental; they are not Phase 4 regressions and remain open.
 
 **`task verify` green. Full Go integration suite green.**
+
+---
+
+# The RAM fault corrupted a build dependency, live, during this session
+
+Asked a fifth time whether the phase is complete. `task verify` failed twice in a row
+while answering, and both failures were the hardware.
+
+**First:** the Go linker reported
+
+```
+cannot find package go.opent%lemetry.io/otel/metric/embedded
+```
+
+`opent%lemetry`. `e` is `0x65`, `%` is `0x25` — **XOR 0x40, a single-bit flip**, in a
+package path held in the build cache. `go clean -cache` cleared it.
+
+**Then:** `next build` died with `SyntaxError: Invalid or unexpected token` at
+`node_modules/next/dist/build/swc/index.js:1202`. That one was **persisted to disk**:
+
+| | |
+|---|---|
+| Scanned | 14,220 `.js` files under `node_modules` |
+| Containing a real NUL byte | **exactly 1** |
+| NULs in that file | **exactly 1**, at byte 52535 of 62048 |
+| Its neighbours | `0x20` `<NUL>` `0x20` — indentation |
+| So the original byte was | `0x20`, a space |
+| XOR | **0x20 — a single-bit clear** |
+
+`memcheck` had reported, an hour earlier: `wrote 0x00 read 0x20 (xor 0x20)`. **The same
+bit position.** A failing cell zeroed a byte on its way to disk, and `node_modules` is
+gitignored so no checksum could have caught it.
+
+Repaired with `npm ci`; 0 NULs, parses cleanly, `task verify` green.
+
+**A methodological note, because it nearly went in this document as fact:** the first
+scan reported NUL bytes in ten files. It was wrong — **bash cannot pass a NUL as an
+argument**, so `grep -c $'\x00'` became `grep -c ''` and matched every line. The files
+parsed fine. Re-run in Python, the true count was one. A scan that cannot represent what
+it searches for reports whatever it likes.
+
+## The state file is now structurally incapable of the drift it kept having
+
+It had gone stale four times, each time because it duplicated a moving fact — "commits
+unpushed", "CI has not run since 2026-09-16", "memtest86+ UNRUN". §17 item 19 is "state
+files updated", so every drift was itself an open gate item.
+
+Fixing it a fifth time buys one more day. The open list now lives in **one** place —
+this document, appended chronologically and never rewritten — and the state file carries
+only what does not move: which phase, whether its gate closed, and the RAM caveat that
+outlives any single finding.
+
+## CI: 10 of 11
+
+The `ai_request_logs` export fix landed and the Go integration job passes. One job still
+fails: three **Phase 3** E2E tests (place-search dropdown, a tablet visual snapshot, XSS
+label rendering). **I have not established whether those are environmental or real**, and
+say so rather than guessing — they are outside Phase 4's gate either way.
