@@ -3440,3 +3440,79 @@ The `ai_request_logs` export fix landed and the Go integration job passes. One j
 fails: three **Phase 3** E2E tests (place-search dropdown, a tablet visual snapshot, XSS
 label rendering). **I have not established whether those are environmental or real**, and
 say so rather than guessing — they are outside Phase 4's gate either way.
+
+---
+
+# Verified properly: the gate number reproduces, and CI now runs on sound hardware
+
+"Verify properly" had an answer I had been missing. **CI runs on GitHub's hardware,
+which is not this machine.** A green CI job is a measurement taken somewhere the RAM
+works.
+
+## The gate number reproduces independently
+
+| | run 1 (2026-09-21) | run 2 (2026-09-22) |
+|---|---|---|
+| Answered | 114/118 | 114/118 |
+| Model accuracy | 100/114 = 87.7% | 101/114 = 88.6% |
+| **As shipped** | **180/200 = 90.0%** | **183/200 = 91.5%** |
+| Provider errors | 4 | 4 |
+
+Two runs, different days, same dataset and prompt. Both clear the 85% gate; the 1.5pp
+gap is ordinary sampling variance at `temperature=0.1`.
+
+**This is what makes the number trustworthy despite the hardware.** A memory fault does
+not produce a *similar* answer twice — it produces a random deviation. Two runs agreeing
+within noise, with identical answered- and error-counts, is evidence the measurement is
+sound in a way a single run never was.
+
+## CI was one root cause, not three UI bugs
+
+The E2E job had **never passed**. The last genuinely-executing run (2026-09-13) had nine
+jobs and no E2E at all — the job arrived during Phase 3, and the quota block meant nobody
+ever saw it fail.
+
+**Cause 1 — the worker never started:**
+
+```
+fatal: pdf renderer: pdf: chrome startup check at /usr/bin/google-chrome:
+websocket url timeout reached
+✗ worker never became ready
+```
+
+`.env.example` names `/usr/bin/google-chrome`, right for a developer machine and absent
+on the runner. CI copies that file verbatim, so every E2E test ran against a half-started
+stack. It presented as three unrelated UI failures. CI installs Playwright's chromium two
+steps earlier; `CHROME_PATH` now points at that, and the step fails loudly if the binary
+is missing rather than starting a stack that cannot work.
+
+**Cause 2 — a test searched for a city CI does not have:**
+
+`input-contrast.spec.ts` typed **"Prayagraj"**. `tests/fixtures/places/cities-e2e.txt`
+holds twenty cities and Prayagraj is not among them. It passed locally only because this
+machine's `places` table still held a fuller seed — the textbook "works on my machine".
+The other ten place-search tests all use `jaip`; this one now does too. Verified by
+reseeding locally from the CI fixture and re-running: 4 passed.
+
+## Two local red herrings, both environment
+
+Worth recording because either would have been filed as a Phase 3 regression by anyone
+reading a summary:
+
+- Four E2E tests failed locally until the stack was restarted — `ayana up` had been
+  serving a **stale build**. Not UI bugs.
+- The full local suite then passed **157/157**.
+
+## Where verification now stands
+
+| | verified where |
+|---|---|
+| Python `ai` suite, Go api-service, contracts, secret scan, env drift, astro-AI-free | **CI — sound hardware** |
+| Go integration (real Postgres) | CI, passing except a PDF browser-timing test |
+| Classifier accuracy 90.0% / 91.5% | **two independent runs, agreeing within noise** |
+| Ephemeris + golden files | `integrity:gate`, byte-for-byte against the index |
+| E2E, 157 tests | locally green; CI fixed for two causes, snapshot outstanding |
+
+**What remains hardware-bound:** nothing in the gate. The RAM fault is still real and
+still needs replacing — it corrupted a build dependency during this session — but the
+Phase 4 numbers no longer rest on it alone.

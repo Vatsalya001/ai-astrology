@@ -128,7 +128,13 @@ test('the birth-place dropdown has a background of its own', async ({ page }) =>
   await page.getByLabel(/minute/i).fill('55')
   await page.getByRole('button', { name: /^continue$/i }).click()
 
-  await page.getByLabel(/birth place/i).fill('Prayagraj')
+  // 'jaip', like the other ten place-search tests, because that is what
+  // tests/fixtures/places/cities-e2e.txt GUARANTEES. This line said
+  // 'Prayagraj', which is not among the fixture's twenty cities — so it
+  // passed on a developer machine whose places table still held a fuller
+  // seed, and returned no options in CI. This test is about the
+  // dropdown's BACKGROUND; which city produces the list is incidental.
+  await page.getByLabel(/birth place/i).fill('jaip')
   const option = page.getByRole('option').first()
   await expect(option).toBeVisible()
 
