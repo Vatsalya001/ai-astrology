@@ -3574,3 +3574,70 @@ drift.
   `ORDER BY population DESC, ascii_name`. Deterministic. Disproved before reporting.
 
 **595 component tests, 15/15 visual locally, `task verify` green.**
+
+---
+
+# The Phase 3 carry-forward list: two closed, one disproved, three open
+
+## ✅ §11.5 — the PDF browser can no longer phone home
+
+> *"`chromedp` runs sandboxed with no network access beyond the print route."*
+
+The sandbox half was a documented deployment constraint. The **network half was simply
+absent**: the browser rendering somebody's birth data could reach anything on the
+internet.
+
+`resolverRules` now gives Chrome `MAP * ~NOTFOUND` with an `EXCLUDE` for only the host
+being printed. The threat is not a compromised Chrome — it is the print page carrying
+content it should not (a profile label that escaped escaping, a future template change).
+Under that assumption, what matters is whether the render can phone home. It cannot.
+
+It **fails closed**: a malformed or empty URL yields the restrictive rule with loopback
+only, because the alternative is unrestricted egress because a string was malformed.
+Break-tested three ways — removing deny-by-default fails 6 subtests, leaking the port
+into the host rule fails the port case, and failing open on a bad URL fails the
+never-permissive test.
+
+## ✅ ADR-012 — hand-rolled auth, recorded
+
+Written late and says so. OTP + HS256 access tokens + rotating refresh with reuse
+detection, and *why*: phone-first Indian audience where hosted providers route SMS
+through their own aggregator and control DLT registration; and birth data being the
+account, so the linkage should not live in another tenancy.
+
+It names what the decision obliges and where each obligation is enforced, and the
+tradeoff that matters — **HS256 is symmetric**, so any service that can verify can also
+mint. Fine while `api-service` is the only verifier; the day a second one needs to
+verify, the move is asymmetric signing rather than a vendor.
+
+## ❌ §11.9 CSP — the escape route was tested and does not work
+
+The `'unsafe-inline'` in `script-src` is the weakest part of the policy. The existing
+comment named two exits: a per-request nonce (kills static rendering, bad for the Indian
+mobile TTFB this app targets) or `experimental.sri`.
+
+**I tested SRI. It does not solve this.** Enabled `experimental.sri`, removed
+`'unsafe-inline'`, rebuilt. SRI emits integrity attributes for *external* scripts — but
+Next's RSC payload rides in **two inline `<script>` tags that carry none**, so
+`script-src 'self'` blocks them. Confirmed with the repo's own test: `csp.spec.ts:52`
+*"the app hydrates and stays interactive under the policy"* fails on a click timeout.
+
+Reverted. **The original decision was correct** and is now correct *with evidence*
+rather than by argument. The remaining exit is the nonce, and PHASE-05 carries the
+blocking gate item.
+
+## Still open
+
+- **E2E for PDF download and share links** — blocked today: `docker compose` vanished
+  mid-session (Docker is a snap and auto-refreshed without the compose plugin), so the
+  full stack cannot start.
+- **Share-management screen** — a UI feature, Phase 3 scope, not started.
+- **`<180 KB` first-load JS** — unmet *by decision*, ADR-010. Recorded, not a gap.
+
+## An environment note
+
+Two more casualties while doing this work: `docker compose` disappeared from the snap,
+and Playwright's `chrome-headless-shell` began segfaulting on every launch until
+reinstalled (browsers live in `~/.cache/ms-playwright`, which `npm ci` does not touch).
+The second is consistent with the RAM fault; the first is a snap refresh. Both cost real
+time and neither is a defect in this repository.

@@ -3,6 +3,8 @@ package pdf
 import (
 	"context"
 	"fmt"
+	"net/url"
+	"strings"
 	"time"
 
 	"github.com/chromedp/cdproto/page"
@@ -34,6 +36,28 @@ func NewChrome(execPath string) (*Chrome, error) {
 }
 
 // PrintToPDF loads a page and returns its printed bytes.
+// resolverRules confines the browser to the host it is printing.
+//
+// `MAP * ~NOTFOUND` fails every DNS lookup; the EXCLUDEs carve out the
+// one host this render needs. Loopback is always excluded because the
+// print route is served from this machine in development and in the
+// worker container.
+//
+// A URL that will not parse yields the restrictive rule with loopback
+// only. Failing closed is right: the alternative is a browser with
+// unrestricted egress because a string was malformed.
+func resolverRules(pageURL string) string {
+	rules := []string{"MAP * ~NOTFOUND", "EXCLUDE localhost", "EXCLUDE 127.0.0.1", "EXCLUDE [::1]"}
+
+	if u, err := url.Parse(pageURL); err == nil && u.Hostname() != "" {
+		host := u.Hostname()
+		if host != "localhost" && host != "127.0.0.1" && host != "::1" {
+			rules = append(rules, "EXCLUDE "+host)
+		}
+	}
+	return strings.Join(rules, ", ")
+}
+
 func (c *Chrome) PrintToPDF(ctx context.Context, pageURL string) ([]byte, error) {
 	opts := append(chromedp.DefaultExecAllocatorOptions[:],
 		chromedp.ExecPath(c.execPath),
@@ -55,6 +79,25 @@ func (c *Chrome) PrintToPDF(ctx context.Context, pageURL string) ([]byte, error)
 		chromedp.Flag("disable-gpu", true),
 		chromedp.Flag("disable-extensions", true),
 		chromedp.Flag("no-first-run", true),
+
+		// PHASE-03 §11.5: "chromedp runs sandboxed with NO NETWORK ACCESS
+		// beyond the print route." The sandbox half is a deployment
+		// constraint (see NoSandbox above); this is the other half, and
+		// until now it was simply absent.
+		//
+		// Every hostname resolves to nothing except the one this render
+		// is for. So if the print page ever carried injected content —
+		// a profile label that escaped escaping, a future template bug —
+		// the browser rendering somebody's birth data cannot reach a
+		// collector, because it cannot resolve one. It is the same
+		// reasoning as the web app's `connect-src`: assume the injection
+		// succeeds and remove the exfiltration route.
+		//
+		// EXCLUDE takes a host, not a URL, so it is derived from the page
+		// being rendered rather than hardcoded — a hardcoded localhost
+		// would silently stop working the day this runs against a real
+		// origin, and "silently" means an empty PDF.
+		chromedp.Flag("host-resolver-rules", resolverRules(pageURL)),
 	)
 
 	allocCtx, cancelAlloc := chromedp.NewExecAllocator(ctx, opts...)

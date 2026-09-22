@@ -130,11 +130,18 @@ Owed to the Phase 4 gate and **not closeable by the suite**:
 
 ## Carried from Phase 3
 
-- **§11.9 CSP `script-src 'unsafe-inline'`** — unmet. Blocks a Phase 5 gate item, and
-  PHASE-05 already carries a blocking item to replace it with a nonce or SRI before the
-  first model response is rendered. Not a Phase 4 concern.
-- **§11.5 Chrome sandbox / network** — `--no-sandbox` is a deployment constraint; the
-  network-restriction half is implementable and not yet done.
+- **§11.9 CSP `script-src 'unsafe-inline'`** — still unmet, and the SRI escape route was
+  **tested and does not work**. `experimental.sri` was enabled and `'unsafe-inline'`
+  removed: SRI emits integrity attributes for EXTERNAL scripts, but Next's RSC payload
+  rides in two INLINE `<script>` tags that carry none, so `script-src 'self'` blocks them
+  and the app does not hydrate — confirmed by `csp.spec.ts:52`, the repo's own test,
+  which fails on a click timeout. Reverted. The remaining exit is a per-request nonce,
+  which costs static rendering and CDN caching; PHASE-05 carries the blocking item.
+- **§11.5 Chrome sandbox / network** — ✅ **network half closed 2026-09-22.**
+  `resolverRules` gives the browser `MAP * ~NOTFOUND` with an EXCLUDE for only the host
+  being printed, so a compromised print page cannot reach a collector. Fails CLOSED on a
+  malformed URL. Break-tested three ways. `--no-sandbox` remains a deployment constraint
+  and is documented as one.
 - **§11.8 profile-label injection** — ✅ closed by PR 30.
 - ~~**CI has never executed a job.**~~ **RESOLVED 2026-09-22.** It was an exhausted
   Actions quota, proven rather than guessed: jobs ran 07:31:53 → 07:31:56 with
