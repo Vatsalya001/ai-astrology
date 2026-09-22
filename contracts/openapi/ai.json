@@ -111,6 +111,20 @@
             "title": "Provider Tier",
             "type": "string"
           },
+          "providers": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "boolean"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Providers"
+          },
           "service": {
             "title": "Service",
             "type": "string"
@@ -482,8 +496,20 @@
   "paths": {
     "/health": {
       "get": {
-        "description": "Liveness check.\n\nDeliberately does NOT probe the model provider. Two reasons:\n\n  * A health check that calls an LLM costs money on every poll and\n    adds seconds of latency to something that should take\n    milliseconds.\n  * Provider reachability is a runtime concern handled by the retry\n    and circuit-breaker logic in Phase 4, not a reason to mark this\n    process unhealthy and have it restarted.\n\nThe provider fields are reported so operators can see at a glance\nwhich backend is configured \u2014 useful when the answer to \"why is dev\noutput worse than prod?\" is \"dev is on a 3B local model\".",
+        "description": "Liveness by default; provider reachability on request.\n\n\u2500\u2500 Why the default does not probe \u2500\u2500\n\nProvider reachability is a runtime concern handled by the retry and\ncircuit-breaker logic, not a reason to mark this process unhealthy\nand have it restarted. A chain whose primary is down but whose\nfallback answers is still serving users, and reporting it unhealthy\nwould pull a working service out of a load balancer.\n\nThat half of the original reasoning stands. The other half said a\nprobe \"calls an LLM and costs money on every poll\" \u2014 which is not\nwhat the probe does: `health_check()` calls `models.list()`, which\nspends no tokens and needs no model pulled. The cost is a round trip,\nnot a bill.\n\n\u2500\u2500 Why it is offered at all \u2500\u2500\n\nBecause the gap it left was real and was observed: with Ollama\nunreachable, `api-service` reported `\"ai\": {\"status\": \"ok\"}` while\nevery `/v1/complete` failed. Nothing anywhere said which provider\nwas unreachable, and `ProviderRegistry.health()` \u2014 whose docstring\nsays it is \"for the health endpoint\" \u2014 had no caller outside a test.\n\nOpt-in rather than always-on so routine liveness polls stay free of\na network round trip, and so this can never be the reason a pod is\nrestarted: `status` is unaffected by what the probe finds.",
         "operationId": "health_health_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "probe",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Probe",
+              "type": "boolean"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -494,6 +520,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
           }
         },
         "summary": "Health",

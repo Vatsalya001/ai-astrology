@@ -228,3 +228,68 @@ class TestTheTraceIdIsSanitised:
         second = client.get("/health").headers[TRACE_HEADER]
 
         assert first != second, "a constant trace ID correlates nothing"
+
+
+class TestTheHealthProbeReportsProviders:
+    """The gap that was observed, not imagined.
+
+    With Ollama unreachable, `api-service` reported
+    `"ai": {"status": "ok"}` while every `/v1/complete` returned 500.
+    Nothing anywhere named the unreachable provider, and
+    `ProviderRegistry.health()` — docstring: "for the health endpoint" —
+    had no caller outside a test.
+
+    The default stays liveness-only on purpose: a provider outage must
+    not restart this process, because a chain whose fallback is
+    answering is still serving users.
+    """
+
+    def test_the_default_does_not_probe(self, client: TestClient) -> None:
+        body = client.get("/health").json()
+
+        # Absent, not empty. `{}` would mean "we looked and found none",
+        # which is a different and real failure.
+        assert body.get("providers") is None
+        assert body["status"] == "ok"
+
+    def test_probing_reports_each_provider_by_name(self, client: TestClient) -> None:
+        body = client.get("/health?probe=true").json()
+
+        assert isinstance(body["providers"], dict)
+        assert body["providers"], "the probe returned no providers at all"
+        for name, reachable in body["providers"].items():
+            assert isinstance(name, str) and name
+            assert isinstance(reachable, bool)
+
+    def test_an_unreachable_provider_does_not_change_the_status(
+        self, client: TestClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The half of the original design that was right.
+
+        `status` must stay "ok" whatever the probe finds, or a provider
+        outage becomes a restart loop for a process that is perfectly
+        healthy and whose fallback may be serving.
+        """
+        import socket as socket_module
+
+        from app.api.complete import get_provider_chain
+
+        with socket_module.socket() as sock:
+            sock.bind(("127.0.0.1", 0))
+            dead_port = sock.getsockname()[1]
+
+        monkeypatch.setattr(settings, "llm_provider", "openai-compatible")
+        monkeypatch.setattr(settings, "llm_base_url", f"http://127.0.0.1:{dead_port}/v1")
+        monkeypatch.setattr(settings, "llm_provider_tier", "local")
+        monkeypatch.setattr(settings, "llm_fallback_provider", "")
+        get_provider_chain.cache_clear()
+
+        body = client.get("/health?probe=true").json()
+
+        assert body["status"] == "ok", "a dead provider made the process look unhealthy"
+        assert body["providers"], "the probe reported nothing about a provider it could not reach"
+        assert not any(body["providers"].values()), (
+            f"a provider on a closed port reported reachable: {body['providers']}"
+        )
+
+        get_provider_chain.cache_clear()

@@ -24,6 +24,7 @@ from app.safety.crisis import (
     detect_crisis,
     load_crisis_response,
 )
+from app.safety.injection import detect_prompt_injection
 from app.safety.postures import (
     ABUSE_RESPONSE,
     declines,
@@ -46,6 +47,7 @@ __all__ = [
     "assert_crisis_responses_present",
     "declines",
     "detect_crisis",
+    "detect_prompt_injection",
     "load_crisis_response",
     "posture_for",
     "short_circuits",

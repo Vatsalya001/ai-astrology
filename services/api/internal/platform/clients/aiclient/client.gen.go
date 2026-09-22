@@ -264,11 +264,12 @@ type HTTPValidationError struct {
 
 // HealthResponse defines model for HealthResponse.
 type HealthResponse struct {
-	Provider     string `json:"provider"`
-	ProviderTier string `json:"provider_tier"`
-	Service      string `json:"service"`
-	Status       string `json:"status"`
-	Version      string `json:"version"`
+	Provider     string           `json:"provider"`
+	ProviderTier string           `json:"provider_tier"`
+	Providers    *map[string]bool `json:"providers,omitempty"`
+	Service      string           `json:"service"`
+	Status       string           `json:"status"`
+	Version      string           `json:"version"`
 }
 
 // Intent The 21 intents from PHASE-04 §6.
@@ -390,6 +391,11 @@ type ValidationErrorLoc1 = int
 // ValidationError_Loc_Item defines model for ValidationError.loc.Item.
 type ValidationError_Loc_Item struct {
 	union json.RawMessage
+}
+
+// HealthHealthGetParams defines parameters for HealthHealthGet.
+type HealthHealthGetParams struct {
+	Probe *bool `form:"probe,omitempty" json:"probe,omitempty"`
 }
 
 // CompleteV1CompletePostJSONRequestBody defines body for CompleteV1CompletePost for application/json ContentType.
@@ -536,23 +542,36 @@ type ClientInterface interface {
 
 	// HealthHealthGet Health
 	//
-	// Liveness check.
+	// Liveness by default; provider reachability on request.
 	//
-	// Deliberately does NOT probe the model provider. Two reasons:
+	// ── Why the default does not probe ──
 	//
-	//   * A health check that calls an LLM costs money on every poll and
-	//     adds seconds of latency to something that should take
-	//     milliseconds.
-	//   * Provider reachability is a runtime concern handled by the retry
-	//     and circuit-breaker logic in Phase 4, not a reason to mark this
-	//     process unhealthy and have it restarted.
+	// Provider reachability is a runtime concern handled by the retry and
+	// circuit-breaker logic, not a reason to mark this process unhealthy
+	// and have it restarted. A chain whose primary is down but whose
+	// fallback answers is still serving users, and reporting it unhealthy
+	// would pull a working service out of a load balancer.
 	//
-	// The provider fields are reported so operators can see at a glance
-	// which backend is configured — useful when the answer to "why is dev
-	// output worse than prod?" is "dev is on a 3B local model".
+	// That half of the original reasoning stands. The other half said a
+	// probe "calls an LLM and costs money on every poll" — which is not
+	// what the probe does: `health_check()` calls `models.list()`, which
+	// spends no tokens and needs no model pulled. The cost is a round trip,
+	// not a bill.
+	//
+	// ── Why it is offered at all ──
+	//
+	// Because the gap it left was real and was observed: with Ollama
+	// unreachable, `api-service` reported `"ai": {"status": "ok"}` while
+	// every `/v1/complete` failed. Nothing anywhere said which provider
+	// was unreachable, and `ProviderRegistry.health()` — whose docstring
+	// says it is "for the health endpoint" — had no caller outside a test.
+	//
+	// Opt-in rather than always-on so routine liveness polls stay free of
+	// a network round trip, and so this can never be the reason a pod is
+	// restarted: `status` is unaffected by what the probe finds.
 	//
 	// Corresponds with GET /health (the `HealthHealthGet` operationId).
-	HealthHealthGet(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
+	HealthHealthGet(ctx context.Context, params *HealthHealthGetParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// CompleteV1CompletePostWithBody Complete
 	//
@@ -630,24 +649,37 @@ type ClientInterface interface {
 
 // HealthHealthGet Health
 //
-// Liveness check.
+// Liveness by default; provider reachability on request.
 //
-// Deliberately does NOT probe the model provider. Two reasons:
+// ── Why the default does not probe ──
 //
-//   - A health check that calls an LLM costs money on every poll and
-//     adds seconds of latency to something that should take
-//     milliseconds.
-//   - Provider reachability is a runtime concern handled by the retry
-//     and circuit-breaker logic in Phase 4, not a reason to mark this
-//     process unhealthy and have it restarted.
+// Provider reachability is a runtime concern handled by the retry and
+// circuit-breaker logic, not a reason to mark this process unhealthy
+// and have it restarted. A chain whose primary is down but whose
+// fallback answers is still serving users, and reporting it unhealthy
+// would pull a working service out of a load balancer.
 //
-// The provider fields are reported so operators can see at a glance
-// which backend is configured — useful when the answer to "why is dev
-// output worse than prod?" is "dev is on a 3B local model".
+// That half of the original reasoning stands. The other half said a
+// probe "calls an LLM and costs money on every poll" — which is not
+// what the probe does: `health_check()` calls `models.list()`, which
+// spends no tokens and needs no model pulled. The cost is a round trip,
+// not a bill.
+//
+// ── Why it is offered at all ──
+//
+// Because the gap it left was real and was observed: with Ollama
+// unreachable, `api-service` reported `"ai": {"status": "ok"}` while
+// every `/v1/complete` failed. Nothing anywhere said which provider
+// was unreachable, and `ProviderRegistry.health()` — whose docstring
+// says it is "for the health endpoint" — had no caller outside a test.
+//
+// Opt-in rather than always-on so routine liveness polls stay free of
+// a network round trip, and so this can never be the reason a pod is
+// restarted: `status` is unaffected by what the probe finds.
 //
 // Corresponds with GET /health (the `HealthHealthGet` operationId).
-func (c *Client) HealthHealthGet(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewHealthHealthGetRequest(c.Server)
+func (c *Client) HealthHealthGet(ctx context.Context, params *HealthHealthGetParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewHealthHealthGetRequest(c.Server, params)
 	if err != nil {
 		return nil, err
 	}
@@ -782,7 +814,7 @@ func (c *Client) PatchRoutingV1RoutingPatch(ctx context.Context, body PatchRouti
 }
 
 // NewHealthHealthGetRequest constructs an http.Request for the HealthHealthGet method
-func NewHealthHealthGetRequest(server string) (*http.Request, error) {
+func NewHealthHealthGetRequest(server string, params *HealthHealthGetParams) (*http.Request, error) {
 	var err error
 
 	serverURL, err := url.Parse(server)
@@ -798,6 +830,33 @@ func NewHealthHealthGetRequest(server string) (*http.Request, error) {
 	queryURL, err := serverURL.Parse(operationPath)
 	if err != nil {
 		return nil, err
+	}
+
+	if params != nil {
+		// queryValues collects non-styled parameters (passthrough, JSON)
+		// that are safe to round-trip through url.Values.Encode().
+		queryValues := queryURL.Query()
+		// rawQueryFragments collects pre-encoded query fragments from
+		// styled parameters, preserving literal commas as delimiters
+		// per the OpenAPI spec (e.g. "color=blue,black,brown").
+		var rawQueryFragments []string
+
+		if params.Probe != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "probe", *params.Probe, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "boolean", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if encoded := queryValues.Encode(); encoded != "" {
+			rawQueryFragments = append(rawQueryFragments, encoded)
+		}
+		queryURL.RawQuery = strings.Join(rawQueryFragments, "&")
 	}
 
 	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
@@ -961,25 +1020,38 @@ type ClientWithResponsesInterface interface {
 
 	// HealthHealthGetWithResponse Health
 	//
-	// Liveness check.
+	// Liveness by default; provider reachability on request.
 	//
-	// Deliberately does NOT probe the model provider. Two reasons:
+	// ── Why the default does not probe ──
 	//
-	//   * A health check that calls an LLM costs money on every poll and
-	//     adds seconds of latency to something that should take
-	//     milliseconds.
-	//   * Provider reachability is a runtime concern handled by the retry
-	//     and circuit-breaker logic in Phase 4, not a reason to mark this
-	//     process unhealthy and have it restarted.
+	// Provider reachability is a runtime concern handled by the retry and
+	// circuit-breaker logic, not a reason to mark this process unhealthy
+	// and have it restarted. A chain whose primary is down but whose
+	// fallback answers is still serving users, and reporting it unhealthy
+	// would pull a working service out of a load balancer.
 	//
-	// The provider fields are reported so operators can see at a glance
-	// which backend is configured — useful when the answer to "why is dev
-	// output worse than prod?" is "dev is on a 3B local model".
+	// That half of the original reasoning stands. The other half said a
+	// probe "calls an LLM and costs money on every poll" — which is not
+	// what the probe does: `health_check()` calls `models.list()`, which
+	// spends no tokens and needs no model pulled. The cost is a round trip,
+	// not a bill.
+	//
+	// ── Why it is offered at all ──
+	//
+	// Because the gap it left was real and was observed: with Ollama
+	// unreachable, `api-service` reported `"ai": {"status": "ok"}` while
+	// every `/v1/complete` failed. Nothing anywhere said which provider
+	// was unreachable, and `ProviderRegistry.health()` — whose docstring
+	// says it is "for the health endpoint" — had no caller outside a test.
+	//
+	// Opt-in rather than always-on so routine liveness polls stay free of
+	// a network round trip, and so this can never be the reason a pod is
+	// restarted: `status` is unaffected by what the probe finds.
 	//
 	// Returns a wrapper object for the known response body format(s).
 	//
 	// Corresponds with GET /health (the `HealthHealthGet` operationId).
-	HealthHealthGetWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*HealthHealthGetResponse, error)
+	HealthHealthGetWithResponse(ctx context.Context, params *HealthHealthGetParams, reqEditors ...RequestEditorFn) (*HealthHealthGetResponse, error)
 
 	// CompleteV1CompletePostWithBodyWithResponse Complete
 	//
@@ -1062,11 +1134,18 @@ type HealthHealthGetResponse struct {
 	HTTPResponse *http.Response
 	// JSON200 the response for an HTTP 200 `application/json` response
 	JSON200 *HealthResponse
+	// JSON422 the response for an HTTP 422 `application/json` response
+	JSON422 *HTTPValidationError
 }
 
 // GetJSON200 returns the response for an HTTP 200 `application/json` response
 func (r HealthHealthGetResponse) GetJSON200() *HealthResponse {
 	return r.JSON200
+}
+
+// GetJSON422 returns the response for an HTTP 422 `application/json` response
+func (r HealthHealthGetResponse) GetJSON422() *HTTPValidationError {
+	return r.JSON422
 }
 
 // GetBody returns the raw response body bytes
@@ -1237,26 +1316,39 @@ func (r PatchRoutingV1RoutingPatchResponse) ContentType() string {
 
 // HealthHealthGetWithResponse Health
 //
-// Liveness check.
+// Liveness by default; provider reachability on request.
 //
-// Deliberately does NOT probe the model provider. Two reasons:
+// ── Why the default does not probe ──
 //
-//   - A health check that calls an LLM costs money on every poll and
-//     adds seconds of latency to something that should take
-//     milliseconds.
-//   - Provider reachability is a runtime concern handled by the retry
-//     and circuit-breaker logic in Phase 4, not a reason to mark this
-//     process unhealthy and have it restarted.
+// Provider reachability is a runtime concern handled by the retry and
+// circuit-breaker logic, not a reason to mark this process unhealthy
+// and have it restarted. A chain whose primary is down but whose
+// fallback answers is still serving users, and reporting it unhealthy
+// would pull a working service out of a load balancer.
 //
-// The provider fields are reported so operators can see at a glance
-// which backend is configured — useful when the answer to "why is dev
-// output worse than prod?" is "dev is on a 3B local model".
+// That half of the original reasoning stands. The other half said a
+// probe "calls an LLM and costs money on every poll" — which is not
+// what the probe does: `health_check()` calls `models.list()`, which
+// spends no tokens and needs no model pulled. The cost is a round trip,
+// not a bill.
+//
+// ── Why it is offered at all ──
+//
+// Because the gap it left was real and was observed: with Ollama
+// unreachable, `api-service` reported `"ai": {"status": "ok"}` while
+// every `/v1/complete` failed. Nothing anywhere said which provider
+// was unreachable, and `ProviderRegistry.health()` — whose docstring
+// says it is "for the health endpoint" — had no caller outside a test.
+//
+// Opt-in rather than always-on so routine liveness polls stay free of
+// a network round trip, and so this can never be the reason a pod is
+// restarted: `status` is unaffected by what the probe finds.
 //
 // Returns a wrapper object for the known response body format(s).
 //
 // Corresponds with GET /health (the `HealthHealthGet` operationId).
-func (c *ClientWithResponses) HealthHealthGetWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*HealthHealthGetResponse, error) {
-	rsp, err := c.HealthHealthGet(ctx, reqEditors...)
+func (c *ClientWithResponses) HealthHealthGetWithResponse(ctx context.Context, params *HealthHealthGetParams, reqEditors ...RequestEditorFn) (*HealthHealthGetResponse, error) {
+	rsp, err := c.HealthHealthGet(ctx, params, reqEditors...)
 	if err != nil {
 		return nil, err
 	}
@@ -1388,6 +1480,13 @@ func ParseHealthHealthGetResponse(rsp *http.Response) (*HealthHealthGetResponse,
 			return nil, err
 		}
 		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest HTTPValidationError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON422 = &dest
 
 	}
 

@@ -212,12 +212,27 @@ func newAI(baseURL, token string, timeout, completion time.Duration) (*AI, error
 // status page is where an operator can see, without reading a config
 // file, that production is on a paid tier and development is not.
 //
-// ai-service does NOT probe the provider itself, by design: a health
-// check that calls a language model costs money on every poll and adds
-// seconds to an endpoint that should take milliseconds. So this reports
-// configuration, not reachability, and says so on the page.
+// This aggregate check reports CONFIGURATION, not provider
+// reachability, and says so on the page.
+//
+// ai-service can now probe its providers — `GET /health?probe=true`,
+// added after an outage in which this line reported `"ai": ok` while
+// every completion returned 500 — but the probe is deliberately NOT
+// requested here. Two reasons, and both are about what this particular
+// caller is for:
+//
+//   - It runs on a poll. Probing adds a network round trip per provider
+//     to every tick of a status page.
+//   - A provider outage must not make this service look unhealthy. A
+//     chain whose primary is down and whose fallback is answering is
+//     still serving users, and this result feeds a page an operator
+//     reads as "is the platform up".
+//
+// An operator diagnosing "why are completions failing" asks ai-service
+// directly, with the probe, and gets it per provider.
 func (a *AI) Health(ctx context.Context) (string, error) {
-	resp, err := a.api.HealthHealthGetWithResponse(ctx)
+	// nil params: no probe. See above.
+	resp, err := a.api.HealthHealthGetWithResponse(ctx, nil)
 	if err != nil {
 		return "", fmt.Errorf("ai: %w", err)
 	}

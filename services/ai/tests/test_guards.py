@@ -587,3 +587,86 @@ class TestTheExampleFileIsComplete:
             assert match.group(1) in declared, (
                 f"{line.strip()!r} offers a setting that does not exist"
             )
+
+
+class TestTheGuardCannotSeeABaseURL:
+    """The hole ADR-011 accepted, written down as a test.
+
+    `production` + `openai-compatible` + a declared `paid` tier is the
+    only production-legal configuration since the Anthropic adapter was
+    removed. The guard reads the DECLARED tier and nothing else — so the
+    same configuration boots against a paid inference host, against
+    Groq's free tier, and against an Ollama on localhost.
+
+    An audit changed only `LLM_BASE_URL` and watched production boot
+    against a free endpoint four times.
+
+    That is deliberate: this adapter has no vendor identity to infer a
+    tier from, which ADR-011 states outright. What was missing is any
+    record of it in the suite, so the residual risk lived only in prose
+    and a reader of CLAUDE.md's "no real user data reaches a free model
+    tier" would not guess that the sole production-legal path is
+    unverifiable.
+
+    These tests PIN the limitation rather than fixing it. If someone
+    later teaches the guard to reject known-free base URLs, they will
+    fail — and that is the right moment to decide whether the new
+    behaviour is wanted, rather than discovering the gap again from
+    scratch.
+    """
+
+    @pytest.mark.parametrize(
+        "base_url",
+        [
+            "http://localhost:11434/v1",
+            "http://host.docker.internal:11434/v1",
+            "https://api.groq.com/openai/v1",
+            "https://openrouter.ai/api/v1",
+        ],
+    )
+    def test_a_declared_paid_tier_boots_against_a_free_endpoint(self, base_url: str) -> None:
+        """Documents the gap. Not an endorsement of it."""
+        assert_provider_allowed("openai-compatible", "paid", "production")
+
+        # And the URL genuinely is not consulted: the guard's signature
+        # has nowhere to put one.
+        import inspect
+
+        params = inspect.signature(assert_provider_allowed).parameters
+        assert "base_url" not in params, (
+            "the guard now takes a base URL — this test documents the era when it "
+            "could not, and should be replaced with one asserting the new behaviour"
+        )
+        assert base_url  # named in the parametrisation so failures say which
+
+    def test_the_declaration_is_the_only_signal(self) -> None:
+        """The other half: an undeclared tier is still refused.
+
+        Without this, the class above would read as "the guard does
+        nothing in production", which is false — it stops every
+        configuration that does not claim to be paid.
+        """
+        with pytest.raises(UnsafeConfigurationError):
+            assert_provider_allowed("openai-compatible", "free-hosted", "production")
+        with pytest.raises(UnsafeConfigurationError):
+            assert_provider_allowed("openai-compatible", "local", "production")
+
+    def test_the_adapters_that_can_infer_a_tier_still_refuse(self) -> None:
+        """`google` and `mock` declare their own tiers, so they cannot be blessed.
+
+        Asserted through `assert_chain_providers_allowed`, which reads
+        `provider.tier` off the constructed object — the declaration in
+        settings is not consulted, which is the whole point of that
+        second guard.
+        """
+        with pytest.raises(UnsafeConfigurationError, match="google"):
+            assert_chain_providers_allowed(
+                [StubProvider("google", "free-hosted")],  # type: ignore[list-item]
+                "production",
+            )
+
+        with pytest.raises(UnsafeConfigurationError, match="mock"):
+            assert_chain_providers_allowed(
+                [StubProvider("mock", "local")],  # type: ignore[list-item]
+                "production",
+            )

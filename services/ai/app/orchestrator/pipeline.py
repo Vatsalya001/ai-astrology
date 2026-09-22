@@ -72,6 +72,7 @@ from app.safety import (
     SafetyVerdict,
     declines,
     detect_crisis,
+    detect_prompt_injection,
     load_crisis_response,
     posture_for,
     short_circuits,
@@ -408,6 +409,26 @@ class Orchestrator:
         # computed, paid for and recorded — and changed nothing about
         # the answer, so §7's table was a statement of intent. Reading
         # ACTION_FOR means a category added later cannot be half-wired.
+        # The offline injection pass, applied as an UPGRADE.
+        #
+        # Detection rested entirely on the model screener, so it did not
+        # work during a provider outage and — an audit's finding — no
+        # test ever handed an injection string to a real detector. Every
+        # one fed the screener a stubbed verdict, which asserts the
+        # category plumbing and nothing about detection.
+        #
+        # Only from NONE, never over a verdict the model already made: a
+        # message can be both a crisis and an injection attempt, and
+        # CRISIS must win. Upgrading downward would turn a safety
+        # short-circuit into steering text.
+        if verdict.category is SafetyCategory.NONE:
+            offline = detect_prompt_injection(req.message)
+            if offline.category is not SafetyCategory.NONE:
+                # The screener's `stats` are kept: that call was made and
+                # billed whatever it concluded, and dropping them would
+                # hide the cost of a screening that missed something.
+                verdict = offline.model_copy(update={"stats": verdict.stats})
+
         if short_circuits(verdict.category):
             return self._crisis_envelope(req, started, calls, trace_id=trace_id, usage=usage)
 
