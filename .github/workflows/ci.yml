@@ -345,11 +345,17 @@ jobs:
           echo "--- web ---";  tail -40 .run/web.log || true
           docker compose logs --tail=50
 
+      # BOTH paths. `playwright-report/` is the HTML report; the actual
+      # expected/actual/diff PNGs for a visual regression live under
+      # `test-results/`, and uploading only the former meant a snapshot
+      # failure arrived with nothing to look at.
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
           name: playwright-report
-          path: playwright-report/
+          path: |
+            playwright-report/
+            test-results/
           retention-days: 7
 
   env-drift:

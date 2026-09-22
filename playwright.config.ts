@@ -26,7 +26,18 @@ export default defineConfig({
   forbidOnly: !!process.env.CI,
 
   retries: process.env.CI ? 1 : 0,
-  reporter: process.env.CI ? 'github' : 'list',
+  // In CI, 'github' annotates the job summary but writes NO files — and
+  // the workflow's upload step points at playwright-report/, a directory
+  // that reporter never creates. So a visual-regression failure uploaded
+  // nothing, and the three images that would explain it (expected,
+  // actual, diff) were discarded with the runner.
+  //
+  // A 2% pixel difference on the tablet planets screen went unexplained
+  // for exactly this reason: it passes locally and fails in CI, and
+  // nobody could look at it.
+  reporter: process.env.CI
+    ? [['github'], ['html', { outputFolder: 'playwright-report', open: 'never' }]]
+    : 'list',
 
   use: {
     baseURL: process.env.WEB_URL ?? 'http://localhost:3000',
