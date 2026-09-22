@@ -28,7 +28,6 @@ import time
 from collections.abc import AsyncIterator
 from typing import Any
 
-import httpx
 from google import genai
 from google.genai import errors as genai_errors
 from google.genai import types as genai_types
@@ -44,7 +43,19 @@ from app.providers.base import (
     ProviderTier,
     Usage,
 )
-from app.providers.resilience import UnsafeToReplayError, is_retryable_status
+from app.providers.resilience import (
+    BEFORE_ANY_BYTE_WAS_SENT as _BEFORE_ANY_BYTE_WAS_SENT,
+)
+from app.providers.resilience import (
+    SENT_THEN_LOST as _SENT_THEN_LOST,
+)
+from app.providers.resilience import (
+    TIMEOUT_PHASES as _TIMEOUT_PHASES,
+)
+from app.providers.resilience import (
+    UnsafeToReplayError,
+    is_retryable_status,
+)
 
 # Every reason Google stops for something other than finishing. Grouped
 # by what the caller must DO, which is the only distinction that matters
@@ -88,8 +99,19 @@ def _classify(err: Exception, provider_id: str) -> ProviderError:
 
     # Connection failures surface as bare httpx/transport errors here —
     # the SDK does not wrap them.
-    if isinstance(err, httpx.TimeoutException):
-        if isinstance(err, httpx.ConnectTimeout | httpx.PoolTimeout):
+    #
+    # Matched by class NAME rather than by isinstance, for the reason
+    # written out at length in openai_compatible.py: this environment has
+    # two httpx distributions and `google.genai._api_client` imports BOTH
+    # `httpx` and `httpx2`. An isinstance check binds to whichever one
+    # this module happened to import, so a `httpx2.ReadTimeout` would
+    # miss the branch entirely and fall through to the plain-retryable
+    # case below — which is the expensive direction: a completion that
+    # may already have been generated and billed, sent again.
+    phase = type(err).__name__
+
+    if phase in _TIMEOUT_PHASES:
+        if phase in _BEFORE_ANY_BYTE_WAS_SENT:
             # No request left this process, so nothing was generated and
             # nothing was billed. Safe to send again.
             return ProviderError(
@@ -104,6 +126,15 @@ def _classify(err: Exception, provider_id: str) -> ProviderError:
         # billed did not happen.
         return UnsafeToReplayError(
             f"{provider_id} timed out after the request was sent",
+            provider_id=provider_id,
+        )
+
+    if phase in _SENT_THEN_LOST:
+        # The same mid-run death the OpenAI adapter classifies: the
+        # request was read in full and the connection then broke, so the
+        # answer is lost but the tokens may not be.
+        return UnsafeToReplayError(
+            f"{provider_id} lost the connection after the request was sent",
             provider_id=provider_id,
         )
 

@@ -18,7 +18,6 @@ import time
 from collections.abc import AsyncIterator
 from typing import Any
 
-import httpx
 import openai
 from openai import AsyncOpenAI
 
@@ -33,7 +32,13 @@ from app.providers.base import (
     ProviderTier,
     Usage,
 )
-from app.providers.resilience import UnsafeToReplayError, is_retryable_status
+from app.providers.resilience import (
+    BEFORE_ANY_BYTE_WAS_SENT as _BEFORE_ANY_BYTE_WAS_SENT,
+)
+from app.providers.resilience import (
+    UnsafeToReplayError,
+    is_retryable_status,
+)
 
 # ─── error classification ────────────────────────────────────────────
 #
@@ -61,7 +66,20 @@ def _timeout_reached_the_provider(err: Exception) -> bool:
     Unknown causes fail CLOSED, i.e. "it may have been billed". The
     expensive mistake here is assuming a call did not happen.
     """
-    return not isinstance(err.__cause__, httpx.ConnectTimeout | httpx.PoolTimeout)
+    return _reached_the_provider(err)
+
+
+def _reached_the_provider(err: Exception) -> bool:
+    """Did any byte of this request leave the process?
+
+    Fails CLOSED: a missing or unrecognised cause is treated as "it may
+    have been billed". The cost of that default is small —
+    `UnsafeToReplayError` is still `retryable=True`, so the chain falls
+    over to the next provider exactly as before, and the only thing it
+    forbids is sending the identical request back to the provider that
+    may have just taken our money.
+    """
+    return type(err.__cause__).__name__ not in _BEFORE_ANY_BYTE_WAS_SENT
 
 
 def _classify(err: openai.APIError, provider_id: str) -> ProviderError:
@@ -83,10 +101,29 @@ def _classify(err: openai.APIError, provider_id: str) -> ProviderError:
         )
 
     if isinstance(err, openai.APIConnectionError):
-        # The backend is not answering and never accepted the request.
-        # Nothing about it is wrong, so another provider is very likely
-        # to succeed — precisely the case fallback exists for. Ollama not
-        # running on a developer's laptop arrives here.
+        # "Never accepted the request" is what this branch used to
+        # ASSUME, and it is only true for half the connection errors.
+        #
+        # A provider killed MID-RUN — request received in full, then the
+        # connection reset — surfaces here too, and replaying it is the
+        # one thing UnsafeToReplayError exists to prevent. Measured
+        # against a server that read the whole body and then sent RST:
+        # with a retry budget of 3, the dying provider received the same
+        # completion THREE times.
+        #
+        # httpx names the phase, and the two chains are distinguishable:
+        #   never sent   ... -> httpx.ConnectError -> ConnectionRefusedError
+        #   sent, lost   ... -> httpx.ReadError    -> ConnectionResetError
+        if _reached_the_provider(err):
+            return UnsafeToReplayError(
+                f"{provider_id} lost the connection after the request was sent",
+                provider_id=provider_id,
+            )
+
+        # Nothing left the process, so nothing could have been generated
+        # or billed. Another provider is very likely to succeed —
+        # precisely the case fallback exists for. Ollama not running on a
+        # developer's laptop arrives here.
         return ProviderError(
             f"{provider_id} unreachable: {type(err).__name__}",
             provider_id=provider_id,

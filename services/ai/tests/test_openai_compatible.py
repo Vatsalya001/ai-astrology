@@ -12,9 +12,11 @@ which is where the version-skew bugs actually live.
 from __future__ import annotations
 
 import json
+import struct
 from typing import ClassVar
 
 import httpx
+import openai
 import pytest
 
 from app.providers import (
@@ -27,6 +29,7 @@ from app.providers import (
     RequestMetadata,
     SystemBlock,
 )
+from app.providers.openai_compatible import _classify
 from app.providers.resilience import UnsafeToReplayError
 
 MODELS = ModelMap(fast="llama3.2:3b", chat="qwen2.5:7b", deep="qwen2.5:7b")
@@ -726,4 +729,189 @@ class TestEveryShippedPromptSatisfiesTheRule:
         assert "json" in content.lower(), (
             f"{module} is sent with a json_schema, so an OpenAI-compatible backend "
             f"rejects the request unless the prompt mentions JSON. Add the word."
+        )
+
+
+class TestAConnectionLostMidRunIsNotReplayed:
+    """The completion the dying provider received three times.
+
+    `_classify` treated every non-timeout `APIConnectionError` as "the
+    backend never accepted the request", and said so in a comment. That
+    is true for a refused connection and false for a provider killed
+    mid-run: the request is read in full, then the connection resets,
+    and the bytes are gone whether or not tokens were generated.
+
+    Measured against a real socket before the fix — a server that reads
+    the whole request body and then sends RST, with a retry budget of 3:
+
+        [server] got a completion request (670 bytes) -> RST
+        [server] got a completion request (670 bytes) -> RST
+        [server] got a completion request (543 bytes) -> RST
+        COMPLETION REQUESTS THE DYING PROVIDER RECEIVED: 3
+
+    Three bills for one question, where `TestATimeoutIsNotAFreeRetry`
+    already establishes that one is too many.
+
+    These use a real TCP server rather than MockTransport, because the
+    thing under test is which httpx phase the failure lands in — and a
+    mock transport is precisely the layer that decides that. The autouse
+    socket guard in conftest.py allows loopback for this reason.
+    """
+
+    async def _server(self, *, read_the_request: bool) -> tuple[str, list[int]]:
+        """A server that dies, either before or after reading the request.
+
+        Returns its base URL and a list that accumulates the byte count
+        of every request it managed to read.
+        """
+        import asyncio
+        import socket as socket_module
+
+        received: list[int] = []
+
+        async def handle(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+            if read_the_request:
+                # Read until the body is in hand, so the kill is
+                # unambiguously AFTER the provider had the request.
+                try:
+                    data = await asyncio.wait_for(reader.read(65536), timeout=2)
+                    received.append(len(data))
+                except (TimeoutError, ConnectionError):
+                    pass
+
+            # RST rather than a clean FIN: SO_LINGER with a zero timeout
+            # makes close() send a reset, which is what a killed process
+            # does and what produces httpx.ReadError rather than a tidy
+            # empty response.
+            sock = writer.get_extra_info("socket")
+            if sock is not None:
+                sock.setsockopt(
+                    socket_module.SOL_SOCKET,
+                    socket_module.SO_LINGER,
+                    struct.pack("ii", 1, 0),
+                )
+            writer.close()
+
+        server = await asyncio.start_server(handle, "127.0.0.1", 0)
+        port = server.sockets[0].getsockname()[1]
+        self._servers.append(server)
+        return f"http://127.0.0.1:{port}/v1", received
+
+    @pytest.fixture(autouse=True)
+    def _track_servers(self):  # type: ignore[no-untyped-def]
+        self._servers: list = []
+        yield
+        for server in self._servers:
+            server.close()
+
+    def _real(self, base_url: str, **kwargs: object) -> OpenAICompatibleProvider:
+        """The adapter with its own SDK client — no transport swapped in."""
+        return OpenAICompatibleProvider(
+            base_url=base_url,
+            api_key="",
+            tier="local",
+            models=MODELS,
+            provider_id="ollama",
+            **kwargs,  # type: ignore[arg-type]
+        )
+
+    async def test_a_provider_that_dies_after_reading_is_unsafe_to_replay(self) -> None:
+        base_url, received = await self._server(read_the_request=True)
+
+        with pytest.raises(UnsafeToReplayError):
+            await self._real(base_url).complete(a_request())
+
+        # The setup has to have actually happened: if the server read
+        # nothing, this is the never-sent case and proves the opposite.
+        assert received, "the server never read the request, so this is not a mid-run kill"
+
+    async def test_a_refused_connection_is_still_an_ordinary_retryable_failure(self) -> None:
+        """The control, and the case that must not regress.
+
+        A developer's laptop with Ollama stopped lands here, and it has
+        to stay retryable — otherwise the fallback chain stops working
+        for the single most common local failure.
+        """
+        import socket as socket_module
+
+        with socket_module.socket() as probe:
+            probe.bind(("127.0.0.1", 0))
+            dead_port = probe.getsockname()[1]
+
+        with pytest.raises(ProviderError) as caught:
+            await self._real(f"http://127.0.0.1:{dead_port}/v1").complete(a_request())
+
+        assert not isinstance(caught.value, UnsafeToReplayError), (
+            "a refused connection was treated as possibly-billed; nothing was sent"
+        )
+        assert caught.value.retryable is True
+
+
+class TestThePhaseCheckSeesTheSdksOwnExceptions:
+    """Two httpx distributions are installed, and they are not the same.
+
+    `httpx` 0.28.1 is what the adapter imports; `httpx2` is what the
+    OpenAI SDK actually raises from. They are separate packages:
+
+        httpx.ConnectError is httpx2.ConnectError   ->  False
+
+    So `isinstance(err.__cause__, httpx.ConnectTimeout | httpx.PoolTimeout)`
+    never matched a real failure, every timeout was classified "may have
+    been billed", and the connect-timeout-is-retryable branch was dead
+    code that a green test claimed to cover.
+
+    The test claimed it because it built the cause by hand from OUR
+    httpx — testing a code path that cannot run in production. Matching
+    by class name instead makes the check indifferent to which
+    distribution the SDK vendors next.
+    """
+
+    def _sdk_httpx(self):  # type: ignore[no-untyped-def]
+        """The httpx module the installed SDK actually uses."""
+        import openai._base_client as base
+
+        for value in vars(base).values():
+            if getattr(value, "__name__", "") in {"httpx", "httpx2"}:
+                return value
+        pytest.skip("could not determine which httpx the SDK uses")
+
+    def test_the_two_distributions_really_are_distinct(self) -> None:
+        """If this ever fails, the bug below is gone and so is its risk."""
+        sdk_httpx = self._sdk_httpx()
+        if sdk_httpx is httpx:
+            pytest.skip("only one httpx installed; nothing to confuse")
+        assert sdk_httpx.ConnectError is not httpx.ConnectError
+
+    @pytest.mark.parametrize("phase", ["ConnectTimeout", "PoolTimeout"])
+    def test_a_pre_send_timeout_from_the_sdks_httpx_is_retryable(self, phase: str) -> None:
+        """The branch that was dead.
+
+        Built from the SDK's own module, so it fails if the check ever
+        goes back to comparing against the wrong package's classes.
+        """
+        sdk_httpx = self._sdk_httpx()
+        err = openai.APITimeoutError(request=sdk_httpx.Request("POST", "http://x/v1"))
+        err.__cause__ = getattr(sdk_httpx, phase)("boom")
+
+        classified = _classify(err, "ollama")
+
+        assert not isinstance(classified, UnsafeToReplayError), (
+            f"a {phase} never sent a byte, so nothing could have been billed"
+        )
+        assert classified.retryable is True
+
+    def test_a_read_timeout_from_the_sdks_httpx_is_unsafe_to_replay(self) -> None:
+        """The control: the other half must still classify as billable."""
+        sdk_httpx = self._sdk_httpx()
+        err = openai.APITimeoutError(request=sdk_httpx.Request("POST", "http://x/v1"))
+        err.__cause__ = sdk_httpx.ReadTimeout("boom")
+
+        assert isinstance(_classify(err, "ollama"), UnsafeToReplayError)
+
+    def test_an_unknown_cause_still_fails_closed(self) -> None:
+        err = openai.APITimeoutError(request=self._sdk_httpx().Request("POST", "http://x/v1"))
+        err.__cause__ = RuntimeError("something nobody mapped")
+
+        assert isinstance(_classify(err, "ollama"), UnsafeToReplayError), (
+            "an unrecognised cause must be assumed billable"
         )

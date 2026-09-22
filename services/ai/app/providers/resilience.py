@@ -70,6 +70,52 @@ _RETRYABLE_CLIENT_STATUS = frozenset(
 )
 
 
+# ─── which transport phase a failure happened in ─────────────────────
+#
+# Matched by class NAME, never by isinstance, and shared by both adapters
+# so they cannot drift apart on a question this expensive.
+#
+# The reason is concrete: this environment has TWO httpx distributions
+# installed. `httpx` 0.28.1 is what the adapters import; the OpenAI SDK
+# raises from `httpx2`, and `google.genai._api_client` imports both. So
+#
+#     httpx.ConnectError is httpx2.ConnectError   ->  False
+#
+# and an isinstance check binds to whichever package the checking module
+# happened to import. In the OpenAI adapter that made the
+# connect-timeout-is-retryable branch dead code — every timeout was
+# classified "may have been billed" — while its test passed because the
+# test built the cause by hand from the other httpx.
+#
+# Names are stable across both distributions, and a new vendored copy
+# changes nothing.
+
+BEFORE_ANY_BYTE_WAS_SENT = frozenset(
+    {
+        "ConnectError",  # refused, DNS failure, TLS handshake
+        "ConnectTimeout",
+        "PoolTimeout",
+    }
+)
+"""Nothing left the process, so nothing could have been generated or billed."""
+
+SENT_THEN_LOST = frozenset(
+    {
+        "ReadError",  # the mid-run kill: request read in full, then RST
+        "ReadTimeout",
+        "WriteError",
+        "WriteTimeout",
+        "RemoteProtocolError",
+    }
+)
+"""The bytes went out and only the answer was lost. May have been billed."""
+
+TIMEOUT_PHASES = frozenset(
+    {"ConnectTimeout", "PoolTimeout", "ReadTimeout", "WriteTimeout", "TimeoutException"}
+)
+"""Every phase name that is a timeout rather than a connection failure."""
+
+
 def is_retryable_status(status: int) -> bool:
     """Should the chain try again, here or at the next provider?
 
