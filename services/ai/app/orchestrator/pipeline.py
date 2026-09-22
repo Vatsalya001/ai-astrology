@@ -474,7 +474,29 @@ class Orchestrator:
 
             calls += 1
             usage = self._accumulate(usage, self._priced(response))
-            violations = validator.validate(response.text, chart.facts)
+
+            # A validator built from the CORRECTED prompt, not the first
+            # one.
+            #
+            # The retry is sent with `corrected`, whose leakable text
+            # carries the corrective instruction — and that instruction
+            # quotes the violation: "You stated a placement the chart
+            # does not support: saturn's house is 4, not 10."
+            # Re-checking with the original `validator` scans for
+            # shingles of a prompt the model was never shown, so when a
+            # model does the obvious thing and parrots the instruction
+            # back, the leak check finds nothing and the user is handed
+            # our own internal correction text.
+            #
+            # Reproduced before fixing: the stale validator returns `[]`
+            # on the exact correction string; one built from the
+            # corrected prompt returns `prompt_leak` and blocks.
+            #
+            # §14 asks for leak validation on ALL output. The
+            # regenerated answer is output.
+            violations = OutputValidator(system_prompt=corrected.leakable).validate(
+                response.text, chart.facts
+            )
 
         blocked = OutputValidator.blocks(violations)
 

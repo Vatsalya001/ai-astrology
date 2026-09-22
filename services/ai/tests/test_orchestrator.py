@@ -345,6 +345,85 @@ class TestValidationRetry:
         retry_prompt = "\n".join(b.content for b in generator.requests[1].system)
         assert "saturn's house is 4, not 10" in retry_prompt
 
+    async def test_a_regenerated_answer_that_parrots_the_correction_is_blocked(
+        self, tmp_path: Path
+    ) -> None:
+        """The retry's output was validated against the FIRST prompt.
+
+        `validator` is built once, from `builder.leakable`. The retry is
+        sent with `corrected`, whose leakable text carries the corrective
+        instruction — and that instruction quotes the user's chart back:
+        "saturn's house is 4, not 10". Re-checking the regenerated answer
+        with the original validator scans for shingles of a prompt the
+        model was never shown, so a model that does the obvious thing and
+        repeats its instruction sailed through: flags `[]`, blocked
+        `False`, and the user received our internal correction text as
+        their reading.
+
+        Proven before the fix, at the validator level: the stale
+        validator returns `[]` on the exact correction string, and one
+        built from the corrected prompt returns `prompt_leak`.
+
+        §14 asks for leak validation on ALL output, and the regenerated
+        answer is output.
+        """
+
+        class ParrotsTheCorrection(MockProvider):
+            """First a fabricated placement, then the instruction itself."""
+
+            def __init__(self, path: Path) -> None:
+                super().__init__(
+                    path,
+                    allow_unknown=True,
+                    default_text="Saturn is in your 10th house.",
+                )
+                self.calls = 0
+
+            async def complete(self, req):  # type: ignore[no-untyped-def]
+                self.calls += 1
+                response = await super().complete(req)
+                if self.calls == 1:
+                    # Wrong placement, so the validator blocks and the
+                    # single corrective retry fires.
+                    return response
+                # The retry. Echo the correction straight back, which is
+                # exactly what a small model asked to fix its answer does.
+                echoed = "\n".join(b.content for b in req.system if "not 10" in b.content)
+                assert echoed, "the correction never reached the retry prompt"
+                return response.model_copy(update={"text": echoed})
+
+        generator = ParrotsTheCorrection(tmp_path / "gen")
+        classifier_provider = MockProvider(
+            tmp_path / "cls",
+            allow_unknown=True,
+            default_text=json.dumps({"primary": "kundli", "confidence": 0.9}),
+        )
+        screener_provider = MockProvider(
+            tmp_path / "saf",
+            allow_unknown=True,
+            default_text=json.dumps({"category": "none", "confidence": 0.9}),
+        )
+        orchestrator = Orchestrator(
+            provider=generator,
+            classifier=IntentClassifier(classifier_provider),
+            screener=SafetyClassifier(screener_provider),
+            chart_context=StubChart(),
+        )
+
+        envelope = await orchestrator.complete(a_request())
+
+        # The setup has to have actually happened, or the assertions
+        # below hold for the boring reason that no retry occurred.
+        assert generator.calls == 2, "the corrective retry did not fire"
+
+        assert envelope.result.blocked is True, (
+            "the regenerated answer repeated the system prompt and was served anyway"
+        )
+        assert "not 10" not in envelope.result.text, (
+            "the corrective instruction reached the user as their reading"
+        )
+        assert envelope.result.text == GRACEFUL_FALLBACK
+
     async def test_the_correction_is_after_the_cache_breakpoint(self, tmp_path: Path) -> None:
         """Otherwise it is sent to every subsequent user.
 

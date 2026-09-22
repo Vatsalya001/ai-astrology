@@ -72,12 +72,29 @@ def _secret_values() -> tuple[str, ...]:
     So the last line of defence is a value scan. It costs one string
     walk per reported event, which only happens when something already
     went wrong.
+
+    ── Every configured key, not just the primary ──
+
+    `llm_fallback_api_key` was missing here, and it is the one that
+    matters most: a fallback exists precisely so that it is called when
+    the primary is failing, which is exactly when Sentry is collecting
+    events. A vendor 401 from the fallback carried its key verbatim
+    into the report while the primary's was redacted in the same
+    string.
+
+    Any new credential added to Settings belongs in this tuple.
+    `test_observability.py` parametrises over all of them so the next
+    one is caught by a failing test rather than by an audit.
     """
     from app.settings import settings
 
     return tuple(
         value
-        for value in (settings.llm_api_key, settings.internal_token)
+        for value in (
+            settings.llm_api_key,
+            settings.llm_fallback_api_key,
+            settings.internal_token,
+        )
         if value and len(value) >= _MIN_REDACTABLE_SECRET
     )
 

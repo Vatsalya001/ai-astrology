@@ -248,6 +248,54 @@ class TestTheSentryScrubber:
         assert self.KEY not in json.dumps(scrubbed.get("extra"))
         assert self.KEY not in json.dumps(scrubbed.get("exception"))
 
+    @pytest.mark.parametrize(
+        "setting_name",
+        ["llm_api_key", "llm_fallback_api_key", "internal_token"],
+    )
+    def test_every_configured_credential_is_scrubbed(
+        self, monkeypatch: pytest.MonkeyPatch, setting_name: str
+    ) -> None:
+        """Parametrised over ALL of them, because one was missing.
+
+        `llm_fallback_api_key` was absent from `_secret_values()`, and
+        it is the credential this matters most for: a fallback exists in
+        order to be called when the primary is failing, which is exactly
+        when Sentry is collecting events. A vendor 401 from the fallback
+        carried its key verbatim into the report — in the same string
+        where the primary's had just been redacted, which is what makes
+        the old tests' green so misleading.
+
+        Parametrised rather than written out three times so that adding
+        a credential to Settings without adding it here is a failing
+        test rather than something an audit has to find.
+        """
+        from app import telemetry
+        from app.settings import settings
+
+        secret = "zz-" + setting_name + "-" + "Q" * 32
+
+        # Every credential set to something, so the test cannot pass
+        # merely because the scrubber found SOME secret in the string.
+        monkeypatch.setattr(settings, "llm_api_key", "sk-primary-" + "A" * 32)
+        monkeypatch.setattr(settings, "llm_fallback_api_key", "AIza-fallback-" + "B" * 32)
+        monkeypatch.setattr(settings, "internal_token", "internal-" + "C" * 32)
+        monkeypatch.setattr(settings, setting_name, secret)
+
+        event = {
+            "exception": {
+                "values": [{"type": "ClientError", "value": f"401 key not valid: {secret}"}]
+            },
+            "breadcrumbs": {"values": [{"message": f"calling vendor with {secret}"}]},
+            "extra": {"provider_config": {"key": secret}},
+        }
+
+        scrubbed = telemetry._scrub_event(event, {})
+
+        assert scrubbed is not None
+        assert secret not in json.dumps(scrubbed), (
+            f"{setting_name} survived into the Sentry payload"
+        )
+
     def test_the_internal_token_is_scrubbed_too(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from app import telemetry
         from app.settings import settings
