@@ -3678,3 +3678,73 @@ a bad argument rather than a missing subcommand, and cost real time. The standal
 
 `scripts/ayana` now resolves `docker compose` or `docker-compose` once, at the top,
 instead of assuming at seven call sites.
+
+# Two Phase 3 carry-forwards closed
+
+Both were listed as outstanding UI/test gaps. Neither was a numbered spec task, which is
+part of why they survived a phase gate.
+
+## PDF export and share links had no e2e test
+
+§17 asks for both. The handlers had unit and integration coverage; nothing drove either
+surface end to end. `tests/e2e/pdf-and-shares.spec.ts` now does — nine tests, three of
+them the security properties the spec names (§17 cross-user PDF refusal, §11 no birth
+details in a share link, §11.6 PDF rate limiting).
+
+Every guard was deliberately broken and the suite re-run, because green proves nothing
+on its own:
+
+| Mutation | Result |
+|---|---|
+| `RequireProfileOwnership` — drop the `return` after `Owns` fails | cross-user PDF test failed (got 201) |
+| `RenderLimit.Max` 10 → 100000 | rate-limit test failed |
+| `RevokeChartShare` — `user_id = $2` replaced with a tautology | cross-user revoke test failed |
+| `SharedView` — add a `birth_date` field | payload test failed with `+ birth_date` |
+
+The revoke mutation needed its own round: with ownership broken, the *list* assertion
+fired first and masked it, so revoke scoping had not actually been proven by the first
+pass. One test passed under the ownership mutation and should have — polling another
+user's render job is guarded by the status key being composed from the authenticated
+user, not by the middleware, and its surviving is the evidence it tests what it claims.
+
+**The PDF pipeline works end to end**: `done`, signed MinIO URL, 112 KB, `%PDF-1.4`.
+The test asserts that rather than "either terminal state", since CI sets `CHROME_PATH`
+from Playwright's chromium before starting the worker.
+
+## A share link could be created but never seen or turned off
+
+`listShares` and `revokeShare` had zero call sites. The app could mint a bearer
+credential to a birth chart — thirty days, no account needed — and offered no way to
+list or revoke one.
+
+Not a missing convenience: the share route sends `no-store` on a public URL precisely so
+a CDN cannot keep serving a chart after the owner turns the link off, and `View` folds
+expired/revoked/never-existed into one 404. Both designs assume the owner *can* turn it
+off.
+
+`/settings/shares` lists every link across every profile with status, expiry and open
+count. `Promise.all`, not `allSettled` — this screen answers "who can still see my
+charts", and rendering the profiles that loaded while dropping the one that failed is a
+confident answer missing rows, in the reassuring direction.
+
+`ShareLink` was missing `created_at`, which the server had always sent. It went
+unnoticed while nothing listed shares.
+
+# A security assertion that was really a coin flip
+
+CI failed with *"the shared payload leaks 14:35"*. The payload was fine.
+
+A chart's dasha tree carries **519 distinct times-of-day** and **731 distinct dates**
+spanning 1988–2108. Grepping the payload for the birth time `14:35` collides with some
+period boundary about a third of the time; `08-17` is present in the dumped payload as a
+dasha date. The test passed locally by luck and failed in CI by luck.
+
+The tempting fix — loosen the strings — leaves a security assertion that asserts nothing.
+Both halves are now structural: `SharedView` must have exactly its six fields and no
+birth-identifying key anywhere in the nested JSON, and the token is checked as a shape
+plus the decisive property that two links for the *same* profile share no run longer than
+eight characters.
+
+Worth keeping in mind for the `fact_index` work in Phase 5: substring checks against a
+payload full of generated numbers are close to useless, and they fail in the direction
+that looks like a passing test.
