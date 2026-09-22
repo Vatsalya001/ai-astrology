@@ -512,7 +512,6 @@ DEFAULT_PERSONA=vedic_guide
 
 SAFETY_VALIDATION_ENABLED=true
 SAFETY_BLOCK_ON_FABRICATED_FACT=true
-CRISIS_HELPLINE_REGION=IN
 ```
 
 **Production `.env` looks like this instead** — and nothing else changes:

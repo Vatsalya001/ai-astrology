@@ -315,7 +315,6 @@ class TestDocumentedEnvironment:
 
         assert loaded.llm_provider == "openai-compatible"
         assert loaded.llm_fallback_provider == ""
-        assert loaded.crisis_helpline_region == "IN"
         assert loaded.llm_circuit_breaker_threshold == 5
 
     def test_the_deferred_variables_are_still_undeclared(self) -> None:
@@ -348,7 +347,6 @@ class TestDocumentedEnvironment:
             # Narrowed on purpose: this phase honours exactly one value,
             # and accepting the others would be a setting that does
             # nothing. See the comments in app/settings.py.
-            ("crisis_helpline_region", "US"),
             ("default_persona", "career_guide"),
             # Malformed prompt versions reach the registry as filenames.
             ("prompt_version_chat", "latest"),
@@ -417,3 +415,109 @@ class TestTheTimeoutFloor:
             "the route passes the raw setting, so a paid provider still gets 60s"
         )
         assert source.count("settings.effective_llm_timeout_seconds") >= 1
+
+
+class TestTheExampleFileIsComplete:
+    """`.env.example` is what an operator copies. It must be current.
+
+    The existing contract runs ONE direction — every documented variable
+    is accepted. Nothing asserted the reverse, so a setting could ship
+    invisible, and two did:
+
+    - `PROMPT_VERSION_SAFETY` appeared in no example file at all, so the
+      only way to discover it was to read `app/settings.py`.
+    - `PROMPT_VERSION_INTENT` sat at `v2` long after `v4` shipped.
+      Copying the documented example downgraded the classifier from
+      **90.0% to 67.0%** on the labelled set, because v2 hands the model
+      a literal `"confidence": 0.0` to copy — and it copies it.
+
+    The second is why this file matters more than the spec: the spec is
+    a historical planning document and is allowed to describe the past.
+    `.env.example` is an instruction, and a stale instruction is a wrong
+    one.
+    """
+
+    EXAMPLE = Path(__file__).resolve().parent.parent / ".env.example"
+
+    def _example_values(self) -> dict[str, str]:
+        """Only ACTIVE assignments — what you get if you copy the file."""
+        found: dict[str, str] = {}
+        for line in self.EXAMPLE.read_text().splitlines():
+            match = re.match(r"^([A-Z][A-Z0-9_]*)=(.*)$", line.strip())
+            if match:
+                found[match.group(1)] = match.group(2).split("#")[0].strip()
+        return found
+
+    def _example_names(self) -> set[str]:
+        """Every name an operator can SEE, commented ones included.
+
+        `LLM_MODEL_FAST` and its siblings ship commented out on purpose —
+        pinning them is a trap that sends an Ollama tag to a hosted
+        vendor. They are still visible, still documented, and still
+        configurable, so a completeness check must count them.
+        """
+        names = set(self._example_values())
+        for line in self.EXAMPLE.read_text().splitlines():
+            match = re.match(r"^#\s*([A-Z][A-Z0-9_]*[A-Z0-9])=", line.strip())
+            # An env var here always has an underscore; requiring one
+            # keeps ordinary prose that happens to contain "WORD=" out.
+            if match and "_" in match.group(1):
+                names.add(match.group(1))
+        return names
+
+    def test_the_parse_finds_something(self) -> None:
+        # Or every assertion below is vacuous — the same trap the §11
+        # block parser guards against.
+        assert len(self._example_values()) >= 15
+
+    def test_every_setting_appears_in_the_example(self) -> None:
+        documented = self._example_names()
+        declared = {name.upper() for name in Settings.model_fields}
+
+        missing = sorted(declared - documented)
+
+        assert missing == [], (
+            f"these settings exist but appear in no example: {missing}. An operator "
+            f"cannot configure what they cannot see, and the only way to find them is "
+            f"to read app/settings.py."
+        )
+
+    def test_the_example_pins_the_versions_that_ship(self) -> None:
+        """The specific failure that motivated this class.
+
+        A version drifting behind is not cosmetic: v2 scores 67.0% where
+        v4 scores 90.0%, so copying a stale example silently costs 23
+        points of accuracy on the gate's own metric.
+        """
+        values = self._example_values()
+        defaults = Settings(_env_file=None)  # type: ignore[call-arg]
+
+        for var, field in (
+            ("PROMPT_VERSION_CHAT", "prompt_version_chat"),
+            ("PROMPT_VERSION_INTENT", "prompt_version_intent"),
+            ("PROMPT_VERSION_SAFETY", "prompt_version_safety"),
+        ):
+            assert values[var] == getattr(defaults, field), (
+                f"{var} is {values[var]} in .env.example but the service ships "
+                f"{getattr(defaults, field)}. Copying the example changes behaviour."
+            )
+
+    def test_no_example_line_names_a_removed_setting(self) -> None:
+        """A commented-out variable is still an instruction.
+
+        `CRISIS_HELPLINE_REGION` was removed and its explanatory comment
+        stayed, describing a knob that no longer exists. Prose about a
+        dead setting is fine — an assignable line for one is not.
+        """
+        declared = {name.upper() for name in Settings.model_fields}
+
+        for line in self.EXAMPLE.read_text().splitlines():
+            match = re.match(r"^#\s*([A-Z][A-Z0-9_]*[A-Z0-9])=", line.strip())
+            # An env var always has an underscore. Without this, ordinary
+            # prose trips it — "# INTENT=v2 long after v4 shipped" in the
+            # comment above PROMPT_VERSION_INTENT did exactly that.
+            if not match or "_" not in match.group(1):
+                continue
+            assert match.group(1) in declared, (
+                f"{line.strip()!r} offers a setting that does not exist"
+            )

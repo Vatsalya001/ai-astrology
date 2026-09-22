@@ -211,13 +211,27 @@ class Settings(BaseSettings):
     safety_validation_enabled: bool = True
     safety_block_on_fabricated_fact: bool = True
 
-    # India only, and narrowed on purpose. The helpline numbers in
-    # app/safety/responses/ are the riskiest lines in this repository —
-    # a wrong number costs somebody in crisis the one attempt they were
-    # willing to make — so a region whose numbers no human has dialled
-    # must fail at startup rather than serve Indian numbers to someone
-    # who cannot call them.
-    crisis_helpline_region: Literal["IN"] = "IN"
+    # CRISIS_HELPLINE_REGION was here, `Literal["IN"]`, and it is gone.
+    #
+    # It guarded a real risk: app/safety/responses/ held Indian helpline
+    # NUMBERS, and serving those to someone who cannot dial them is worse
+    # than serving nothing — so a region nobody had verified refused to
+    # boot.
+    #
+    # The numbers were then removed (no human had dialled them, and a
+    # test proving a number is PRESENT proves nothing about whether it
+    # ANSWERS). The response now points at findahelpline.com, which
+    # resolves by country itself and says "your country, in your
+    # language" and "your local emergency number".
+    #
+    # So the setting stopped selecting anything while still refusing to
+    # boot outside India — a knob that lies, and one that blocked a
+    # deployment it would have served correctly. Its own rejection test
+    # said the quiet part: "accepting the others would be a setting that
+    # does nothing."
+    #
+    # Phase 5 may add region-specific responses. It can add the setting
+    # back, at the point where it would mean something.
 
     # ─── Embeddings ───────────────────────────────────────────────
     embedding_provider: str = "ollama"

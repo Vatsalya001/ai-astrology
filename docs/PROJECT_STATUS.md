@@ -3107,3 +3107,70 @@ ordinary edit does not trip it.
 `memtest86+` remains unrun, and every number in this phase was measured on this machine.
 This change does not make the hardware sound — it makes the next failure **loud** rather
 than a mystery three days later.
+
+---
+
+# §2–§11 audited: the documented .env downgraded the classifier
+
+Fourth ask. I said I'd audit the design sections clause by clause if asked again, so I
+did. §4's routing table matches the code exactly (all 10 jobs, same tiers). §8's schema
+has no missing column — three extras, all justified. §11 already has a strong test that
+reads the spec at test time and guards against a silently-empty parse.
+
+Two real defects, both in §7/§11 territory.
+
+## `.env.example` shipped a prompt version that scores 23 points lower
+
+| | |
+|---|---|
+| `services/ai/.env.example` | `PROMPT_VERSION_INTENT=v2` |
+| spec §11 | `v1` |
+| what actually ships | **`v4`** |
+
+Copying the documented example downgraded the intent classifier from **90.0% to 67.0%**
+on the labelled set — v2 is the version that hands the model a literal
+`"confidence": 0.0` to copy, and it copies it. The spec's `v1` is the version that
+scored **0%**, because it never named its output fields.
+
+`PROMPT_VERSION_SAFETY` appeared in **no example file at all**. The only way to discover
+it was to read `app/settings.py`.
+
+**Why nothing caught it:** the env contract was tested in one direction only — *every
+documented variable is accepted*. Nothing asserted the reverse, so a setting could ship
+invisible and a documented value could drift from the shipped one indefinitely.
+
+Three guards now, each break-tested:
+
+- every declared setting appears in the example (commented-out ones count — `LLM_MODEL_*`
+  ship commented on purpose, and they are still visible and configurable)
+- the example's prompt versions equal the shipped defaults
+- no line, including a commented one, offers a setting that no longer exists
+
+The full measured history is now in the file itself, so the next person to touch a
+version sees what each one cost:
+
+```
+v1  0%      never named its output fields
+v2  67.0%   named them, but handed the model "confidence": 0.0 to copy
+v3  59.5%   all placeholders; the model answered the entity DESCRIPTIONS
+            with `null` and 66 of 118 failed to parse
+v4  90.0%   two worked examples with DIFFERENT confidences
+```
+
+## `CRISIS_HELPLINE_REGION` had become a knob that lies
+
+Read by **nothing** in `app/` — only tests. Still `Literal["IN"]`, so the service
+**refused to boot outside India** for a setting that selected nothing.
+
+Its own comment gave the rationale: *"a region whose numbers no human has dialled must
+fail at startup rather than serve Indian numbers to someone who cannot call them."* Void
+— the numbers were removed, and the response now points at findahelpline.com, which
+resolves by country and says *"your country, in your language"* and *"your local
+emergency number"*.
+
+So it blocked a deployment it would have served correctly. Its own rejection test said
+the quiet part: *"accepting the others would be a setting that does nothing."* Removed
+from settings, spec §11, the example and the tests. Phase 5 can add it back at the point
+where it would mean something.
+
+**877 tests, `task verify` green.**
