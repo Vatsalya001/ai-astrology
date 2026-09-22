@@ -136,8 +136,20 @@ Owed to the Phase 4 gate and **not closeable by the suite**:
 - **§11.5 Chrome sandbox / network** — `--no-sandbox` is a deployment constraint; the
   network-restriction half is implementable and not yet done.
 - **§11.8 profile-label injection** — ✅ closed by PR 30.
-- **CI has never executed a job.** Still the largest caveat on everything: every check in
-  this repo is local. Ten PRs have now been merged over checks that never started.
+- ~~**CI has never executed a job.**~~ **RESOLVED 2026-09-22.** It was an exhausted
+  Actions quota, proven rather than guessed: jobs ran 07:31:53 → 07:31:56 with
+  `"steps": []` — three seconds, zero steps, all eleven. The repo is public now, so
+  Actions minutes are free, and **all 11 jobs pass**. Getting there took three real
+  fixes, none of them cosmetic: the worker died because `.env.example` names a Chrome
+  that does not exist on a runner; two tests searched a gazetteer for a city the CI
+  fixture does not contain; and a visual snapshot was reporting a genuine cross-OS
+  layout defect (the ℞ mark is in no bundled font, so its width — and the table column
+  behind it — changed with the reader's operating system).
+
+  This was described here as "the largest caveat on everything", and it was right: the
+  first hour CI could run, it caught `ai_request_logs` missing from the data-subject
+  export, which `task verify` structurally cannot see because it does not run the
+  integration suite.
 - `< 180 KB` first-load JS — unmet by decision, ADR-010.
 - No e2e drives PDF or share links; no share-management screen; no ADR for hand-rolled
   auth; `memtest86+` unrun.
