@@ -4,10 +4,25 @@ The determinism principle says a language model must never compute a
 planetary position, a house, a nakshatra or a dasha. Prose in a spec
 does not enforce that. This test does.
 
-Three independent barriers exist in total:
-  1. This test (CI fails if a model SDK appears)
-  2. No model API key in the service's environment
-  3. Container egress deny-list in deployment
+TWO independent barriers exist. This docstring said three until
+2026-09-23, and the third did not exist:
+
+  1. This test — CI fails if a model SDK, an HTTP client or a dynamic
+     import appears in app/.
+  2. No model API key in the service's environment. Verified against the
+     running container, not just the compose file: INTERNAL_TOKEN, ENV,
+     LOG_LEVEL and PATH, and no LLM/OPENAI/GROQ/GOOGLE/ANTHROPIC key of
+     any kind. docker-compose.yml says why, in a comment.
+  3. ~~Container egress deny-list in deployment.~~ **There is none.**
+     No `networks:` block, no `internal: true`, no network policy, no
+     firewall config anywhere in the repo — the container runs on the
+     default bridge with unrestricted outbound.
+
+That matters more than a documentation slip, because this file is where
+a future maintainer comes to find out how much slack barrier 1 has. The
+honest answer is: none. It is the only barrier that stops code, and for
+a while it was not stopping much — `urllib.request`, `socket`,
+`subprocess` and `importlib.import_module("openai")` all walked past it.
 
 If a future change makes this test fail, the correct response is almost
 never to relax the test — it is to move that work into ai-service.
@@ -236,9 +251,7 @@ def test_telemetry_is_the_only_egress() -> None:
     # Everything egress-capable: the banned clients, the model SDKs, and
     # the permitted paths. The union is the point — a filter that only
     # admits permitted modules can only ever find permitted modules.
-    known_egress = (
-        BANNED_NETWORK_PREFIXES + BANNED_MODULE_PREFIXES + PERMITTED_EGRESS_PREFIXES
-    )
+    known_egress = BANNED_NETWORK_PREFIXES + BANNED_MODULE_PREFIXES + PERMITTED_EGRESS_PREFIXES
 
     found: dict[str, str] = {}
     for path in _app_files():
@@ -267,9 +280,7 @@ def test_the_egress_test_can_actually_fail() -> None:
     filter and an assertion sharing one list — reads as perfectly
     sensible code and passes review again.
     """
-    known_egress = (
-        BANNED_NETWORK_PREFIXES + BANNED_MODULE_PREFIXES + PERMITTED_EGRESS_PREFIXES
-    )
+    known_egress = BANNED_NETWORK_PREFIXES + BANNED_MODULE_PREFIXES + PERMITTED_EGRESS_PREFIXES
 
     # A module that is egress-capable and not permitted must be seen by
     # the scan AND rejected by the permit check.

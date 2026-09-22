@@ -4,7 +4,23 @@ Every item in `docs/specs/PHASE-04-AI-INFRASTRUCTURE.md` §17, checked by
 **executing it** rather than by reading the code. Where a check is a command, the
 command is here so anyone can re-run it.
 
-**Every §17 gate item is met.** The accuracy item closed at **180/200 = 90.0%**, and
+> ## ⚠️ This page was re-audited on 2026-09-23 and several rows below are wrong
+>
+> Ninety-one claims across §14, §16 and §17 were re-checked **by executing them**,
+> each by one agent and then attacked by a second whose job was to refute it:
+> **51 passed, 30 failed, 10 unprovable either way, and 8 initial passes were
+> overturned** on the adversarial pass.
+>
+> The corrections are in **[§ What the re-audit overturned](#what-the-re-audit-overturned)**
+> at the bottom of this page, and the original rows are left exactly as written.
+> They are not edited in place on purpose: a gate report that quietly rewrites its
+> own history is worth less than one that shows what it got wrong and how.
+>
+> Five were real defects and are fixed. The gate is **not** closed.
+
+**Every §17 gate item is met.** ~~*(This claim did not survive the re-audit — see
+above. Left in place as the thing that was believed.)*~~ The accuracy item closed at
+**180/200 = 90.0%**, and
 the Anthropic line was **superseded by
 [ADR-011](decisions/011-remove-anthropic-adapter.md)** on 2026-09-21: the adapter is
 removed, the production provider is deferred to Phase 7, and the line's actual purpose
@@ -357,3 +373,69 @@ phase's own code. All are fixed and break-tested. The ones that mattered most:
 Three of the *fixers'* own fixes were then caught by the verifiers, two in the safety
 path — including negative lookaheads that matched a prefix rather than a word, so
 `to` swallowed *"take my life **to**night"*.
+
+---
+
+## What the re-audit overturned
+
+2026-09-23. Ninety-one claims from §14, §16 and §17, each checked by running
+something, then attacked by a second reviewer told to refute it rather than confirm
+it. **51 PASS · 30 FAIL · 10 UNPROVEN · 8 overturned.**
+
+The method mattered more than the total. Eight of the rows that a first pass marked
+PASS did not survive a second look, and in every case the reason was the same shape:
+the evidence could not have come out differently if the claim were false. One row was
+graded on `grep -c 'MockProvider' tests/*.py` — a grep cannot tell a provider that is
+CONSTRUCTED from one that is merely mentioned.
+
+### Real defects, now fixed
+
+| What was claimed | What was true |
+|---|---|
+| "API keys … never in telemetry" (§14) | `_scrub_event` scanned `llm_api_key` and `internal_token`. **`llm_fallback_api_key` was not in the list** — the one credential that exists in order to be used while the primary is failing, which is exactly when Sentry is collecting. Both keys planted in one exception message: primary redacted, fallback verbatim |
+| "`prompt_leak` validation active on all output" (§14) | The validator is built once from the FIRST prompt. The corrective retry is sent with a DIFFERENT prompt whose text quotes the user's chart back. A model that repeated its instruction was served to the user with `flags: []` |
+| "Crisis input short-circuits to a static response" (§17) | The bypass works. But **26 of the 50 crisis phrases were matched by no test** — including `suicide`, `suicidal`, `self-harm`, `hang myself`, and both feminine Hinglish forms. Deleting all 26 left the suite green at 214 passed |
+| `test_telemetry_is_the_only_egress` "fails if a second egress path is added" | The assertion was a subset check against the filter that built it — **true by construction, could not fail**. And `sentry_sdk` was already imported in `app/`, so the thing it existed to catch had already happened |
+| CLAUDE.md: "`astro-service` has no HTTP client. Never add one." | Seventeen ways in were tried and **thirteen went through**, including `import urllib.request`, `socket`, `subprocess`+curl, `import groq` (what this project's own measurements run on), and `importlib.import_module("openai")` |
+| §13: "a Python 5xx maps to a clean 503 with a retryable flag" | `NoProviderAvailableError` extended `RuntimeError`, not `ProviderError`, so every graceful path missed it. With Ollama unreachable, `POST /v1/complete` returned an **unhandled 500 with a traceback** |
+| The three production guards | Each asked `env == "production"` exactly, so `"prod"`, `"Production"`, `""` and `"production "` disabled the PII guard, the internal-token check and the read-only-DB check **all at once** |
+
+### Rows on this page that are wrong as written
+
+| Row | Correction |
+|---|---|
+| "Output validator blocks fabricated chart facts, **unsupported certainty** and prompt leaks — 35 table-driven cases" | Certainty **warns, it does not block**, by design: `validator.py:119` sets severity `warn`, and `test_predictive_framing_warns_rather_than_blocks` asserts `not blocks(violations)`. Executed: "You will get married soon" → `blocks=False`. The 35 cases cover the first conjunct only. Either the severity changes or the gate line does — but the line as written is false |
+| "Retry, circuit breaker and fallback verified **by killing the primary mid-run** — executed end to end" | **Nothing in the repo kills a process.** Making the shipped chain's breaker incapable of opening left all **881 tests green**. The retry tests run against an in-memory stub with a fake clock, and the route tests that do use an unreachable primary set `llm_max_retries: 0`. A real mid-run kill (request received in full, then RST) also revealed the dying provider received the completion **3 times** — a `ReadError` after the request was sent is treated as safe to replay |
+| "Telemetry envelope persisted by Go; every AI call logged" (§16) | In Phase 4 there is exactly **one** Go call site, the admin playground, and it deliberately does **not** write a row — with a comment explaining why. `ai_request_logs` contains 0 rows. The `cost_micros`-is-`BIGINT` half is solid; the "every AI call" half is unsatisfiable until Phase 5 ships chat |
+| "Ollama runs `fast`, `chat` and `deep` locally at zero cost" | Not on this machine today. Ollama is bound to `127.0.0.1:11434`, so no container can reach it whatever hostname is used. Fixing it means `OLLAMA_HOST=0.0.0.0`, which exposes it beyond loopback — an operator's decision |
+| "Model router … overridable from admin without deploy" | The code is correct, but **nothing tests it**: making `Orchestrator.router` return a copy — the exact defect its own docstring warns about, "would return 200 and change nothing" — left all 124 tests passing. The only `PATCH /v1/routing` call in the suite is inside an auth parametrisation and never reaches the handler |
+
+### Gate lines that need rewording, not work
+
+- §17 "`LLMProvider` implemented by **all four adapters**" — there are three. ADR-011
+  removed Anthropic and struck through two neighbouring gate lines while walking past
+  this one. The parity suite itself still says "four" in its prose and in the name
+  `test_the_four_adapters_agree_on_every_status`.
+- §11's production `.env` block still instructs `LLM_PROVIDER=anthropic` with
+  `claude-*` models. `Settings.llm_provider` is a Literal of three values, so an
+  operator following that section cannot boot the service.
+- §16 "CI … makes **no network calls**" — CI makes many, to npm, PyPI and Docker Hub.
+  Only §17's wording, "no CI job makes a network call **to a model**", is defensible.
+
+### Still unproven, and honest about it
+
+- **`services/ai/.env` holds a live Groq key.** The autouse socket blocker stops the
+  suite reaching it, but it is real credential material on disk in a repo that is now
+  public. Nothing in the tree leaks it; worth knowing anyway.
+- **`api-service /health` reports `"ai": ok` while every `/v1/complete` returns 500** —
+  the health probe does not exercise a provider. A green board during a total outage.
+- **The PII guard cannot see a base URL.** `production` + `openai-compatible` +
+  a declared `paid` tier boots against `https://api.groq.com` or `localhost:11434`
+  alike. ADR-011 accepts this deliberately — that adapter has no vendor identity to
+  infer a tier from — but no test pins it, so the residual risk is undocumented in the
+  suite.
+- **The Hinglish crisis phrases have still not been reviewed by a native speaker.**
+  `docs/HINGLISH-CRISIS-REVIEW.md` has 15 rows and every reviewer cell is empty. Its
+  own stated gap reproduces exactly: **Devanagari is not matched at all** —
+  `मुझे नहीं जीना`, `मैं मरना चाहता हूँ` and `आत्महत्या करना चाहता हूँ` all return
+  `none`, and no test asserts this either way.

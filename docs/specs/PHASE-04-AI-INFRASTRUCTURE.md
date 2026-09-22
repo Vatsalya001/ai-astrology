@@ -517,15 +517,40 @@ SAFETY_BLOCK_ON_FABRICATED_FACT=true
 **Production `.env` looks like this instead** — and nothing else changes:
 
 ```bash
-LLM_PROVIDER=anthropic
+# ⚠️ SUPERSEDED 2026-09-23 — this block no longer boots.
+# `Settings.llm_provider` is Literal["openai-compatible", "google", "mock"],
+# so `anthropic` is rejected by pydantic at startup. Kept visible rather
+# than deleted because ADR-011 is a decision worth being able to see the
+# shape of. Do not copy this.
+#
+# LLM_PROVIDER=anthropic
+# LLM_PROVIDER_TIER=paid
+# LLM_API_KEY=${ANTHROPIC_API_KEY}
+# LLM_MODEL_FAST=claude-haiku-4-5
+# LLM_MODEL_CHAT=claude-sonnet-5
+# LLM_MODEL_DEEP=claude-opus-5
+
+# What production actually takes, as of ADR-011. `openai-compatible`
+# with a declared `paid` tier is the ONLY production-legal
+# configuration: `google` and `mock` declare their own non-paid tiers
+# and the guard refuses them whatever the setting claims.
+#
+# The declaration is load-bearing and unverifiable — this adapter
+# reaches a paid inference host and a laptop's Ollama through the same
+# code path, so there is no vendor identity to infer a tier from. The
+# guard cannot see LLM_BASE_URL. Point it somewhere you pay.
+LLM_PROVIDER=openai-compatible
 LLM_PROVIDER_TIER=paid
-LLM_API_KEY=${ANTHROPIC_API_KEY}
-LLM_MODEL_FAST=claude-haiku-4-5
-LLM_MODEL_CHAT=claude-sonnet-5
-LLM_MODEL_DEEP=claude-opus-5
+LLM_BASE_URL=https://<a-vendor-you-pay>/v1
+LLM_API_KEY=${LLM_API_KEY}
+# Tier models: leave unset and each follows DEFAULT_MODELS for the
+# provider. Pinned here, one value wins for every provider.
 ```
 
-That diff is the whole point of this phase.
+That diff is the whole point of this phase. **The choice of production
+vendor is deferred to Phase 7** — ADR-011 removed the only paid adapter
+and nothing has replaced it, so today this block describes a shape
+rather than a deployment.
 
 ### `api-service`
 
@@ -653,7 +678,14 @@ Global DoD **plus**:
 
 ## 17. Phase Gate 🔒
 
-- [ ] `LLMProvider` implemented by all four adapters, all passing the parity suite
+- [ ] `LLMProvider` implemented by all ~~four~~ **three** adapters, all passing the parity suite
+      **Amended 2026-09-23.** [ADR-011](../decisions/011-remove-anthropic-adapter.md)
+      removed the Anthropic adapter and struck through two gate lines below while
+      walking past this one, which kept asserting a cardinality that stopped being
+      true the same day. The adapters are `openai-compatible`, `google` and `mock`;
+      `anthropic` is not installed and the parity suite collects exactly three ids.
+      The parity half of this line holds and is not vacuous — seven mutations, one
+      per behaviour it claims to guard, each turns the suite red.
 - [ ] Ollama runs `fast`, `chat` and `deep` tiers locally at zero cost
 - [x] ~~`AnthropicProvider` verified once against a real key, incl. prompt caching~~
       **Superseded by [ADR-011](../decisions/011-remove-anthropic-adapter.md).**

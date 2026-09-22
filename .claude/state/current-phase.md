@@ -2,8 +2,25 @@
 
 ```
 Phase: 4 — AI Infrastructure
-Gate:  ✅ 19 of 19 §17 items closed (2026-09-21)
+Gate:  ⚠️ NOT CLOSED. Reopened 2026-09-23 by an execution audit.
        21 tasks done. Nothing is exposed to users in this phase.
+
+       This line used to read "✅ 19 of 19 §17 items closed". It was
+       wrong in a way worth recording, because the same mistake is
+       cheap to make again: in the spec that DEFINES the gate,
+       docs/specs/PHASE-04-AI-INFRASTRUCTURE.md §17, eighteen of the
+       nineteen checkboxes were unticked and the single [x] was a
+       descope (ADR-011), not a completion. Nothing had ever been
+       ticked. The claim of closure lived only here.
+
+       An audit re-checked 91 claims across §14, §16 and §17 by
+       RUNNING them: 51 passed, 30 failed, 10 could not be proven
+       either way, and 8 initial passes were overturned on a second,
+       adversarial look. Five were real defects, now fixed — see
+       docs/PROJECT_STATUS.md, last sections.
+
+       The gate closes when the boxes in the SPEC are ticked, each
+       against evidence. Not here.
 
        Accuracy CLOSED at 180/200 = 90.0% (qwen/qwen3.8-27b via Groq,
        prompt v4, 4 provider errors — under the 5% the script tolerates
@@ -93,16 +110,22 @@ at `58fe1f2`. Three §11 security items were carried forward — see below.
 **873 Python tests** in `services/ai`, `mypy --strict` clean, both import contracts kept.
 Go: `go build`/`go vet` clean, unit + integration suites green.
 
-**Phase 4 gate: one item NOT met** — intent-classifier accuracy. The keyword
-pre-pass is 100% precise at 41% coverage (CI-asserted), but a free local model
-reaches only 40% (`llama3.2:3b`) / 60.5% (`qwen2.5:7b`) against the spec's ≥85%.
-§15 predicted this. Full report: `docs/PHASE-04-GATE.md`.
+**Intent-classifier accuracy — met on a hosted model, not on a local one.**
+180/200 = 90.0% and independently reproduced at 183/200 = 91.5%, both on
+`qwen/qwen3.8-27b` via Groq with prompt v4. Two runs agreeing within noise is what
+makes the number worth anything on this machine.
 
-The measurement is **blocked on the machine, not the code**: a root-owned Ollama
-`llama-server` has been stuck in a runaway generation for hours at 350–970% CPU, and
-its own unload API will not release it. `sudo snap restart ollama` frees it; then
-`uv run python -m scripts.diagnose_intent_loss qwen2.5:7b` gives the attributed
-number in one pass.
+The paragraph that used to sit here said the opposite — "one item NOT met" — and was
+simply older than the measurement above it, on the same page. It is the reason the
+header block now carries no per-item status at all: two places stating the same fact
+is two places for it to rot, and this one rotted in under a day.
+
+What has NOT changed: a free LOCAL model does not reach the bar. 40% on
+`llama3.2:3b`, 60.5% on `qwen2.5:7b` against the spec's ≥85%. §15 predicted exactly
+this, and the mitigation it named — "Groq free tier via the same adapter, one env
+var" — is what produced the passing number. So the gate line is met and the §16 line
+"whole AI stack runs on local free models at zero cost" is not; they are different
+claims and only one of them holds.
 
 Partial evidence already says most of the loss is **ours**: on 30 deferred messages
 `llama3.2:1b` answered correctly 12 times and the product delivered 2 — ten correct
@@ -158,8 +181,15 @@ Owed to the Phase 4 gate and **not closeable by the suite**:
   export, which `task verify` structurally cannot see because it does not run the
   integration suite.
 - `< 180 KB` first-load JS — unmet by decision, ADR-010.
-- No e2e drives PDF or share links; no share-management screen; no ADR for hand-rolled
-  auth; `memtest86+` unrun.
+- ~~No e2e drives PDF or share links; no share-management screen; no ADR for
+  hand-rolled auth.~~ **All three closed 2026-09-22/23.**
+  `tests/e2e/pdf-and-shares.spec.ts` (9 tests, four guards mutation-proven),
+  `apps/web/src/app/settings/shares/page.tsx` (+ 11 unit tests), and
+  `docs/decisions/012-hand-rolled-auth.md`.
+  The share screen was not a cosmetic gap: `listShares` and `revokeShare` had zero
+  call sites, so a user could mint a 30-day bearer link to a birth chart and had no
+  way to see or revoke it — and revocation is the owner's only remedy.
+- `memtest86+` unrun. Still true, and still the caveat below.
 
 ---
 
