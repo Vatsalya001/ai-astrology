@@ -273,6 +273,15 @@ export interface ShareLink {
   expires_at: string
   revoked_at?: string | null
   view_count: number
+  /**
+   * When the link was made.
+   *
+   * The server has always sent this — `shares.Share` has the field — and
+   * this type simply omitted it, which went unnoticed while nothing
+   * listed shares. It is what the management screen sorts by and how a
+   * user tells two links for the same profile apart.
+   */
+  created_at: string
   /** Present ONLY in the response to createShare. Never on a listing. */
   token?: string
 }

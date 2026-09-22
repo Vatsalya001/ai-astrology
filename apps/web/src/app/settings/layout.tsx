@@ -25,6 +25,7 @@ export default function SettingsLayout({ children }: { children: React.ReactNode
     { href: '/settings/profile', label: t.settings.profile },
     { href: '/settings/preferences', label: t.settings.preferences },
     { href: '/settings/sessions', label: t.settings.sessions },
+    { href: '/settings/shares', label: t.settings.sharesTab },
     { href: '/settings/delete', label: t.settings.deleteAccount },
   ]
 

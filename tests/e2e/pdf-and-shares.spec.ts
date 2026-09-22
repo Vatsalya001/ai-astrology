@@ -425,6 +425,57 @@ test("a stranger cannot list or revoke another user's share links", async ({ pag
   await other.close()
 })
 
+// ─── the management screen ───────────────────────────────────────────
+
+test('the settings screen lists a share link and can actually revoke it', async ({
+  page,
+  browser,
+}) => {
+  /*
+    The loop that had no UI at all.
+
+    `listShares` and `revokeShare` existed in astrology-api.ts with zero
+    call sites, so a user could mint a link and had no way to see it or
+    turn it off — and revocation is the owner's only remedy. This drives
+    the screen the way a person does, and then checks the LINK is dead
+    rather than trusting what the page says about it.
+  */
+  const me = await newAccountWithProfile(page, '821')
+
+  const created = await page.request.post(`${API_URL}/api/v1/charts/${me.profileID}/shares`, {
+    ...auth(me.token),
+    data: { expires_in_days: 30 },
+    failOnStatusCode: false,
+  })
+  expect(created.status()).toBe(201)
+  const share = (await created.json()) as { id: string; token: string }
+
+  await page.goto('/settings/shares')
+
+  const row = page.locator('li', { hasText: 'Export subject' })
+  await expect(row, 'the link did not appear on the management screen').toBeVisible({
+    timeout: 15_000,
+  })
+  await expect(row.getByText('Active')).toBeVisible()
+
+  // The screen must not show the token: the listing endpoint omits it by
+  // design, and a page that displayed one would mean the plaintext had
+  // been stored somewhere it should not be.
+  await expect(page.locator('body')).not.toContainText(share.token)
+
+  await row.getByRole('button', { name: /^Revoke/ }).click()
+  await expect(row.getByText('Revoked')).toBeVisible({ timeout: 15_000 })
+
+  // The assertion that matters. The badge changing is a claim by the
+  // page; this is the link itself, fetched with no session at all.
+  const anon = await browser.newContext()
+  const check = await anon.request.get(`${API_URL}/api/v1/shared/${share.token}`, {
+    failOnStatusCode: false,
+  })
+  expect(check.status(), 'the screen said Revoked but the link still resolves').toBe(404)
+  await anon.close()
+})
+
 // ─── rate limits ─────────────────────────────────────────────────────
 
 test('the PDF route is rate limited', async ({ page }) => {

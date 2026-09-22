@@ -254,6 +254,20 @@ export const en = {
     signOutEverywhere: 'Sign out everywhere',
     thisDevice: 'This device',
 
+    sharesTab: 'Shared links',
+    sharesTitle: 'Links you have shared',
+    sharesBody:
+      'Anyone holding one of these links can see that Kundli, without signing in. Revoking a link stops it immediately.',
+    sharesEmpty: 'You have not shared any Kundli links.',
+    sharesNoToken:
+      'The link itself is shown only once, when you create it. It cannot be shown again — if you have lost it, revoke this one and share a new link.',
+    sharesLive: 'Active',
+    sharesRevoked: 'Revoked',
+    sharesExpired: 'Expired',
+    sharesCreated: 'Created',
+    sharesViews: 'Opened',
+    sharesRevokeFailed: 'That link could not be revoked. It is still active — please try again.',
+
     deleteTitle: 'Delete your account',
     deleteBody: 'This removes your account and everything in it. Not hidden, not flagged — deleted.',
     deleteGrace: 'You have seven days to change your mind. After that it cannot be undone.',
@@ -703,6 +717,20 @@ export const hi: Dictionary = {
     revoking: 'रद्द किया जा रहा है…',
     signOutEverywhere: 'सभी जगह साइन आउट करें',
     thisDevice: 'यह डिवाइस',
+
+    sharesTab: 'साझा किए गए लिंक',
+    sharesTitle: 'आपके द्वारा साझा किए गए लिंक',
+    sharesBody:
+      'इनमें से कोई भी लिंक रखने वाला व्यक्ति बिना साइन इन किए वह कुंडली देख सकता है। लिंक रद्द करने पर वह तुरंत बंद हो जाता है।',
+    sharesEmpty: 'आपने कोई कुंडली लिंक साझा नहीं किया है।',
+    sharesNoToken:
+      'लिंक केवल एक बार दिखाया जाता है, जब आप उसे बनाते हैं। उसे दोबारा नहीं दिखाया जा सकता — यदि वह खो गया है, तो इसे रद्द करें और नया लिंक साझा करें।',
+    sharesLive: 'सक्रिय',
+    sharesRevoked: 'रद्द किया गया',
+    sharesExpired: 'समाप्त',
+    sharesCreated: 'बनाया गया',
+    sharesViews: 'खोला गया',
+    sharesRevokeFailed: 'यह लिंक रद्द नहीं हो सका। यह अब भी सक्रिय है — कृपया फिर से प्रयास करें।',
 
     deleteTitle: 'अपना खाता हटाएँ',
     deleteBody: 'यह आपका खाता और उसमें सब कुछ हटा देता है। छिपाया नहीं, चिह्नित नहीं — हटाया गया।',
