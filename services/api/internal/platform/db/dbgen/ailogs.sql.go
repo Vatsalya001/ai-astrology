@@ -298,6 +298,94 @@ func (q *Queries) ListAIRequestLogsForUser(ctx context.Context, arg ListAIReques
 	return items, nil
 }
 
+const listAIRequestsForUser = `-- name: ListAIRequestsForUser :many
+SELECT
+    id,
+    job_type,
+    intent,
+    model,
+    tier,
+    prompt_version,
+    input_tokens,
+    output_tokens,
+    cached_tokens,
+    latency_ms,
+    cost_micros,
+    finish_reason,
+    safety_flags,
+    validation_passed,
+    created_at
+FROM ai_request_logs
+WHERE user_id = $1
+ORDER BY created_at DESC
+`
+
+type ListAIRequestsForUserRow struct {
+	ID               pgtype.UUID
+	JobType          string
+	Intent           *string
+	Model            string
+	Tier             string
+	PromptVersion    string
+	InputTokens      int32
+	OutputTokens     int32
+	CachedTokens     int32
+	LatencyMs        int32
+	CostMicros       int64
+	FinishReason     string
+	SafetyFlags      []byte
+	ValidationPassed bool
+	CreatedAt        time.Time
+}
+
+// Every AI request this person made, for their data export.
+//
+// PHASE-04 §8 keeps message CONTENT out of this table entirely, so what
+// a person receives here is the shape of their usage and nothing they
+// wrote: when, which job, which intent, what it cost. That is still
+// personal data — "asked about medical matters on these dates" is a
+// fact about a person — which is why it is exported rather than filed
+// as telemetry.
+//
+// `cost_micros` is included deliberately. Phase 7 bills from this
+// table, and an export that hides the number a charge is computed from
+// would be the one field a person most reasonably wants to check.
+func (q *Queries) ListAIRequestsForUser(ctx context.Context, userID pgtype.UUID) ([]ListAIRequestsForUserRow, error) {
+	rows, err := q.db.Query(ctx, listAIRequestsForUser, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListAIRequestsForUserRow{}
+	for rows.Next() {
+		var i ListAIRequestsForUserRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.JobType,
+			&i.Intent,
+			&i.Model,
+			&i.Tier,
+			&i.PromptVersion,
+			&i.InputTokens,
+			&i.OutputTokens,
+			&i.CachedTokens,
+			&i.LatencyMs,
+			&i.CostMicros,
+			&i.FinishReason,
+			&i.SafetyFlags,
+			&i.ValidationPassed,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listAISafetyIncidents = `-- name: ListAISafetyIncidents :many
 SELECT id, trace_id, user_id, conversation_id, job_type, intent, provider_id, model, tier, prompt_version, context_version, input_tokens, output_tokens, cached_tokens, cache_write_tokens, latency_ms, cost_micros, finish_reason, safety_flags, validation_passed, regenerated, model_calls, created_at FROM ai_request_logs
 WHERE validation_passed = FALSE

@@ -46,6 +46,47 @@ type Export struct {
 	// only this answers, and an export that omits it hands somebody a
 	// copy of their data with the sharing removed.
 	ShareLinks []ExportShareLink `json:"share_links"`
+
+	// Phase 4. Every AI request made for this person.
+	//
+	// PHASE-04 §8 keeps message CONTENT out of `ai_request_logs`
+	// entirely, so this carries the shape of someone's usage and nothing
+	// they wrote. That is still personal data: "asked about medical
+	// matters on these dates" is a fact about a person, and `intent`
+	// plus `created_at` says exactly that.
+	//
+	// It was missing for the whole of Phase 4.
+	// `TestEveryUserOwnedTableAppearsInTheExport` exists to catch
+	// precisely this and could not run, because CI had been out of
+	// minutes since 2026-09-16 and `task verify` does not run the
+	// integration suite. The guard worked the first hour it was able to.
+	AIRequests []ExportAIRequest `json:"ai_requests"`
+}
+
+// ExportAIRequest is one model call, as the person it was made for
+// receives it back.
+//
+// `trace_id`, `provider_id` and `conversation_id` are absent: they
+// identify our infrastructure rather than the person, and a trace id is
+// the key to logs they cannot read. `cost_micros` IS present — Phase 7
+// bills from this table, and the number a charge is computed from is the
+// one field somebody most reasonably wants to check.
+type ExportAIRequest struct {
+	ID               uuid.UUID `json:"id"`
+	JobType          string    `json:"job_type"`
+	Intent           *string   `json:"intent"`
+	Model            string    `json:"model"`
+	Tier             string    `json:"tier"`
+	PromptVersion    string    `json:"prompt_version"`
+	InputTokens      int32     `json:"input_tokens"`
+	OutputTokens     int32     `json:"output_tokens"`
+	CachedTokens     int32     `json:"cached_tokens"`
+	LatencyMS        int32     `json:"latency_ms"`
+	CostMicros       int64     `json:"cost_micros"`
+	FinishReason     string    `json:"finish_reason"`
+	SafetyFlags      []string  `json:"safety_flags"`
+	ValidationPassed bool      `json:"validation_passed"`
+	CreatedAt        time.Time `json:"created_at"`
 }
 
 // ExportShareLink is one share link as its owner receives it back.
@@ -218,6 +259,40 @@ func (e *Exporter) Export(ctx context.Context, userID uuid.UUID) (Export, error)
 		shareLinks = append(shareLinks, link)
 	}
 
+	aiRows, err := e.q.ListAIRequestsForUser(ctx, pgUser)
+	if err != nil {
+		return Export{}, fmt.Errorf("users: export ai requests: %w", err)
+	}
+	aiRequests := make([]ExportAIRequest, 0, len(aiRows))
+	for _, row := range aiRows {
+		item := ExportAIRequest{
+			ID:               row.ID.Bytes,
+			JobType:          row.JobType,
+			Model:            row.Model,
+			Tier:             row.Tier,
+			PromptVersion:    row.PromptVersion,
+			InputTokens:      row.InputTokens,
+			OutputTokens:     row.OutputTokens,
+			CachedTokens:     row.CachedTokens,
+			LatencyMS:        row.LatencyMs,
+			CostMicros:       row.CostMicros,
+			FinishReason:     row.FinishReason,
+			ValidationPassed: row.ValidationPassed,
+			CreatedAt:        row.CreatedAt,
+			// Never nil: a null reads as "we hold nothing", which is a
+			// stronger claim than "none fired".
+			SafetyFlags: make([]string, 0),
+		}
+		if row.Intent != nil {
+			intent := *row.Intent
+			item.Intent = &intent
+		}
+		if len(row.SafetyFlags) > 0 {
+			_ = json.Unmarshal(row.SafetyFlags, &item.SafetyFlags)
+		}
+		aiRequests = append(aiRequests, item)
+	}
+
 	out := Export{
 		ExportedAt: time.Now().UTC(),
 		// Versioned so a later change to the shape is detectable by
@@ -234,6 +309,7 @@ func (e *Exporter) Export(ctx context.Context, userID uuid.UUID) (Export, error)
 		BirthProfiles: make([]ExportBirthProfile, 0, len(profiles)),
 		Charts:        make([]ExportChart, 0, len(profiles)),
 		ShareLinks:    shareLinks,
+		AIRequests:    aiRequests,
 	}
 
 	for _, profile := range profiles {

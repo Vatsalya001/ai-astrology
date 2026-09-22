@@ -75,6 +75,27 @@ func seedFullUser(ctx context.Context, t *testing.T, pool *pgxpool.Pool, email s
 			        now() + INTERVAL '30 days'
 			 FROM birth_profiles WHERE user_id = $1 LIMIT 1`,
 			[]any{userID}},
+		// Phase 4, and the same standing obligation: every phase that
+		// adds a user-owned table extends this test. `userOwnedTables`
+		// discovers ai_request_logs on its own and refuses to pass until
+		// it is seeded, which is how the requirement gets enforced
+		// rather than remembered.
+		//
+		// The deletion semantics differ from every other row here. The
+		// FK is ON DELETE SET NULL, so this row SURVIVES with a null
+		// user_id — deliberate, because Phase 7 bills from this table
+		// and the cost history has to outlive the account. The residue
+		// check still passes, because what it looks for is anything
+		// still pointing AT the person.
+		{"ai request log",
+			`INSERT INTO ai_request_logs
+			   (trace_id, user_id, job_type, intent, provider_id, model, tier,
+			    prompt_version, context_version, input_tokens, output_tokens,
+			    latency_ms, cost_micros, finish_reason)
+			 VALUES ('trace-seed', $1, 'chat_response', 'career', 'mock',
+			         'mock-chat', 'local', 'chat_response.v1', 'ctx.v1',
+			         11, 7, 42, 0, 'stop')`,
+			[]any{userID}},
 	} {
 		if _, err := pool.Exec(ctx, stmt.sql, stmt.args...); err != nil {
 			t.Fatalf("seed %s: %v", stmt.what, err)
@@ -622,6 +643,10 @@ func TestEveryUserOwnedTableAppearsInTheExport(t *testing.T) {
 		"audit_logs":       "audit_log",
 		"birth_profiles":   "birth_profiles",
 		"chart_shares":     "share_links",
+		// Phase 4. Content is never stored (PHASE-04 §8), but intent and
+		// timestamps are still personal data — "asked about medical
+		// matters on these dates" is a fact about a person.
+		"ai_request_logs": "ai_requests",
 		// Charts hang off birth_profiles and have no user_id column, so
 		// they are not discovered here; TestExportIncludesBirthProfiles
 		// AndCharts asserts them directly.

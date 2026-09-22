@@ -84,3 +84,36 @@ FROM ai_request_logs
 WHERE created_at >= $1 AND created_at < $2
 GROUP BY job_type
 ORDER BY cost_micros DESC;
+
+-- name: ListAIRequestsForUser :many
+-- Every AI request this person made, for their data export.
+--
+-- PHASE-04 §8 keeps message CONTENT out of this table entirely, so what
+-- a person receives here is the shape of their usage and nothing they
+-- wrote: when, which job, which intent, what it cost. That is still
+-- personal data — "asked about medical matters on these dates" is a
+-- fact about a person — which is why it is exported rather than filed
+-- as telemetry.
+--
+-- `cost_micros` is included deliberately. Phase 7 bills from this
+-- table, and an export that hides the number a charge is computed from
+-- would be the one field a person most reasonably wants to check.
+SELECT
+    id,
+    job_type,
+    intent,
+    model,
+    tier,
+    prompt_version,
+    input_tokens,
+    output_tokens,
+    cached_tokens,
+    latency_ms,
+    cost_micros,
+    finish_reason,
+    safety_flags,
+    validation_passed,
+    created_at
+FROM ai_request_logs
+WHERE user_id = $1
+ORDER BY created_at DESC;

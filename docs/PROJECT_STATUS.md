@@ -3304,3 +3304,81 @@ it was meant to complement cannot be run.
 
 **The honest position: this machine is unverified, not cleared.** Every number in Phase 4
 was measured on it.
+
+---
+
+# 🔴 CONFIRMED: this machine has failing RAM
+
+`scripts/memcheck.go`, 6 GiB, 45 minutes, from userspace. **Seven errors.**
+
+```
+MISMATCH pass 28 offset 6092606519: wrote 0x9A read 0x98 (xor 0x02)
+MISMATCH pass 29 offset 2539188983: wrote 0x00 read 0x04 (xor 0x04)
+MISMATCH pass 29 offset 2539190135: wrote 0x00 read 0x10 (xor 0x10)
+MISMATCH pass 29 offset 2539190455: wrote 0x00 read 0x20 (xor 0x20)
+MISMATCH pass 29 offset 2539191607: wrote 0x00 read 0x40 (xor 0x40)
+MISMATCH pass 29 offset 2539193335: wrote 0x00 read 0x10 (xor 0x10)
+MISMATCH pass 41 offset 5882954999: wrote 0xF0 read 0x70 (xor 0x80)
+```
+
+**Every XOR is a power of two — seven single-bit flips.** Five of them fall within a
+4.3 KB span. Both directions occur: five 0→1, two 1→0.
+
+This is conclusive. Userspace memory does not change on its own, and a clean run would
+have been weak evidence while a dirty one is not. **Fifteen-plus corruption events across
+this project now have a single explanation**: two single-bit clears in the ephemeris
+kernel, two in a golden dasha fixture, seven Go linker panics, a mypy cache
+"reading past the buffer end", a Turbopack checksum mismatch.
+
+EDAC reports `ce_count=0 / ue_count=0` — which tells us only that in-band ECC is not
+actually monitoring on this SoC, not that memory is sound.
+
+**Every number in Phase 4 was computed here**: the 90.0% classifier accuracy, the golden
+charts, the cost arithmetic, and the 21 review findings. None of it is *known* wrong.
+None of it is *known* right either.
+
+**Next step is not software.** Escalate to IT with the offsets above. memtest86+ (already
+installed, needs a reboot) will identify the DIMM.
+
+---
+
+# CI runs again, and caught a privacy defect on its first pass
+
+The repository was made **public** on 2026-09-21 (owner's explicit decision after a full
+history scan: 221 commits, gitleaks clean, no `.env` ever committed, no live-shaped
+credential in any revision). Public repositories get unlimited free Actions minutes.
+
+The prior diagnosis is now confirmed rather than inferred: jobs had been running
+`07:31:53 → 07:31:56` with **`"steps": []`** — three seconds, zero steps, all eleven
+jobs. That is a quota block.
+
+**First real run: 9 of 11 jobs pass, and the two failures were real.**
+
+## `ai_request_logs` never reached a user's data export
+
+`TestEveryUserOwnedTableAppearsInTheExport` — a guard written in Phase 1 — had been
+unable to run since 2026-09-16. It fired the first hour it could:
+
+> *table `ai_request_logs` has a user_id column but no entry in this test … A table that
+> holds a person's data and never reaches their export is the whole failure this guard
+> exists for.*
+
+Phase 4 added the table and wired it into neither the data-subject export nor the
+deletion seed. §8 keeps message **content** out of it entirely — but `intent` and
+`created_at` remain personal data: *"asked about medical matters on these dates"* is a
+fact about a person.
+
+Fixed: `ListAIRequestsForUser`, an `ai_requests` export section, and the table registered
+in both guards. `trace_id`, `provider_id` and `conversation_id` are deliberately excluded
+— they identify our infrastructure, not the person. `cost_micros` is deliberately
+included: Phase 7 bills from this table, and the number a charge is computed from is the
+one field somebody most reasonably wants to check.
+
+**`task verify` cannot catch this class of defect** — it does not run the integration
+suite. Only CI does. That is the argument for CI, made concrete within an hour of it
+working.
+
+The two E2E failures are Phase 3 tests (place-search dropdown, OTP timing) and appear
+environmental; they are not Phase 4 regressions and remain open.
+
+**`task verify` green. Full Go integration suite green.**

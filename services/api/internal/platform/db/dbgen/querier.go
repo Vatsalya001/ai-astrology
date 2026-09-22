@@ -150,6 +150,19 @@ type Querier interface {
 	LinkIdentity(ctx context.Context, arg LinkIdentityParams) (AuthIdentity, error)
 	// Newest first, served by ai_logs_user_idx.
 	ListAIRequestLogsForUser(ctx context.Context, arg ListAIRequestLogsForUserParams) ([]AiRequestLog, error)
+	// Every AI request this person made, for their data export.
+	//
+	// PHASE-04 §8 keeps message CONTENT out of this table entirely, so what
+	// a person receives here is the shape of their usage and nothing they
+	// wrote: when, which job, which intent, what it cost. That is still
+	// personal data — "asked about medical matters on these dates" is a
+	// fact about a person — which is why it is exported rather than filed
+	// as telemetry.
+	//
+	// `cost_micros` is included deliberately. Phase 7 bills from this
+	// table, and an export that hides the number a charge is computed from
+	// would be the one field a person most reasonably wants to check.
+	ListAIRequestsForUser(ctx context.Context, userID pgtype.UUID) ([]ListAIRequestsForUserRow, error)
 	// The admin incident feed. Served by the PARTIAL index, so this stays
 	// fast as the table grows — failures are a small fraction of rows and a
 	// full index on the boolean would be scanned rather than used.
