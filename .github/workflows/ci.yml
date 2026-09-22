@@ -303,6 +303,25 @@ jobs:
       - name: Start the whole stack
         run: |
           cp .env.example .env
+
+          # CHROME_PATH must point at a browser that EXISTS on this
+          # runner. `.env.example` names /usr/bin/google-chrome, which is
+          # right for a developer machine and absent here — so the worker
+          # died at startup with
+          #
+          #   fatal: pdf renderer: pdf: chrome startup check at
+          #   /usr/bin/google-chrome: websocket url timeout reached
+          #
+          # and every E2E test then failed against a half-started stack.
+          # That looked like three unrelated UI bugs; all 157 pass
+          # locally. The job installs Playwright's chromium two steps
+          # above, so point at that one rather than installing a second
+          # browser.
+          CHROME="$(node -e "console.log(require('playwright').chromium.executablePath())")"
+          test -x "$CHROME" || { echo "no chromium at $CHROME"; exit 1; }
+          sed -i "s#^CHROME_PATH=.*#CHROME_PATH=$CHROME#" .env
+          grep '^CHROME_PATH=' .env
+
           ./scripts/ayana up
 
       - name: Show what is running
