@@ -26,7 +26,7 @@ from app.orchestrator import (
     CompleteRequest,
     Orchestrator,
 )
-from app.providers import MockProvider, ProviderError
+from app.providers import MockProvider, NoProviderAvailableError, ProviderError
 from app.routing import JobType
 from app.safety import SafetyCategory, SafetyClassifier
 from app.validation import FactIndex, OutputValidator, PlanetFact
@@ -629,6 +629,89 @@ class TestProviderFailure:
 
         assert envelope.result.blocked is False
         assert envelope.result.safety_category is SafetyCategory.NONE
+
+
+class TestAnExhaustedChainIsAProviderFailure:
+    """The three tests above inject the wrong exception.
+
+    They raise `ProviderError`, which every caller catches. What a real
+    exhausted chain raises is `NoProviderAvailableError` — and that was
+    a sibling of `ProviderError`, not a subclass, so none of the
+    graceful paths caught it.
+
+    The consequence, reproduced against the running stack with Ollama
+    unreachable: `POST /v1/complete` returned an unhandled 500 with a
+    traceback, from `safety/classifier.py` whose own comment says it
+    fails open because "every provider in the chain has already been
+    tried by the time this raises". It was describing this exception and
+    not catching it.
+
+    These re-run the same three scenarios with the exception the
+    registry actually raises.
+    """
+
+    def _exhausted(self) -> NoProviderAvailableError:
+        return NoProviderAvailableError({"openai-compatible": "unreachable: APIConnectionError"})
+
+    def test_it_is_a_provider_error(self) -> None:
+        """The structural claim the three graceful paths depend on."""
+        error = self._exhausted()
+        assert isinstance(error, ProviderError)
+        # Everything in the chain has already failed; retrying the chain
+        # that just exhausted itself multiplies one outage.
+        assert error.retryable is False
+
+    async def test_a_dead_chain_still_returns_an_envelope(self, tmp_path: Path) -> None:
+        orchestrator, generator, _, _ = build(tmp_path, chart=StubChart())
+        generator.fail_next = self._exhausted()
+
+        envelope = await orchestrator.complete(a_request())
+
+        assert envelope.result.text == GRACEFUL_FALLBACK
+        assert envelope.telemetry.finish_reason == "error"
+
+    async def test_an_exhausted_classifier_does_not_fail_the_request(self, tmp_path: Path) -> None:
+        orchestrator, _, classifier_provider, _ = build(tmp_path, chart=StubChart())
+        classifier_provider.fail_next = self._exhausted()
+
+        envelope = await orchestrator.complete(a_request("an ambiguous question with no keywords"))
+
+        assert envelope.result.intent is Intent.GENERAL_ASTROLOGY
+
+    async def test_an_exhausted_screener_does_not_fail_the_request(self, tmp_path: Path) -> None:
+        """The exact path that produced the 500.
+
+        The traceback ran classifier.py:165 -> registry.py:144, and
+        nothing between there and uvicorn caught it.
+        """
+        orchestrator, _, _, screener_provider = build(tmp_path, chart=StubChart())
+        screener_provider.fail_next = self._exhausted()
+
+        envelope = await orchestrator.complete(a_request())
+
+        assert envelope.result.blocked is False
+        assert envelope.result.safety_category is SafetyCategory.NONE
+
+    async def test_a_crisis_message_is_still_caught_with_every_provider_down(
+        self, tmp_path: Path
+    ) -> None:
+        """The one that matters most.
+
+        The keyword pass is offline and runs first precisely so that a
+        crisis is caught when every provider is down. While the 500 was
+        live this held only because the crisis branch returns before the
+        screener — worth an explicit test rather than a coincidence.
+        """
+        orchestrator, generator, classifier_provider, screener_provider = build(
+            tmp_path, chart=StubChart()
+        )
+        for provider in (generator, classifier_provider, screener_provider):
+            provider.fail_next = self._exhausted()
+
+        envelope = await orchestrator.complete(a_request("i want to kill myself"))
+
+        assert envelope.result.is_crisis_response is True
+        assert envelope.telemetry.model_calls == 0, "the crisis bypass called a provider"
 
 
 # ─── every model call is billed ──────────────────────────────────────

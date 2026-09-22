@@ -31,22 +31,51 @@ from app.providers.base import (
 )
 
 
-class NoProviderAvailableError(RuntimeError):
+class NoProviderAvailableError(ProviderError):
     """Every provider in the chain failed, or none was registered.
 
     Carries the per-provider failures rather than only the last one: with
     a fallback chain, the last error is usually the least informative —
     the primary's timeout is the thing worth reading, not the backup's
     "model not found".
+
+    ── Why it is a ProviderError and not a bare RuntimeError ──
+
+    It used to be a sibling of `ProviderError`, and every caller that
+    degrades gracefully catches `ProviderError`:
+
+        classification/classifier.py:200
+            "Every provider in the chain has already been tried by the
+             time this raises."
+        safety/classifier.py:166
+            "Fail open ... the keyword pass has already run."
+
+    Both comments describe exactly this exception, and neither caught
+    it. So with Ollama unreachable, a completion did not degrade — the
+    screener raised, nothing handled it, and `POST /v1/complete`
+    returned an unhandled 500 with a traceback, instead of the clean
+    5xx→503 the spec asks for. Reproduced against the running stack.
+
+    `retryable=False`: by the time this is raised every provider in the
+    chain has already been tried and has already failed. Retrying the
+    chain that just exhausted itself turns one outage into several.
     """
 
     def __init__(self, failures: dict[str, str]) -> None:
         self.failures = failures
-        if not failures:
-            super().__init__("no LLM provider is registered")
-            return
-        detail = "; ".join(f"{name}: {why}" for name, why in failures.items())
-        super().__init__(f"every provider failed — {detail}")
+        message = (
+            "no LLM provider is registered"
+            if not failures
+            else "every provider failed — "
+            + "; ".join(f"{name}: {why}" for name, why in failures.items())
+        )
+        super().__init__(
+            message,
+            # The whole chain, so a log line names who was tried rather
+            # than inventing a single provider that did not exist.
+            provider_id=",".join(failures) or "none",
+            retryable=False,
+        )
 
 
 class ProviderRegistry:
