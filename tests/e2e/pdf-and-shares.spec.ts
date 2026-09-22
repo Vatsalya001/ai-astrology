@@ -332,27 +332,122 @@ test('a share link carries no birth details, and the payload does not either', a
   expect(created.status()).toBe(201)
   const { token } = (await created.json()) as { token: string }
 
-  // §11: share links "do not embed birth details". A token encoding the
-  // date or place would put PII into every browser history, referrer
-  // header and chat app the link is pasted into —
-  // `.claude/rules/security.md` treats birth date + time + place as close
-  // to a unique identifier, so that is the same class of leak as an email
-  // address in a query string.
-  const secrets = ['1994', '08-17', '1708', '14:35', '1435', 'Jaipur', 'jaipur']
-  for (const secret of secrets) {
-    expect(token, `the share token embeds ${secret}`).not.toContain(secret)
-  }
+  /*
+    §11: share links "do not embed birth details".
+    `.claude/rules/security.md` treats birth date + time + place as close
+    to a unique identifier, so a token encoding any of it would put PII
+    into every browser history, referrer header and chat app the link is
+    pasted into.
+
+    ── Why this is not a substring search ──
+
+    The first version grepped the token and the payload for '1994',
+    '08-17', '14:35' and so on. It passed here and FAILED IN CI with "the
+    shared payload leaks 14:35" — and the payload was fine. A chart's
+    dasha tree carries 519 distinct times-of-day and 731 distinct dates
+    across 1988–2108, so 'HH:MM' collides with a period boundary about a
+    third of the time and '08-17' is present in this very payload as a
+    dasha date. The check was a coin flip wearing a security assertion's
+    clothes: green locally by luck, red in CI by luck, and it would have
+    stayed flaky forever.
+
+    So both halves are asserted structurally instead. A structural check
+    cannot collide with a number, and it fails when someone ADDS a field
+    — which is the way this property will actually be broken.
+  */
+
+  // The token is 32 random bytes, base64url. Asserted as a shape, which
+  // is also what rules out it encoding anything at all.
+  expect(token, 'the token is not opaque base64url').toMatch(/^[A-Za-z0-9_-]+$/)
   expect(token.length, 'a short token is guessable').toBeGreaterThan(20)
 
-  // The response body is the other half, and the more likely leak: the
-  // page comment claims "the API does not send them, and this page could
-  // not display them if it wanted to". That is a claim about the payload,
-  // so it is worth checking the payload.
-  const body = await (await page.request.get(`${API_URL}/api/v1/shared/${token}`)).text()
-  for (const secret of ['1994-08-17', '14:35', 'Jaipur']) {
-    expect(body, `the shared payload leaks ${secret}`).not.toContain(secret)
-  }
+  // The decisive one: two links for the SAME profile must be unrelated.
+  // A token derived from birth details would repeat itself here, and no
+  // substring search is needed to see it.
+  const second = await page.request.post(`${API_URL}/api/v1/charts/${me.profileID}/shares`, {
+    ...auth(me.token),
+    data: { expires_in_days: 30 },
+    failOnStatusCode: false,
+  })
+  expect(second.status()).toBe(201)
+  const { token: other } = (await second.json()) as { token: string }
+  expect(other, 'two links for one profile produced the same token').not.toBe(token)
+  expect(
+    longestCommonSubstring(token, other).length,
+    'two tokens for the same profile share a long run — they are not random',
+  ).toBeLessThan(8)
+
+  /*
+    The payload is the other half, and the likelier leak. SharedView is
+    deliberately narrow — label, chart type, chart data, and the three
+    provenance fields — so the assertion is that it is EXACTLY that, and
+    that no birth-identifying key appears anywhere inside it.
+  */
+  const payload = (await (
+    await page.request.get(`${API_URL}/api/v1/shared/${token}`)
+  ).json()) as { chart: Record<string, unknown> }
+
+  expect(Object.keys(payload.chart).sort()).toEqual([
+    'ayanamsa',
+    'chart_data',
+    'chart_type',
+    'engine_version',
+    'house_system',
+    'label',
+  ])
+
+  /*
+    `longitude` and `latitude` are NOT in this list on purpose: a planet's
+    longitude is an angle along the ecliptic, and excluding it would make
+    every chart fail. The birth PLACE coordinates would arrive under
+    `birth_latitude` / `place`, which are.
+  */
+  const forbidden = [
+    'birth_date',
+    'birth_time',
+    'birth_place',
+    'birth_latitude',
+    'birth_longitude',
+    'birth_timezone',
+    'place',
+    'place_id',
+    'utc_instant',
+    'utc_offset_min',
+    'timezone',
+  ]
+  const present = keysIn(payload).filter((k) => forbidden.includes(k))
+  expect(present, `the shared payload carries birth-identifying fields: ${present}`).toEqual([])
+
+  // The place NAME is still worth a literal check: it is a word, so it
+  // cannot collide with a timestamp the way a number can.
+  const raw = await (await page.request.get(`${API_URL}/api/v1/shared/${token}`)).text()
+  expect(raw, 'the shared payload names the birth place').not.toContain('Jaipur')
 })
+
+/** Every key appearing anywhere in a JSON value, however deeply nested. */
+function keysIn(value: unknown): string[] {
+  if (Array.isArray(value)) return value.flatMap(keysIn)
+  if (value && typeof value === 'object') {
+    return Object.entries(value).flatMap(([k, v]) => [k, ...keysIn(v)])
+  }
+  return []
+}
+
+/**
+ * Enough to tell "two random strings" from "two strings built the same
+ * way". Quadratic, on two ~43-character tokens.
+ */
+function longestCommonSubstring(a: string, b: string): string {
+  let best = ''
+  for (let i = 0; i < a.length; i++) {
+    for (let j = i + best.length + 1; j <= a.length; j++) {
+      const candidate = a.slice(i, j)
+      if (b.includes(candidate)) best = candidate
+      else break
+    }
+  }
+  return best
+}
 
 test('a share token that never existed is refused, and gives nothing away', async ({
   page,
