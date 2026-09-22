@@ -244,7 +244,32 @@ function Status({ planet }: { planet: PlanetPlacement }) {
 
       {planet.isRetrograde && (
         <AstroTerm term="retrograde" className="text-gold">
-          <span aria-hidden="true">{RETROGRADE_MARK}</span>
+          {/*
+            Fixed width, in `em`, because ℞ (U+211E) is in no font this
+            app bundles. next/font self-hosts Inter, JetBrains Mono and
+            Cormorant Garamond; none carries Letterlike Symbols, so the
+            browser falls back to whatever the OS provides — Noto on one
+            machine, DejaVu on another — and the glyph's ADVANCE WIDTH
+            differs with it.
+
+            That width fed straight into the table's column layout, so
+            the Status column landed in a different place depending on
+            the reader's operating system. It is why
+            screen-planets-tablet.png differed by 14,845 pixels in CI
+            while passing locally: the same DOM, a different fallback
+            font.
+
+            `em` rather than `ch` or `px`: `ch` is the width of "0" in
+            the ACTIVE font, which is the thing that varies here, and
+            `px` would not track the surrounding type size.
+
+            The glyph still LOOKS different per OS. That is cosmetic and
+            inherent to using a character we do not ship; the layout
+            shifting underneath it was not.
+          */}
+          <span aria-hidden="true" className="inline-block w-[1em] text-center">
+            {RETROGRADE_MARK}
+          </span>
           <span className="sr-only">retrograde</span>
         </AstroTerm>
       )}

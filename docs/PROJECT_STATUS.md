@@ -3516,3 +3516,61 @@ reading a summary:
 **What remains hardware-bound:** nothing in the gate. The RAM fault is still real and
 still needs replacing — it corrupted a build dependency during this session — but the
 Phase 4 numbers no longer rest on it alone.
+
+---
+
+# The visual failure was a real UI defect: a glyph no bundled font contains
+
+The last red CI job. Diagnosed by looking at the images — which was only possible
+because the previous commit made CI upload them.
+
+## What the diff showed
+
+The planetary positions table was **shifted**; the houses section below it matched
+byte-for-byte. Same data, same rows, same values — every column right of the planet
+names landed a few pixels off.
+
+The cause is one character: `RETROGRADE_MARK = '℞'` (U+211E, Letterlike Symbols).
+
+`next/font` self-hosts Inter, JetBrains Mono and Cormorant Garamond. **None of them
+carries that block**, so the browser falls back to whatever the operating system
+provides — Noto on one machine, DejaVu on another — and the glyph's *advance width*
+differs with it. That width fed straight into the table's column layout.
+
+**So this was never only a test problem.** The Status column sat in a different place
+depending on the reader's operating system. The snapshot was reporting a real defect and
+being dismissed as flakiness.
+
+## The fix
+
+The mark now renders in a box of fixed width:
+
+```tsx
+<span aria-hidden="true" className="inline-block w-[1em] text-center">
+```
+
+`em`, not `ch` or `px`: `ch` is the width of "0" *in the active font*, which is the thing
+that varies here, and `px` would not track the surrounding type size.
+
+The glyph still *looks* different per OS. That is cosmetic and inherent to using a
+character we do not ship. The layout shifting underneath it was not.
+
+Accessibility is unchanged — the mark is `aria-hidden` beside an `sr-only` "retrograde",
+and the visible word remains, per the rule that colour never carries meaning alone.
+
+Baselines regenerated: exactly **two** files changed, `screen-planets-desktop` and
+`screen-planets-tablet` — the only screens containing the mark. Nothing else moved,
+which is the evidence the fix is targeted rather than a re-baseline that papers over
+drift.
+
+## Two wrong turns on the way, recorded because both were convincing
+
+- **"It fails locally under CI=1 too."** It does not. `npm ci` — repairing the
+  RAM-corrupted Playwright bundle — had wiped `node_modules` from under the running
+  stack, so the failure was `ERR_CONNECTION_REFUSED`, not a snapshot mismatch. On a
+  healthy stack, 15/15 pass with `CI=1`.
+- **"Two Jaipurs in the fixture, so `.first()` picks a different city."** Plausible and
+  false: populations are 2,711,758 and 612, and the query is
+  `ORDER BY population DESC, ascii_name`. Deterministic. Disproved before reporting.
+
+**595 component tests, 15/15 visual locally, `task verify` green.**
