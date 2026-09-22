@@ -23,11 +23,15 @@ from app.api.complete import get_orchestrator, get_provider_chain
 from app.guards import UnsafeConfigurationError
 from app.orchestrator import CompleteRequest
 from app.providers import (
+    CircuitOpenError,
     CompletionRequest,
     Message,
     NoProviderAvailableError,
+    ProviderError,
+    ProviderRegistry,
     RequestMetadata,
 )
+from app.routing import JobType
 from app.settings import settings
 
 
@@ -668,3 +672,197 @@ class TestADeclaredTierCannotBlessAFreeKey:
         )
 
         assert [p.id for p in get_provider_chain().chain] == ["openai-compatible"]
+
+
+class TestTheShippedChainsBreakerActuallyOpens:
+    """Every breaker test runs against a stub. None runs against this.
+
+    `tests/test_resilience.py` drives `ResilientProvider` directly with an
+    in-memory `Flaky` and an injected fake clock — thorough, and blind to
+    whether the breaker is WIRED. An audit made the shipped chain's
+    breaker incapable of opening and the entire suite stayed green at
+    **881 passed**, because the only thing connecting
+    `llm_circuit_breaker_threshold` to a real request is `_resilient()` in
+    app/api/complete.py, and nothing exercised it.
+
+    §17 asks for the breaker "verified by killing the primary provider
+    mid-run". This kills it by pointing the chain at a closed port and
+    then asserts the breaker opened — which is observable as
+    `CircuitOpenError`, a different type from the connection failures
+    that preceded it.
+    """
+
+    def _chain_against_a_dead_port(
+        self, monkeypatch: pytest.MonkeyPatch, *, threshold: int
+    ) -> ProviderRegistry:
+        import socket as socket_module
+
+        with socket_module.socket() as probe:
+            probe.bind(("127.0.0.1", 0))
+            dead_port = probe.getsockname()[1]
+
+        monkeypatch.setattr(settings, "llm_provider", "openai-compatible")
+        monkeypatch.setattr(settings, "llm_base_url", f"http://127.0.0.1:{dead_port}/v1")
+        monkeypatch.setattr(settings, "llm_provider_tier", "local")
+        monkeypatch.setattr(settings, "llm_fallback_provider", "")
+        # One attempt, so each call costs the breaker exactly one failure
+        # and the arithmetic below is about the breaker rather than about
+        # the retry budget.
+        monkeypatch.setattr(settings, "llm_max_retries", 0)
+        monkeypatch.setattr(settings, "llm_circuit_breaker_threshold", threshold)
+        monkeypatch.setattr(settings, "llm_circuit_breaker_reset_seconds", 60)
+
+        get_provider_chain.cache_clear()
+        return get_provider_chain()
+
+    async def test_it_opens_after_the_configured_threshold(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        threshold = 3
+        chain = self._chain_against_a_dead_port(monkeypatch, threshold=threshold)
+
+        # Up to the threshold, each call is a genuine connection attempt.
+        for attempt in range(threshold):
+            with pytest.raises(ProviderError) as caught:
+                await chain.complete(_request())
+            assert not isinstance(caught.value, CircuitOpenError), (
+                f"the breaker opened after {attempt} failures, before the threshold of {threshold}"
+            )
+
+        # The next one must not touch the socket at all.
+        with pytest.raises(NoProviderAvailableError) as exhausted:
+            await chain.complete(_request())
+
+        assert (
+            "CircuitOpenError" in str(exhausted.value) or "circuit" in str(exhausted.value).lower()
+        ), (
+            f"after {threshold} consecutive failures the chain still attempted the "
+            f"dead provider: {exhausted.value}"
+        )
+
+        get_provider_chain.cache_clear()
+
+    async def test_the_threshold_setting_reaches_the_breaker(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The wiring, isolated.
+
+        `tests/test_guards.py:318` asserts the DEFAULT VALUE of
+        `llm_circuit_breaker_threshold` is 5 — which is a test of a
+        constant, not of a connection. A breaker hardcoded to any other
+        number satisfies it.
+
+        Two different thresholds, so the assertion is that the setting
+        CHANGES behaviour rather than that some breaker exists.
+        """
+        for threshold in (1, 4):
+            chain = self._chain_against_a_dead_port(monkeypatch, threshold=threshold)
+
+            failures_before_open = 0
+            for _ in range(threshold + 2):
+                try:
+                    await chain.complete(_request())
+                except NoProviderAvailableError as err:
+                    if "circuit" in str(err).lower() or "CircuitOpen" in str(err):
+                        break
+                    failures_before_open += 1
+                except ProviderError:
+                    failures_before_open += 1
+
+            assert failures_before_open == threshold, (
+                f"threshold={threshold} but the breaker opened after "
+                f"{failures_before_open} failures — the setting is not reaching it"
+            )
+            get_provider_chain.cache_clear()
+
+
+class TestTheAdminRoutingOverrideChangesWhatServes:
+    """§17: "overridable from admin **without deploy**".
+
+    The only `PATCH /v1/routing` call anywhere in the suite was inside an
+    auth parametrisation, sent with no token or a wrong one — so it was
+    rejected at the middleware and never reached the handler. The handler
+    itself, and the property it exists for, were untested.
+
+    An audit made `Orchestrator.router` return a COPY — the precise
+    defect its own docstring warns about, *"an admin override that
+    mutated a copy would return 200 and change nothing, which is the
+    worst possible outcome for a control an operator reaches for during
+    an incident"* — and all **124 tests passed**.
+
+    So these assert on the TIER A JOB RESOLVES TO after the patch, not on
+    the 200 or on the echoed body. A copy-returning router satisfies both
+    of those.
+    """
+
+    def _client(self):  # type: ignore[no-untyped-def]
+        from fastapi.testclient import TestClient
+
+        from app.main import app
+
+        return TestClient(app)
+
+    def _auth(self) -> dict[str, str]:
+        from app.middleware import INTERNAL_TOKEN_HEADER
+
+        return {INTERNAL_TOKEN_HEADER: settings.internal_token}
+
+    def test_a_patch_changes_the_tier_the_orchestrator_resolves(self) -> None:
+        get_orchestrator.cache_clear()
+        orchestrator = get_orchestrator()
+        job = JobType.CHAT_RESPONSE
+
+        before = orchestrator.router.tier_for(job)
+        target = "deep" if before != "deep" else "fast"
+
+        with self._client() as client:
+            response = client.patch(
+                "/v1/routing",
+                json={"overrides": [{"job": job.value, "tier": target, "reason": "test"}]},
+                headers=self._auth(),
+            )
+
+        assert response.status_code == 200, response.text
+
+        # The live router, reached the way a request reaches it — not the
+        # response body, which a copy would also have echoed correctly.
+        assert get_orchestrator().router.tier_for(job) == target, (
+            "PATCH /v1/routing returned 200 and changed nothing that serves"
+        )
+
+        # Put it back, since the orchestrator is an lru_cache'd singleton.
+        with self._client() as client:
+            client.patch("/v1/routing", json={"reset": True, "overrides": []}, headers=self._auth())
+        assert get_orchestrator().router.tier_for(job) == before
+
+    def test_the_override_survives_into_a_second_request(self) -> None:
+        """ "Without a deploy" means it outlives the request that set it.
+
+        A router rebuilt per request would pass the test above if that
+        test read the same object it patched. This one re-enters through
+        the HTTP layer.
+        """
+        get_orchestrator.cache_clear()
+        job = JobType.INTENT_CLASSIFICATION
+        before = get_orchestrator().router.tier_for(job)
+        target = "deep" if before != "deep" else "fast"
+
+        with self._client() as client:
+            client.patch(
+                "/v1/routing",
+                json={"overrides": [{"job": job.value, "tier": target, "reason": "test"}]},
+                headers=self._auth(),
+            )
+            read_back = client.get("/v1/routing", headers=self._auth())
+
+        assert read_back.status_code == 200
+        body = read_back.json()
+        assert body["table"][job.value] == target
+        assert body["overridden"][job.value] == target, (
+            "the override is not reported as an override, so an operator "
+            "cannot tell what was changed from what shipped"
+        )
+
+        with self._client() as client:
+            client.patch("/v1/routing", json={"reset": True, "overrides": []}, headers=self._auth())
+        assert get_orchestrator().router.tier_for(job) == before
