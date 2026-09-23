@@ -420,7 +420,7 @@ class TestEveryPhraseIsExercised:
         # Both corpora, and the message normalised the way `detect_crisis`
         # normalises it — otherwise a Devanagari phrase written without a
         # nuqta would read as uncovered against a sentence that has one.
-        corpus = (*CRISIS_CORPUS, *DEVANAGARI_CORPUS, *METHOD_CORPUS)
+        corpus = (*CRISIS_CORPUS, *DEVANAGARI_CORPUS, *METHOD_CORPUS, *INDIRECT_CORPUS)
         uncovered = [
             phrase
             for phrase in crisis_module._CRISIS_PHRASES
@@ -454,9 +454,9 @@ class TestEveryPhraseIsExercised:
         # does. Not equality — one sentence legitimately covers several
         # phrases — but a corpus far smaller than the list means the
         # coverage test above is being satisfied by accident.
-        assert len(CRISIS_CORPUS) + len(DEVANAGARI_CORPUS) + len(METHOD_CORPUS) >= len(
-            crisis_module._CRISIS_PHRASES
-        )
+        assert len(CRISIS_CORPUS) + len(DEVANAGARI_CORPUS) + len(METHOD_CORPUS) + len(
+            INDIRECT_CORPUS
+        ) >= len(crisis_module._CRISIS_PHRASES)
 
 
 # ─── the static response ─────────────────────────────────────────────
@@ -1072,7 +1072,7 @@ class TestDevanagariIsCovered:
             # uncovered and push someone to duplicate the sentences.
             if not any(
                 re.search(phrase, crisis_module._normalise(m))
-                for m in (*DEVANAGARI_CORPUS, *METHOD_CORPUS)
+                for m in (*DEVANAGARI_CORPUS, *METHOD_CORPUS, *INDIRECT_CORPUS)
             )
         ]
         assert not uncovered, (
@@ -1180,4 +1180,104 @@ class TestMethodStatementsInHindi:
         """
         assert detect_crisis("train ke neeche se tunnel jata hai").category is (
             SafetyCategory.CRISIS
+        )
+
+
+INDIRECT_CORPUS = (
+    "ab bas bahut ho gaya",
+    "mujhe maaf kar dena",
+    "koi raasta nahi bacha",
+    "koi rasta nahi bacha",
+    "jeene ka koi matlab nahi",
+    "mera koi nahi hai",
+    "ab aur nahi ho raha",
+    "meri zindagi bekaar hai",
+    "meri zindagi bekar hai",
+    "अब बस बहुत हो गया",
+    "मुझे माफ़ कर देना",
+    "कोई रास्ता नहीं बचा",
+    "जीने का कोई मतलब नहीं",
+    "मेरा कोई नहीं है",
+    "अब और नहीं हो रहा",
+    "मेरी ज़िंदगी बेकार है",
+)
+
+
+class TestTheIndirectPhrasings:
+    """Seven phrasings the reviewer approved on 2026-09-23.
+
+    Each was put to them individually with its ordinary reading spelled
+    out, and each was accepted. §7 asks for a list "biased heavily
+    toward false positives" and this is where that instruction actually
+    costs something — these are the phrasings a keyword list is worst
+    at, because every one has a benign use.
+    """
+
+    @pytest.mark.parametrize("message", INDIRECT_CORPUS)
+    def test_the_approved_phrasings_are_caught(self, message: str) -> None:
+        assert detect_crisis(message).category is SafetyCategory.CRISIS, (
+            f"{message!r} was approved for the list and is not detected"
+        )
+
+    @pytest.mark.parametrize(
+        "message",
+        [
+            # `maaf kar dena` is the FAREWELL construction. These are the
+            # ordinary apologies, and keeping them out is the whole
+            # reason the pattern is not the stem `maaf`.
+            "maaf kijiye, mera sawal galat tha",
+            "maaf karna, der ho gayi",
+            "maaf kar do yaar",
+            "मुझे माफ़ कर दीजिए",
+            # `zindagi bekaar`, not bare `bekaar` — otherwise every
+            # complaint about a phone or an app is a crisis.
+            "yeh purana phone bekaar hai",
+            "यह फोन बेकार है",
+        ],
+    )
+    def test_the_nearby_ordinary_phrasings_stay_quiet(self, message: str) -> None:
+        """What the tight scoping buys.
+
+        A stem like `maaf` or bare `bekaar` would turn every apology and
+        every complaint in the product into a helpline message, which is
+        how a list becomes biased-to-useless — people learn to ignore it
+        and it stops working for the person it exists for.
+        """
+        assert detect_crisis(message).category is SafetyCategory.NONE, (
+            f"{message!r} is an ordinary sentence and was flagged"
+        )
+
+    @pytest.mark.parametrize(
+        ("message", "ordinary_meaning"),
+        [
+            ("sorry, maaf kar dena mujhe", "an apology using the farewell form"),
+            ("mujhe maaf kar dena, main kal nahi aa paunga", "cannot come tomorrow"),
+            ("is sheher me mera koi nahi hai", "no family in this city"),
+            ("office me ab aur nahi ho raha", "work overload"),
+            ("bas bahut ho gaya is traffic ka", "traffic"),
+            ("इस शहर में मेरा कोई नहीं है", "no family in this city"),
+        ],
+    )
+    def test_the_accepted_false_positives_are_recorded(
+        self, message: str, ordinary_meaning: str
+    ) -> None:
+        """These flag, and that is the deal the reviewer accepted.
+
+        Asserting the CURRENT behaviour rather than the desired one, on
+        purpose. A reviewer said yes to seven phrasings knowing each had
+        an ordinary reading; this is what that costs, measured rather
+        than described — six of twelve ordinary sentences in the probe.
+
+        If someone later tightens one of these patterns, this test fails
+        and tells them exactly which benign sentence they just un-flagged
+        and which crisis phrasing they may have lost with it. That is the
+        conversation worth forcing.
+
+        `mera koi nahi hai` and `ab aur nahi ho raha` account for most of
+        it and are the first two to revisit if the flag rate is too high
+        in real traffic.
+        """
+        assert detect_crisis(message).category is SafetyCategory.CRISIS, (
+            f"{message!r} ({ordinary_meaning}) no longer flags — if that was "
+            f"deliberate, check which crisis phrasing went with it"
         )

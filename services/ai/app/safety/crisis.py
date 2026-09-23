@@ -245,6 +245,37 @@ _CRISIS_PHRASES = (
     r"ट्रेन के नीचे",
     r"खुद को खत्म",
     r"खुद को मार",
+    # ─── indirect and farewell phrasings ─────────────────────────────
+    #
+    # Approved by the reviewer on 2026-09-23, all seven, after each was
+    # put to them individually with its ordinary reading spelled out.
+    # These are the ones a keyword list is worst at: every one has a
+    # benign use, and §7's "biased heavily toward false positives" is
+    # the reason they are here anyway.
+    #
+    # Written TIGHT rather than as stems, because the benign reading is
+    # usually a shorter phrase. `maaf kar dena` is the farewell
+    # construction; `maaf kijiye` / `maaf karo` / `maaf kar do` are
+    # ordinary apologies and are deliberately NOT matched. A stem like
+    # `maaf` would turn every "sorry" in the product into a helpline.
+    #
+    # The cost is real and is measured in the tests: `mujhe maaf kar
+    # dena, main kal nahi aa paunga` — "forgive me, I can't come
+    # tomorrow" — does flag. The reviewer was shown that and accepted it.
+    r"bas bahut ho gaya",
+    r"maaf kar dena",
+    r"koi ra+sta nahi bacha",  # raasta / rasta
+    r"jeene ka koi matlab nahi",
+    r"mera koi nahi hai",
+    r"ab aur nahi ho raha",
+    r"zindagi bek[ae]+r",  # bekaar / bekar
+    r"बस बहुत हो गया",
+    r"माफ कर देना",  # माफ़ — nuqta normalised away
+    r"कोई रास्ता नहीं बचा",
+    r"जीने का कोई मतलब नहीं",
+    r"मेरा कोई नहीं",
+    r"अब और नहीं हो रहा",
+    r"जिंदगी बेकार",  # ज़िंदगी — nuqta normalised away
 )
 
 CRISIS_PATTERN = re.compile("|".join(f"(?:{phrase})" for phrase in _CRISIS_PHRASES), re.IGNORECASE)

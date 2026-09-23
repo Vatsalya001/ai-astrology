@@ -16,8 +16,10 @@ This is the highest-stakes list in the repository.
 > `jump off`, `overdose` and `cutting myself`, and the Hinglish and Devanagari sides
 > carried **no method statements at all**. Those are now added (third table below).
 >
-> **Still open:** the indirect and goodbye phrasings in the fourth table, which need a
-> judgement call this review has not yet made.
+> **All seven indirect phrasings were then approved by the same reviewer**, each put to
+> them individually with its ordinary reading spelled out. They are in the list. What
+> that costs is measured below rather than described — six of twelve ordinary sentences
+> in an adversarial probe now flag.
 
 A test proves a regex matches the sentence we wrote down. It cannot prove that is the
 sentence a real person in distress actually writes. That gap is what this review closes.
@@ -115,10 +117,12 @@ a list biased heavily toward false positives, and the existing `end it with X` c
 already accepted flagging "end it with him" to catch "end it with pills". Say so if you
 think that is wrong for this one.
 
-## Still undecided — the indirect phrasings
+## The indirect phrasings — APPROVED 2026-09-23, and what they cost
 
-These were generated in the same pass, all currently **miss**, and none were added
-because each has an ordinary reading. This is the judgement call the review has not made.
+Generated in the same pass; all seven missed. Each was put to the reviewer individually
+with its ordinary reading spelled out, and **all seven were approved**. §7 asks for a
+list "biased heavily toward false positives" and this is where that instruction actually
+costs something.
 
 | phrase | literal | why it is hard |
 |---|---|---|
@@ -130,9 +134,31 @@ because each has an ordinary reading. This is the judgement call the review has 
 | `ab aur nahi ho raha` / `अब और नहीं हो रहा` | "cannot take any more" | said about work, illness, exam stress |
 | `meri zindagi bekaar hai` / `मेरी ज़िंदगी बेकार है` | "my life is worthless" | real distress; not necessarily suicidal |
 
-**The question for each:** if a person typed ONLY this and nothing else, is a helpline
-the right response? Yes → add it. The bias says lean yes; the existing list's care about
-not flagging "I've been feeling low lately" says do not lean all the way.
+### What this bought, measured
+
+Twelve ordinary sentences were probed afterwards. **Six now flag:**
+
+| ordinary sentence | what it means | why it flags |
+|---|---|---|
+| `sorry, maaf kar dena mujhe` | an apology, farewell form | `maaf kar dena` |
+| `mujhe maaf kar dena, main kal nahi aa paunga` | "can't come tomorrow" | `maaf kar dena` |
+| `is sheher me mera koi nahi hai` | "no family in this city" | `mera koi nahi hai` |
+| `इस शहर में मेरा कोई नहीं है` | same, Devanagari | `मेरा कोई नहीं` |
+| `office me ab aur nahi ho raha` | work overload | `ab aur nahi ho raha` |
+| `bas bahut ho gaya is traffic ka` | traffic | `bas bahut ho gaya` |
+
+Six stayed quiet, and that is the tight scoping working: `maaf kijiye`, `maaf karna`,
+`maaf kar do`, `माफ़ कर दीजिए` are ordinary apologies and are NOT matched — only the
+farewell construction `maaf kar dena` is. Likewise `zindagi bekaar` rather than bare
+`bekaar`, so a complaint about a phone is not a crisis.
+
+Every one of these six is pinned by a test asserting the CURRENT behaviour, so tightening
+a pattern later fails a test that names the benign sentence being un-flagged and asks
+which crisis phrasing went with it.
+
+**`mera koi nahi hai` and `ab aur nahi ho raha` account for most of the spillover.**
+They are the first two to revisit if the flag rate is too high in real traffic — which
+is a question only production data answers, not a reviewer.
 
 ### Two things to know before reviewing these
 
