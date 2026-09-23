@@ -225,7 +225,12 @@ Owed to the Phase 4 gate and **not closeable by the suite**:
   The share screen was not a cosmetic gap: `listShares` and `revokeShare` had zero
   call sites, so a user could mint a 30-day bearer link to a birth chart and had no
   way to see or revoke it — and revocation is the owner's only remedy.
-- `memtest86+` unrun. Still true, and still the caveat below.
+- ~~`memtest86+` unrun.~~ **Removed from the open list 2026-09-23.** It answers "which
+  DIMM", which is a laptop-repair question, not a phase one. What the project needed is
+  done and is in the caveat block above: the integrity check is clean across every
+  tracked file, `de421.bsp` matches its SHA-256, and CI re-verifies everything on ten
+  runners that are not this machine. The hardware is still suspect — that is why the
+  caveat stays.
 
 ---
 
@@ -370,6 +375,11 @@ clear the caches before believing it is your code.** ADR-007 already pins the Go
 toolchain because this machine's system Go has a corrupted stdlib byte; this looks
 related and is worth a proper diagnosis before it costs somebody an afternoon.
 
+
+**Snapshot as of Phase 3 close. Kept as written; do not read as current.**
+Two of these three have since closed — ADR-012 records the hand-rolled auth, and
+`memtest86+` came off the open list on 2026-09-23 (see the caveat block at the top).
+The CSP item is still open and now belongs to Phase 5.
 
 - Web CSP still has `script-src 'unsafe-inline'` (from Phase 1; blocks a **Phase 5** item).
 - No ADR for hand-rolled auth.

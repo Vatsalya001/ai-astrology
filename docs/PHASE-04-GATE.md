@@ -35,8 +35,15 @@ argument for auditing a checklist by running it: reading it found neither.
 
 > ⚠️ **Read `docs/PROJECT_STATUS.md` on the ephemeris corruption before trusting any
 > number on this page.** Two single-bit flips were found in a committed 16.8 MB binary
-> on 2026-09-21, and `memtest86+` has never been run on this machine. Every measurement
-> in this report was taken on it.
+> on 2026-09-21, and seven more by a userspace memory test on 2026-09-22.
+>
+> **Narrowed 2026-09-23.** This used to say "every measurement in this report was taken
+> on it", which was true and too broad — a caveat that overstates gets discounted
+> whole, and then the part that is true stops being heard. CI re-runs the suite, the
+> golden fixtures and a byte-for-byte integrity check on ten GitHub runners, so those
+> results are reproduced on hardware with no known fault. **The accuracy number is the
+> exception**: it needs a provider key, CI cannot run it, and its only mitigation is
+> two independent local runs agreeing within noise.
 
 ---
 
