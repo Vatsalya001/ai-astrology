@@ -2,25 +2,30 @@
 
 ```
 Phase: 4 — AI Infrastructure
-Gate:  ⚠️ NOT CLOSED. Reopened 2026-09-23 by an execution audit.
+Gate:  17 of 19 §17 items ticked in the spec, each against a named,
+       re-runnable command. TWO REMAIN OPEN — both below.
        21 tasks done. Nothing is exposed to users in this phase.
 
-       This line used to read "✅ 19 of 19 §17 items closed". It was
-       wrong in a way worth recording, because the same mistake is
-       cheap to make again: in the spec that DEFINES the gate,
-       docs/specs/PHASE-04-AI-INFRASTRUCTURE.md §17, eighteen of the
-       nineteen checkboxes were unticked and the single [x] was a
-       descope (ADR-011), not a completion. Nothing had ever been
-       ticked. The claim of closure lived only here.
+       Read the boxes in docs/specs/PHASE-04-AI-INFRASTRUCTURE.md, not
+       this line. It used to read "✅ 19 of 19 closed" while eighteen of
+       nineteen boxes in the spec were unticked and the one [x] was a
+       descope, not a completion — nothing had ever been ticked, and the
+       closure existed only here. A count in a state file is the thing
+       that rots; the boxes are the artifact.
 
-       An audit re-checked 91 claims across §14, §16 and §17 by
-       RUNNING them: 51 passed, 30 failed, 10 could not be proven
-       either way, and 8 initial passes were overturned on a second,
-       adversarial look. Five were real defects, now fixed — see
-       docs/PROJECT_STATUS.md, last sections.
+       ── WHAT IS STILL OPEN ────────────────────────────────────
+       1. §17 "Ollama runs fast/chat/deep locally at zero cost", and
+          the matching §16 line. Ollama is bound to 127.0.0.1:11434 so
+          no container can reach it. Needs OLLAMA_HOST=0.0.0.0, which
+          exposes it beyond loopback — an operator's decision, not a
+          code change. The wiring in the repo is correct.
+       2. §16 "Every AI call logged by Go". Phase 4 has one Go AI call
+          site, the admin playground, which deliberately writes no row.
+          The machinery is built and tested; nothing exists to record
+          until Phase 5 ships chat. The line belongs in Phase 5.
 
-       The gate closes when the boxes in the SPEC are ticked, each
-       against evidence. Not here.
+       Neither is fixable from this repository today. Everything else
+       that was found IS fixed.
 
        Accuracy CLOSED at 180/200 = 90.0% (qwen/qwen3.8-27b via Groq,
        prompt v4, 4 provider errors — under the 5% the script tolerates

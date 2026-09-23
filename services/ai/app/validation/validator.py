@@ -81,10 +81,58 @@ _GUARANTEED = re.compile(
 
 _CERTAINTY = re.compile(
     r"\b(?:"
-    r"you will (?:get married|have a child|conceive|be promoted|become rich|die)|"
-    r"you are going to (?:get married|have a child|die)|"
+    r"you will (?:get married|be promoted|become rich)|"
+    r"you are going to get married|"
     r"this will definitely happen|"
     r"it will surely"
+    r")\b",
+    re.IGNORECASE,
+)
+
+# Predictions that harm whether or not they are hedged.
+#
+# `.claude/rules/ai.md`: "No guaranteed outcomes: medical, marriage,
+# pregnancy, death, legal, financial." `_GUARANTEED` above catches the
+# ones wearing a certainty marker — "you will DEFINITELY be promoted" —
+# and `_CERTAINTY` warns about predictive tone. Between them they left a
+# gap that an audit walked straight through:
+#
+#     "You will die in 2030."               -> warn only, served
+#     "You will fall seriously ill in 2027." -> not flagged at all
+#     "Your business will fail within two years." -> not flagged at all
+#
+# The split is not about how confident the sentence sounds. It is about
+# what happens if the reader believes it. Being told you will be
+# promoted and then not being promoted is a disappointment; being told
+# you will fall seriously ill, or that you will never have children, is
+# the kind of thing people reorganise their lives around.
+#
+# `die`, `conceive` and `have a child` moved UP from `_CERTAINTY` for
+# exactly that reason. Marriage, promotion and wealth stayed there: they
+# are a tone problem, and blocking them spends a regeneration on a
+# clumsy sentence rather than a dangerous one.
+_HARMFUL_PREDICTION = re.compile(
+    r"\b(?:"
+    # Death.
+    r"you (?:will|are going to|shall) (?:die|pass away|not survive)|"
+    r"your (?:death|end) will (?:come|be)|"
+    r"you (?:have|will have) (?:only )?\d+ (?:more )?(?:years|months|days) (?:to live|left)|"
+    # Serious illness. Deliberately not every mention of health — this
+    # is the PREDICTIVE form, which `_MEDICAL` does not cover because
+    # that one is about diagnosis and advice.
+    r"you will (?:fall|become|get) (?:seriously |gravely |critically )?ill|"
+    r"you will (?:develop|contract|suffer from|be diagnosed with)|"
+    r"you will have (?:an accident|a serious accident|surgery)|"
+    # Pregnancy and infertility. Named in the rules, and the sentence a
+    # couple trying to conceive would remember for years.
+    r"you will (?:never )?(?:conceive|have (?:a child|children))|"
+    r"you are going to have a child|"
+    r"you (?:will|can) never (?:have children|become a (?:mother|father)|conceive)|"
+    r"you will (?:be )?(?:infertile|barren)|"
+    # Financial ruin.
+    r"your business will (?:fail|collapse|go bankrupt)|"
+    r"you will (?:lose (?:your|everything|all your)|go bankrupt|be ruined)|"
+    r"you will never (?:be successful|succeed|recover financially)"
     r")\b",
     re.IGNORECASE,
 )
@@ -111,6 +159,10 @@ _PHRASE_RULES: list[tuple[re.Pattern[str], ViolationType, Severity]] = [
     # a guaranteed outcome, or medical advice.
     (_GUARANTEED, "guaranteed_outcome", "block"),
     (_MEDICAL, "medical_claim", "block"),
+    # Death, serious illness, infertility, financial ruin. Blocks for the
+    # same reason the two above do: the sentence is one this product must
+    # never emit, hedged or not. See _HARMFUL_PREDICTION.
+    (_HARMFUL_PREDICTION, "guaranteed_outcome", "block"),
     # Warn, not block. These are predictive framings that the prompt
     # rules already discourage, and blocking every one would regenerate
     # a large share of otherwise good answers — which costs money and

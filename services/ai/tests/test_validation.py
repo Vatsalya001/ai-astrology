@@ -539,3 +539,87 @@ def test_the_two_luminary_signs_are_checked() -> None:
     """
     assert blocks("Your moon sign is Aries.", FULL_CHART)
     assert not blocks("Your moon sign is Scorpio.", FULL_CHART)
+
+
+class TestPredictionsThatHarmRegardlessOfHedging:
+    """`.claude/rules/ai.md`: "No guaranteed outcomes: medical, marriage,
+    pregnancy, death, legal, financial."
+
+    `_GUARANTEED` caught the ones wearing a certainty marker and
+    `_CERTAINTY` warned about predictive tone, and between them an audit
+    found a gap:
+
+        "You will die in 2030."                     -> warn only, served
+        "You will fall seriously ill in 2027."      -> not flagged at all
+        "Your business will fail within two years." -> not flagged at all
+
+    The split is not about how confident a sentence sounds. It is about
+    what happens if the reader believes it. Being told you will be
+    promoted and then not being promoted is a disappointment; being told
+    you will never have children is something people reorganise their
+    lives around.
+    """
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "You will die in 2030.",
+            "You are going to die during this dasha.",
+            "You have only 3 years left.",
+            "You will fall seriously ill in 2027.",
+            "You will develop a serious condition.",
+            "You will be diagnosed with something difficult.",
+            "You will have an accident this year.",
+            "You will never have children.",
+            "You will never conceive.",
+            "You are going to have a child this year.",
+            "You will be infertile.",
+            "Your business will fail within two years.",
+            "You will go bankrupt.",
+            "You will lose everything you have built.",
+            "You will never succeed.",
+        ],
+    )
+    def test_it_blocks(self, text: str) -> None:
+        violations = OutputValidator(system_prompt="").validate(text, None)
+        assert OutputValidator.blocks(violations), f"{text!r} was served to a user"
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "You will get married soon.",
+            "You will be promoted next year.",
+            "You will become rich.",
+        ],
+    )
+    def test_tone_problems_still_only_warn(self, text: str) -> None:
+        """The control on the other side.
+
+        These stayed in the warn tier deliberately. Blocking them spends
+        a regeneration on a clumsy sentence rather than a dangerous one,
+        and a validator that blocks everything predictive would
+        regenerate a large share of otherwise good answers.
+        """
+        violations = OutputValidator(system_prompt="").validate(text, None)
+        assert violations, f"{text!r} was not flagged at all"
+        assert not OutputValidator.blocks(violations), f"{text!r} should warn, not block"
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "Saturn in the tenth is traditionally read as a slow climb.",
+            "This period is often associated with health matters — do see a doctor.",
+            "Many people find this transit brings a change of role.",
+            "Your tenth house suggests a focus on career.",
+            "This is traditionally a time when family matters come forward.",
+        ],
+    )
+    def test_ordinary_traditional_framing_is_untouched(self, text: str) -> None:
+        """The control that keeps the product usable.
+
+        `.claude/rules/ai.md` asks for traditional framing — "is
+        traditionally read as" — and every one of these is the shape the
+        prompt rules ask the model to produce. A validator that flagged
+        them would block its own house style.
+        """
+        assert OutputValidator(system_prompt="").validate(text, None) == []

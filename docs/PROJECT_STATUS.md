@@ -3813,3 +3813,70 @@ command you can re-run, which is why every corrected row now carries one.
   either way.
 - **`memtest86+` still unrun**, and a Docker build during this session failed with
   `unexpected digest ... copied` until the buildx cache was cleared.
+
+# Phase 4 gate: 17 of 19 ticked, against a command each
+
+2026-09-23, continuing the audit above. Every box in §14, §16 and §17 was resolved —
+ticked with the command that proves it, or left open with the reason.
+
+## What ticking them turned up
+
+Four more defects, found by trying to attach evidence to a line rather than by
+reading it:
+
+**Prompt-injection detection was a mock of itself.** §14 asks that attempts are
+"flagged and neutralised". NEUTRALISE worked. FLAGGING rested entirely on the model
+screener, and every test fed that screener a stubbed
+`{"category": "prompt_injection"}` — so the property was asserted against a stand-in
+for the thing being tested, and during a provider outage there was no detection at
+all, while the crisis pass beside it went on working offline.
+`app/safety/injection.py` is the missing half, applied only as an upgrade from NONE
+so a CRISIS verdict can never be downgraded into steering text.
+
+The list is tight, and the negative cases are the point: this product invites
+"pretend I was born an hour later" and "forget what I said about my job", so
+`pretend`, `forget` and `act as` appear nowhere on their own.
+
+**The output validator drew its severity boundary in the wrong place.** It was
+tracking how confident a sentence *sounds* rather than what happens if the reader
+believes it:
+
+    "You will die in 2030."                      warn only, served
+    "You will fall seriously ill in 2027."       not flagged at all
+    "Your business will fail within two years."  not flagged at all
+
+`.claude/rules/ai.md` names those domains outright. Death, serious illness,
+infertility and financial ruin now block, hedged or not. Marriage, promotion and
+wealth stay in the warn tier — being told you will be promoted and then not being
+promoted is a disappointment, not a harm.
+
+**`ProviderRegistry.health()` had a docstring saying it was "for the health
+endpoint" and no caller outside a test**, while the endpoint's own comment claimed a
+probe "calls an LLM and costs money on every poll" — it calls `models.list()`, which
+spends no tokens. `GET /health?probe=true` now reports per-provider reachability,
+opt-in, with `status` unaffected by what it finds.
+
+**Adding that query parameter broke the Go build** — the OpenAPI changed, the client
+regenerated, the call site no longer compiled. Caught by `task verify`, which is
+exactly what generating cross-service clients from the spec is for.
+
+## The two that remain, and why neither is code
+
+**Ollama is bound to `127.0.0.1:11434`.** No container reaches it whatever hostname
+is used. The repo's wiring is right — compose defaults to `host.docker.internal`
+with `extra_hosts`, and running the service on the host works. Closing it means
+`OLLAMA_HOST=0.0.0.0`, which exposes Ollama beyond loopback: an operator's decision.
+Until then the accuracy number comes from Groq's free tier, which is free but not
+local.
+
+**"Every AI call logged by Go"** has nothing to log. Phase 4's only Go AI call site
+is the admin playground, which deliberately writes no row and explains why —
+mixing operator experiments into the usage table would corrupt the cost-per-request
+figure that table exists to produce. The machinery is built and tested. The line
+belongs in Phase 5.
+
+## Carried, unchanged
+
+Hinglish crisis phrases still unreviewed by a native speaker, and Devanagari matches
+nothing. `memtest86+` still unrun. `services/ai/.env` still holds a live Groq key in a
+now-public repo — nothing leaks it, and it is worth rotating.

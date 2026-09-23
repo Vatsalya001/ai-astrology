@@ -619,18 +619,57 @@ is a guard you should not trust.
 
 ## 14. Security checklist
 
-- [ ] API keys from env only; never logged, never in error messages, never in telemetry
-- [ ] `LLM_API_KEY` absent from every log line and Sentry payload in both services
-- [ ] **PII guard blocks non-paid providers in production — tested**
-- [ ] User input never interpolated into the system prompt section
-- [ ] Prompt-injection attempts flagged and neutralised
-- [ ] System prompts never returned to clients, including in error responses
-- [ ] `prompt_leak` validation active on all output
-- [ ] `ai_request_logs` stores IDs and token counts — **never message content**
-- [ ] `ai-service` not publicly reachable; `X-Internal-Token` required
-- [ ] `ai-service` DB role remains read-only (regression-tested)
-- [ ] Admin AI routes `SUPER_ADMIN` only, audit-logged in Go
-- [ ] Playground cannot be pointed at real user data
+**Ticked 2026-09-23 against a re-runnable command each**, after an execution audit
+found five of these false. The command is named on every line; the evidence and the
+defects it found are in [`docs/PHASE-04-GATE.md`](../PHASE-04-GATE.md).
+
+- [x] API keys from env only; never logged, never in error messages, never in telemetry
+      **Was false.** `_scrub_event` scanned `llm_api_key` and `internal_token` only;
+      `llm_fallback_api_key` reached Sentry verbatim — the credential used precisely
+      when the primary is failing, which is when events are collected. Now
+      parametrised over all three, so a fourth added to Settings fails a test.
+      `pytest tests/test_observability.py -k every_configured_credential`
+- [x] `LLM_API_KEY` absent from every log line and Sentry payload in both services
+      `pytest tests/test_observability.py -q`
+- [x] **PII guard blocks non-paid providers in production — tested**
+      `pytest tests/test_guards.py -q`. Note the accepted limit, now pinned by
+      `TestTheGuardCannotSeeABaseURL`: the guard reads the declared tier and cannot
+      see `LLM_BASE_URL`, so `openai-compatible` + `paid` boots against a free
+      endpoint. Deliberate per ADR-011 — that adapter has no vendor identity to infer
+      from — and no longer undocumented in the suite.
+- [x] User input never interpolated into the system prompt section
+      `pytest tests/test_orchestrator.py -k never_in_the_system_prompt`
+- [x] Prompt-injection attempts flagged and neutralised
+      **Was false in the half that matters.** NEUTRALISE worked; FLAGGING rested
+      entirely on the model screener, and every test fed it a stubbed verdict — so it
+      was asserted against a mock of itself and did not work at all during a provider
+      outage. `app/safety/injection.py` is the offline pass, shaped like the crisis
+      one and applied only as an upgrade from NONE so a CRISIS verdict cannot be
+      downgraded. `pytest tests/test_safety.py -k Injection`
+- [x] System prompts never returned to clients, including in error responses
+      **Was false on a 200.** Error responses were clean; the corrective retry
+      returned the internal correction text to the user as their reading. See the
+      next line — same fix.
+- [x] `prompt_leak` validation active on all output
+      **Was false.** The validator was built once from the FIRST prompt and re-used
+      on the regenerated answer, which was produced from a different one.
+      `pytest tests/test_orchestrator.py -k parrots_the_correction`
+- [x] `ai_request_logs` stores IDs and token counts — **never message content**
+      No content column exists, so it cannot leak what it cannot store.
+      `psql -c "\d ai_request_logs"` + `go test ./internal/ailogs/...`
+- [x] `ai-service` not publicly reachable; `X-Internal-Token` required
+      `pytest tests/test_http_surface.py -q` — constant-time compare, every route
+      except the four `PUBLIC_PATHS`.
+- [x] `ai-service` DB role remains read-only (regression-tested)
+      Enforced by Postgres grants, not convention.
+      `REQUIRE_CONTAINERS=1 go test ./internal/platform/db/... -tags=integration`
+- [x] Admin AI routes `SUPER_ADMIN` only, audit-logged in Go
+      `go test ./internal/httpapi/... -tags=integration -run AdminAI`. The route
+      table is walked and set-compared to the test's list, so a new admin route
+      cannot be added without appearing in it.
+- [x] Playground cannot be pointed at real user data
+      Asserted on what crosses the boundary, not on what the handler accepts.
+      `go test ./internal/ailogs/... -run Playground`
 - [x] Rate limiting on the internal completion path (a runaway loop is a real cost event)
       `ratelimit.AIPlaygroundPerAdmin` — 20 per 5 minutes, keyed on the
       SUPER_ADMIN's user id. **This was ticked in the gate table while the route
@@ -638,7 +677,18 @@ is a guard you should not trust.
       the backstop sized for ordinary API traffic, which at this service's prompt
       size is roughly 1.7 million tokens a minute. Fails CLOSED, unlike the
       global throttle — those protect availability, this protects a bill.
-- [ ] Crisis responses are static, human-written text — never model-generated
+- [x] Crisis responses are static, human-written text — never model-generated
+      Asserted on the PROVIDER (`generator.requests == []`), not on the text: a test
+      checking the response string passes while the bypass is broken, as long as
+      something eventually produces the right words.
+      `pytest tests/test_safety.py tests/test_orchestrator.py -q`
+      **Caveat, and it is real:** the phrase list was half unprotected — 26 of 50
+      phrases were matched by no test, including `suicide`, `self-harm` and both
+      feminine Hinglish forms, and deleting them left the suite green.
+      `CRISIS_CORPUS` now pins one sentence per phrase. Separately, **Devanagari is
+      not matched at all** and the Hinglish list has never been reviewed by a native
+      speaker — see [`docs/HINGLISH-CRISIS-REVIEW.md`](../HINGLISH-CRISIS-REVIEW.md),
+      whose reviewer column is still empty.
 
 ---
 
@@ -661,6 +711,14 @@ is a guard you should not trust.
 Global DoD **plus**:
 
 - [ ] Whole AI stack runs on local free models at zero cost
+      **NOT MET, and not from the repo.** Ollama is bound to `127.0.0.1:11434`, so
+      no container reaches it whatever hostname is used — `docker compose exec ai`
+      gets `ConnectionRefusedError` on both `host.docker.internal` and the bridge
+      gateway. The code is right: compose defaults to `host.docker.internal` and maps
+      it via `extra_hosts`, and running ai-service on the host works.
+      Closing it means `OLLAMA_HOST=0.0.0.0`, which exposes Ollama beyond loopback —
+      an operator's decision, not a code change. Until then the accuracy number
+      (§17) comes from Groq's free tier, which is free but not local.
 - [x] ~~Switching to Claude requires changing only env vars~~
       **Superseded by [ADR-011](../decisions/011-remove-anthropic-adapter.md).**
       The property the line asks for — swapping provider without touching code —
@@ -668,17 +726,45 @@ Global DoD **plus**:
       OpenAI-compatible vendor (Groq, Cerebras, OpenRouter, a local Ollama) needs
       only `LLM_BASE_URL` and a key. It is Claude specifically that now needs an
       adapter written, because there is no Anthropic subscription and no free tier.
-- [ ] CI runs the full pipeline with `MockProvider` and makes no network calls
-- [ ] PII guard verified to block production + non-paid provider
+- [x] CI runs the full pipeline with `MockProvider` and ~~makes no network calls~~
+      **makes no network call to a model**
+      **Wording amended 2026-09-23.** As written this line is false on its face: CI
+      calls npm, PyPI, Docker Hub and the Playwright CDN on every run. §17's phrasing
+      — "no CI job makes a network call **to a model**" — is the one that can be
+      true, and is: `tests/conftest.py` blocks every non-loopback `connect`,
+      `connect_ex` and `create_connection`, autouse, so a new test file is covered
+      without opting in. The orchestrator integration suite drives generator,
+      classifier and screener as separate `MockProvider`s.
+      Loopback stays open deliberately, and that is the residual risk: a CI job with
+      an Ollama on localhost would not be blocked. No CI job starts one.
+      `pytest tests/test_no_external_network.py -q`
+- [x] PII guard verified to block production + non-paid provider
+      `pytest tests/test_guards.py -q` — and see the base-URL limit noted in §14.
 - [ ] Every AI call logged by Go with model, prompt version, tokens, latency, integer cost
-- [ ] Intent classifier ≥85% on the labelled set
-- [ ] Output validator blocks fabricated chart facts
+      **NOT SATISFIABLE IN THIS PHASE, and the line should move to Phase 5.**
+      Phase 4 has exactly one Go AI call site — the admin playground — and it
+      deliberately writes no row, with a comment saying why: *"a playground run is an
+      operator experimenting, and mixing it into the usage table would corrupt the
+      cost-per-request figure that table exists to produce"*. `ai_request_logs` has
+      0 rows and every caller of `ailogs.Service.Record` is a test.
+      The machinery is built and tested; there is nothing for it to record until
+      Phase 5 ships chat. The `cost_micros`-is-an-integer half is met — see §17.
+- [x] Intent classifier ≥85% on the labelled set
+      **180/200 = 90.0%**, independently reproduced at **183/200 = 91.5%**, both on
+      `qwen/qwen3.8-27b` via Groq with prompt v4. Two runs agreeing within noise is
+      what makes the number usable on a machine with confirmed RAM faults.
+      A free LOCAL model does not reach the bar: 40% (`llama3.2:3b`), 60.5%
+      (`qwen2.5:7b`). §15 predicted this and named the mitigation that was used.
+- [x] Output validator blocks fabricated chart facts
+      `pytest tests/test_validation.py -q`. Note that in Phase 4 the fact index is
+      always empty (`NoChartContext`), so every extracted personal placement blocks —
+      correct, and a weaker test than it will be once Phase 5 supplies a real index.
 
 ---
 
 ## 17. Phase Gate 🔒
 
-- [ ] `LLMProvider` implemented by all ~~four~~ **three** adapters, all passing the parity suite
+- [x] `LLMProvider` implemented by all ~~four~~ **three** adapters, all passing the parity suite
       **Amended 2026-09-23.** [ADR-011](../decisions/011-remove-anthropic-adapter.md)
       removed the Anthropic adapter and struck through two gate lines below while
       walking past this one, which kept asserting a cardinality that stopped being
@@ -687,6 +773,14 @@ Global DoD **plus**:
       The parity half of this line holds and is not vacuous — seven mutations, one
       per behaviour it claims to guard, each turns the suite red.
 - [ ] Ollama runs `fast`, `chat` and `deep` tiers locally at zero cost
+      **NOT MET on this machine, and not from the repo.** Ollama is bound to
+      `127.0.0.1:11434`, so no container reaches it whatever hostname is used —
+      `ConnectionRefusedError` on both `host.docker.internal` and the bridge gateway.
+      The wiring is correct: compose defaults to `host.docker.internal` with
+      `extra_hosts`, and `services/ai/.env.example` runs it on the host, where
+      `localhost` is right.
+      Closing this means starting Ollama with `OLLAMA_HOST=0.0.0.0`, which exposes it
+      beyond loopback — an operator's decision. See §16.
 - [x] ~~`AnthropicProvider` verified once against a real key, incl. prompt caching~~
       **Superseded by [ADR-011](../decisions/011-remove-anthropic-adapter.md).**
       The adapter is removed; the production provider is deferred to Phase 7.
@@ -697,19 +791,97 @@ Global DoD **plus**:
       ~770 tokens against the ~1024 minimum below which `cache_control` is
       ignored outright, so there was no cache behaviour to observe even with a
       key. Phase 5's corpus crosses that line and a test fails on the day it does.
-- [ ] `MockProvider` powers all CI; no CI job makes a network call to a model
-- [ ] **PII guard blocks `production` + non-paid provider — test proves it**
-- [ ] Model router maps all 10 job types; overridable from admin without deploy
-- [ ] Prompt registry immutable; editing a published module fails CI
-- [ ] Cache breakpoint ordering verified by a prefix-stability test
-- [ ] Intent classifier ≥85% on 200 labelled messages, keyword pre-pass working
-- [ ] Crisis input short-circuits to a static human-written response
-- [ ] Output validator blocks fabricated chart facts, unsupported certainty and prompt leaks
-- [ ] Telemetry envelope persisted by Go; `cost_micros` is an integer
-- [ ] Retry, circuit breaker and fallback verified by killing the primary provider mid-run
-- [ ] Generated Go client compiles from the AI service OpenAPI; contract diff passes
-- [ ] Admin config, usage, incidents and playground all working
-- [ ] No message content in `ai_request_logs`
-- [ ] `ai-service` DB role still read-only
-- [ ] `task verify` green
+- [x] `MockProvider` powers all CI; no CI job makes a network call to a model
+      `pytest tests/test_no_external_network.py -q`. Autouse socket blocker, so a
+      new test file is covered without opting in. Loopback stays open by design and
+      is the residual risk; no CI job starts a local model.
+- [x] **PII guard blocks `production` + non-paid provider — test proves it**
+      `pytest tests/test_guards.py -q`. Three guards also stopped failing open on
+      any environment name but the exact string `production` — `"prod"`,
+      `"Production"`, `""` disabled the PII guard, the internal-token check and the
+      read-only-DB check at once. Now an allowlist, so an unknown env fails closed.
+- [x] Model router maps all 10 job types; overridable from admin without deploy
+      **The override had no test.** Making `Orchestrator.router` return a copy — the
+      defect its own docstring warns about, "would return 200 and change nothing" —
+      left all 124 tests passing. Now asserted on the tier a job RESOLVES to after
+      the PATCH, not on the 200 or the echoed body, both of which a copy produces
+      correctly. `pytest tests/test_complete_route.py -k RoutingOverride`
+- [x] Prompt registry immutable; editing a published module fails CI
+      Verified by doing it: appending one line to `astrology_rules.v1.md` fails
+      `TestImmutability::test_no_published_module_has_changed`, which runs in the
+      `Python — ai` CI job. `pytest tests/test_prompt_registry.py -q`
+- [x] Cache breakpoint ordering verified by a prefix-stability test
+      `pytest tests/ -k prefix` — two different users' charts produce a
+      byte-identical prefix, and changing a stable module moves it.
+      **The breakpoint itself has never engaged**: the prefix is ~770 tokens against
+      the ~1024 minimum below which `cache_control` is ignored. Ordering is what this
+      line asks for and it holds; the caching it enables starts in Phase 5, and a
+      test fails on the day the corpus crosses that line.
+- [x] Intent classifier ≥85% on 200 labelled messages, keyword pre-pass working
+      180/200 = 90.0%, reproduced at 183/200 = 91.5%. Keyword pre-pass: 82/82
+      correct — 100% precision at 41% coverage, asserted in CI. The labelled set is
+      200 synthetic messages, committed. See §16 for the local-model caveat.
+- [x] Crisis input short-circuits to a static human-written response
+      Asserted on the provider receiving nothing, both via the offline keyword pass
+      (zero model calls) and the model screener. Verified live with every provider
+      unreachable. **See §14 for the phrase-coverage defect and the open Devanagari
+      gap.**
+- [x] Output validator blocks fabricated chart facts, ~~unsupported certainty~~
+      **harmful predictions**, and prompt leaks
+      **Wording amended 2026-09-23, and a real gap closed behind it.**
+
+      The line as written was false on its middle third: unsupported certainty
+      *warns* by design — `validator.py` sets severity `warn`, and
+      `test_predictive_framing_warns_rather_than_blocks` asserts
+      `not blocks(violations)`. That is deliberate. Blocking every predictive
+      phrasing regenerates a large share of otherwise good answers, which spends
+      money and latency on a tone problem.
+
+      But auditing the line found the design had drawn the boundary in the wrong
+      place. Severity was tracking **how confident a sentence sounds** rather than
+      **what happens if the reader believes it**, so:
+
+          "You will die in 2030."                      warn only, served
+          "You will fall seriously ill in 2027."       not flagged at all
+          "Your business will fail within two years."  not flagged at all
+
+      `.claude/rules/ai.md` names those domains explicitly — *"No guaranteed
+      outcomes: medical, marriage, pregnancy, death, legal, financial"* — so
+      `_HARMFUL_PREDICTION` now **blocks** death, serious illness, infertility and
+      financial ruin, hedged or not. Marriage, promotion and wealth stay in the warn
+      tier: being told you will be promoted and then not being promoted is a
+      disappointment, not a harm.
+
+      Three tiers, each with its own control test:
+      `pytest tests/test_validation.py -k HarmRegardless`
+- [x] Telemetry envelope persisted by Go; `cost_micros` is an integer
+      `BIGINT`, proven against real Postgres by round-tripping 2^53+1 — a value no
+      `float64` holds. The persistence machinery is built and tested; §16 records
+      that Phase 4 has nothing for it to record yet.
+- [x] Retry, circuit breaker and fallback verified by killing the primary provider mid-run
+      **Was claimed and was not true.** Nothing in the repo killed anything; the
+      breaker tests ran against an in-memory stub with a fake clock, and making the
+      SHIPPED chain's breaker incapable of opening left 881 tests green.
+      A real mid-run kill — a server that reads the completion in full, then sends
+      RST — showed the dying provider receiving the same request three times, because
+      the connection branch assumed "never accepted the request". That also exposed
+      a dead branch: two httpx distributions are installed and
+      `httpx.ConnectError is not httpx2.ConnectError`, so the phase check never
+      matched a real SDK failure.
+      `pytest tests/test_openai_compatible.py tests/test_complete_route.py -q`
+- [x] Generated Go client compiles from the AI service OpenAPI; contract diff passes
+      Exercised for real this session: adding a query parameter to `GET /health`
+      regenerated the client, changed its signature and broke the Go call site —
+      caught by `task verify`, which is what generating from the spec is for.
+- [x] Admin config, usage, incidents and playground all working
+      `go test ./internal/httpapi/... -tags=integration`. Rows seeded and read back
+      through HTTP, asserting totals, cache hit rate, grouping, and that incidents
+      selects only the failure.
+- [x] No message content in `ai_request_logs`
+      No content column exists, so it cannot leak what it cannot store. Asserted
+      against the serialised envelope, so a field added later is caught.
+- [x] `ai-service` DB role still read-only
+      Postgres grants, not convention.
+      `REQUIRE_CONTAINERS=1 go test ./internal/platform/db/... -tags=integration`
+- [x] `task verify` green — lint, test and build across Go, Python and TypeScript.
 - [ ] `docs/PROJECT_STATUS.md` and `.claude/state/current-phase.md` updated
