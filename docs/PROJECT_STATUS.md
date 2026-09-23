@@ -4017,3 +4017,53 @@ closed" survived over eighteen unticked boxes.
 document that described it, and that obligation comes due immediately. The audit's rule
 was "execute the checks rather than reading them". The corollary is that a check which
 passes can still leave prose behind that is now false.
+
+# The helpline was dialled, and the RAM caveat was too broad
+
+2026-09-23.
+
+## findahelpline.com verified from India
+
+Checked by Vatsalya from a normal Indian connection, not a VPN — geolocation is the
+whole mechanism. The directory resolved to India and offered valid, working numbers.
+
+That closes the last item on the safety path, and it is the one I would have blocked
+Phase 5 on: the crisis response makes exactly one claim about the outside world, and
+until today nobody had checked it. Logged in
+`services/ai/app/safety/responses/README.md` with the date, because the claim goes
+stale without a byte changing in this repository.
+
+**Not closed:** no local number has been added back. The three that were removed —
+Tele-MANAS, AASRA, Vandrevala — were transcribed rather than dialled, and they stay out
+until someone dials them. A local number is still the better answer for someone in
+distress than a directory lookup.
+
+## "EVERY NUMBER IN PHASE 4 WAS COMPUTED ON IT" was overstated
+
+That line was true when written. It is now too broad, and that matters in a specific
+way: **a caveat that overstates gets discounted wholesale, and the part that is true
+stops being heard.** The RAM is genuinely faulty; the claim about what it endangers
+needed narrowing, not softening.
+
+What CI re-verifies on clean hardware — ten GitHub-runner jobs, not this laptop:
+
+- the whole suite: 1128 Python, Go unit + integration, TypeScript, e2e
+- **the golden chart fixtures.** A corrupted fixture makes CI compute one value and
+  compare it to another, and fail. Green CI means fixture and computation agree on a
+  machine with no known fault — which is a stronger statement than it looks.
+- the cost arithmetic, unit-tested
+- every tracked file byte-for-byte: `check-integrity.sh` runs in CI (`ci.yml:158`) and
+  in `task verify`, so corruption of a committed artifact fails the build instead of
+  waiting to be noticed
+
+What still carries the caveat in full: **the 90.0% classifier accuracy.** It needs a
+provider key, so CI cannot run it. The only mitigation is that two independent runs
+agreed within noise (180/200 and 183/200) — which is what makes the number usable, not
+a clean bill of health.
+
+Verified today: full integrity check clean, every tracked file matches the index, and
+`de421.bsp` — the 16.8 MB kernel corrupted twice — matches its committed SHA-256.
+
+**So memtest86+ answers "which DIMM", which is a laptop-repair question.** It is not a
+Phase 4 blocker and not a Phase 5 one. The accuracy number is the single measurement
+worth re-running once the hardware is replaced.

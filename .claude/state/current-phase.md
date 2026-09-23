@@ -32,12 +32,16 @@ Gate:  CLOSED 2026-09-23. §17 19/19, §14 14/14, §16 6/7.
        machine (bound to 127.0.0.1). Use `task dev:ai`.
 
        The crisis list was reviewed on 2026-09-23 and grew from 50
-       phrases to 100 across three scripts — but whether those are the
-       phrasings real users write is a question only production data
-       answers, and NOBODY HAS DIALLED THE HELPLINE the static response
-       points at. That is the one open item on the safety path.
+       phrases to 100 across three scripts. The helpline the static
+       response points at was dialled and verified from India the same
+       day — see app/safety/responses/README.md, which carries the date
+       because the claim goes stale without a byte changing here.
 
-       memtest86+ is still unrun.
+       What remains is not closeable from the repo: whether these are
+       the phrasings real users write is a production-data question.
+       `mera koi nahi hai` and `ab aur nahi ho raha` cause most of the
+       false positives and are the first two to revisit if the flag rate
+       runs high.
 
        Accuracy CLOSED at 180/200 = 90.0%, reproduced at 183/200 =
        91.5% (qwen/qwen3.8-27b via Groq, prompt v4). Hosted, not local:
@@ -58,12 +62,38 @@ Gate:  CLOSED 2026-09-23. §17 19/19, §14 14/14, §16 6/7.
        explanation: the ephemeris kernel, a golden dasha fixture, seven
        Go linker panics, a mypy cache, a Turbopack checksum.
 
-       EVERY NUMBER IN PHASE 4 WAS COMPUTED ON IT — the 90.0%
-       classifier accuracy, the golden charts, the cost arithmetic.
-       None is known wrong. None is known right.
+       This block used to say "EVERY NUMBER IN PHASE 4 WAS COMPUTED ON
+       IT". That was true when written and is now too broad, which
+       matters: a caveat that overstates gets discounted wholesale, and
+       the part that IS true stops being heard.
 
-       Re-run the gate measurements once the hardware is replaced, and
-       treat THAT as the real close of Phase 4.
+       What CI re-verifies on clean hardware (10 GitHub-runner jobs):
+         · the whole test suite — 1128 Python, Go unit + integration,
+           TypeScript, e2e
+         · the golden chart fixtures. A corrupted fixture would make CI
+           compute one value and compare it to another, and FAIL. Green
+           CI means fixture and computation agree on a machine with no
+           known fault.
+         · the cost arithmetic, which is unit-tested
+         · every tracked file byte-for-byte — `check-integrity.sh` runs
+           in CI (ci.yml:158) and in `task verify`, so corruption of a
+           committed artifact fails the build rather than waiting to be
+           noticed
+
+       What is STILL measured only here, and carries the caveat in full:
+         · the 90.0% classifier accuracy. It needs a provider key, so CI
+           cannot run it. Mitigated only by two independent runs
+           agreeing within noise (180/200 and 183/200) — which is what
+           makes it usable, not a clean bill of health.
+
+       Verified 2026-09-23: full integrity check clean, every tracked
+       file matches the index; `de421.bsp` — the kernel corrupted twice
+       — matches its committed sha256.
+
+       So memtest86+ identifies WHICH DIMM, which is a laptop-repair
+       question. It is not a Phase 4 blocker and not a Phase 5 one. The
+       accuracy number is the single measurement worth re-running after
+       the hardware is replaced.
 ```
 
 Phase 3 closed 16 of 16 on 2026-09-19. Its record is `docs/TESTING-PHASE-3.md` and
@@ -97,7 +127,7 @@ at `58fe1f2`. Three §11 security items were carried forward — see below.
 | 4.17 | `ai_request_logs` migration + persistence from the envelope | ✅ `ON DELETE SET NULL`, BIGINT cost, no content column |
 | 4.18 | Typed AI client with timeout and rate limiting | ✅ concurrency-bounded; a completion is never replayed |
 | 4.19 | Admin config, usage, incidents, playground | ✅ SUPER_ADMIN only, break-tested four ways |
-| 4.21 | Provider parity suite | ✅ one suite, four adapters, each through its own SDK |
+| 4.21 | Provider parity suite | ✅ one suite, THREE adapters since [ADR-011](../../docs/decisions/011-remove-anthropic-adapter.md), each through its own SDK. Seven mutations, one per behaviour it guards, each turns it red |
 
 **1128 Python tests** in `services/ai`, `mypy --strict` clean, both import contracts kept.
 Go: `go build`/`go vet` clean, unit + integration suites green.
