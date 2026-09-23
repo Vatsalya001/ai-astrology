@@ -2,8 +2,22 @@
 
 **What this is.** `services/ai/app/safety/crisis.py` short-circuits a message to a
 static crisis response *before any model is called*. It matches on the phrases below.
-This is the highest-stakes list in the repository and **no native Hinglish speaker has
-ever read it.**
+This is the highest-stakes list in the repository.
+
+> **Reviewed 2026-09-23 by Vatsalya (Hindi/Hinglish speaker).** Verdict: every pattern's
+> **intended meaning is correct** — no row is there by mistake, and the meaning column is
+> accurate.
+>
+> **That closes the translation question and not the coverage one.** A row-by-row read
+> answers "is this right?"; it cannot answer "what is absent?", because absent things
+> are not on the page. Immediately after this review, twenty-four plausible distress
+> phrasings were generated and run against the live detector: **all twenty-four returned
+> `none`.** The largest gap was structural — the English list carries `hang myself`,
+> `jump off`, `overdose` and `cutting myself`, and the Hinglish and Devanagari sides
+> carried **no method statements at all**. Those are now added (third table below).
+>
+> **Still open:** the indirect and goodbye phrasings in the fourth table, which need a
+> judgement call this review has not yet made.
 
 A test proves a regex matches the sentence we wrote down. It cannot prove that is the
 sentence a real person in distress actually writes. That gap is what this review closes.
@@ -78,6 +92,47 @@ fifteen rows below are the right fifteen.
 | D12 | `सब खत्म कर` | "end it all" |  |  |
 | D13 | `मेरे बिना (?:सब\|सभी)` | "without me, everyone (would be better off)" |  |  |
 | D14 | `मर जाऊ` | "(I) will die" — जाऊं / जाऊँगा |  |  |
+
+## The method statements, added 2026-09-23
+
+Found by generation, not by review: twenty-four plausible phrasings were run against the
+detector and all twenty-four missed. The English list had four method phrases and the
+other two scripts had none, so this category existed for English speakers only.
+
+| # | pattern | intended meaning | misses anything? | wrongly catches? |
+|---|---|---|---|---|
+| M1 | `nas kaat` / `नस काट` | cut (my) veins |  |  |
+| M2 | `phansi laga` / `फांसी लगा` | hang (myself) — also `fansi`, `फाँसी` |  |  |
+| M3 | `zeher kha` / `जहर खा` | consume poison — also `zahar` |  |  |
+| M4 | `neend ki goli` / `नींद की गोल` | sleeping pills |  |  |
+| M5 | `chhat se kood` / `छत से कूद` | jump from the roof — also `chat` |  |  |
+| M6 | `train ke neeche` / `ट्रेन के नीचे` | under a train — also `niche` |  |  |
+| M7 | `khud ko khatam` / `खुद को खत्म` | end myself |  |  |
+| M8 | `khud ko maar` / `खुद को मार` | kill myself |  |  |
+
+**M6 is deliberately bare** and flags `train ke neeche se tunnel jata hai`. §7 asks for
+a list biased heavily toward false positives, and the existing `end it with X` comment
+already accepted flagging "end it with him" to catch "end it with pills". Say so if you
+think that is wrong for this one.
+
+## Still undecided — the indirect phrasings
+
+These were generated in the same pass, all currently **miss**, and none were added
+because each has an ordinary reading. This is the judgement call the review has not made.
+
+| phrase | literal | why it is hard |
+|---|---|---|
+| `ab bas bahut ho gaya` / `अब बस बहुत हो गया` | "enough is enough" | said about traffic, work, a bad day |
+| `mujhe maaf kar dena` / `मुझे माफ़ कर देना` | "forgive me" | a classic goodbye, and also an ordinary apology |
+| `koi raasta nahi bacha` / `कोई रास्ता नहीं बचा` | "no way left" | said about any stuck problem |
+| `jeene ka koi matlab nahi` / `जीने का कोई मतलब नहीं` | "no meaning in living" | closest to unambiguous of this group |
+| `mera koi nahi hai` / `मेरा कोई नहीं है` | "I have nobody" | loneliness, not necessarily crisis |
+| `ab aur nahi ho raha` / `अब और नहीं हो रहा` | "cannot take any more" | said about work, illness, exam stress |
+| `meri zindagi bekaar hai` / `मेरी ज़िंदगी बेकार है` | "my life is worthless" | real distress; not necessarily suicidal |
+
+**The question for each:** if a person typed ONLY this and nothing else, is a helpline
+the right response? Yes → add it. The bias says lean yes; the existing list's care about
+not flagging "I've been feeling low lately" says do not lean all the way.
 
 ### Two things to know before reviewing these
 

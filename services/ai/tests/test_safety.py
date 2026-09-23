@@ -420,7 +420,7 @@ class TestEveryPhraseIsExercised:
         # Both corpora, and the message normalised the way `detect_crisis`
         # normalises it — otherwise a Devanagari phrase written without a
         # nuqta would read as uncovered against a sentence that has one.
-        corpus = (*CRISIS_CORPUS, *DEVANAGARI_CORPUS)
+        corpus = (*CRISIS_CORPUS, *DEVANAGARI_CORPUS, *METHOD_CORPUS)
         uncovered = [
             phrase
             for phrase in crisis_module._CRISIS_PHRASES
@@ -454,7 +454,9 @@ class TestEveryPhraseIsExercised:
         # does. Not equality — one sentence legitimately covers several
         # phrases — but a corpus far smaller than the list means the
         # coverage test above is being satisfied by accident.
-        assert len(CRISIS_CORPUS) + len(DEVANAGARI_CORPUS) >= len(crisis_module._CRISIS_PHRASES)
+        assert len(CRISIS_CORPUS) + len(DEVANAGARI_CORPUS) + len(METHOD_CORPUS) >= len(
+            crisis_module._CRISIS_PHRASES
+        )
 
 
 # ─── the static response ─────────────────────────────────────────────
@@ -1065,9 +1067,117 @@ class TestDevanagariIsCovered:
         uncovered = [
             phrase
             for phrase in devanagari
-            if not any(re.search(phrase, crisis_module._normalise(m)) for m in DEVANAGARI_CORPUS)
+            # Both corpora: the Devanagari METHOD phrases live in
+            # METHOD_CORPUS, so checking only one would report them
+            # uncovered and push someone to duplicate the sentences.
+            if not any(
+                re.search(phrase, crisis_module._normalise(m))
+                for m in (*DEVANAGARI_CORPUS, *METHOD_CORPUS)
+            )
         ]
         assert not uncovered, (
             f"{len(uncovered)} Devanagari phrase(s) are matched by no message, so "
             f"deleting them would fail no test: {uncovered}"
+        )
+
+
+# One sentence per method phrase, both scripts.
+METHOD_CORPUS = (
+    "nas kaat lunga",
+    "nass kaat dunga",
+    "phansi laga lunga",
+    "fansi laga lunga",
+    "zeher kha lunga",
+    "zahar kha lunga",
+    "neend ki goliyan kha lunga",
+    "chhat se kood jaunga",
+    "chat se kood jaunga",
+    "train ke neeche aa jaunga",
+    "train ke niche aa jaunga",
+    "khud ko khatam kar dunga",
+    "khud ko maar dunga",
+    "नस काट लूंगा",
+    "फांसी लगा लूंगा",
+    "फाँसी लगा लूंगा",
+    "ज़हर खा लूंगा",
+    "नींद की गोलियां खा लूंगा",
+    "छत से कूद जाऊंगा",
+    "ट्रेन के नीचे आ जाऊंगा",
+    "खुद को खत्म कर दूंगा",
+    "खुद को मार दूंगा",
+)
+
+
+class TestMethodStatementsInHindi:
+    """The gap a row-by-row review could not see.
+
+    The English list carries `hang myself`, `jump off`, `overdose` and
+    `cutting myself`. The Hinglish and Devanagari sides carried NONE —
+    they covered statements of INTENT and nothing else. The comment on
+    `end it with X` calls method statements "the highest-risk category
+    in the whole list", and for two thirds of this audience there was no
+    category at all.
+
+    Found by generating twenty-four plausible phrasings and running them
+    rather than by reading the list: all twenty-four returned `none`. A
+    reviewer confirming that every existing row means what it says
+    cannot find this, because absent things are not on the page.
+    """
+
+    @pytest.mark.parametrize("message", METHOD_CORPUS)
+    def test_a_method_statement_is_caught(self, message: str) -> None:
+        assert detect_crisis(message).category is SafetyCategory.CRISIS, (
+            f"{message!r} names a method and was not detected"
+        )
+
+    def test_the_devanagari_plural_of_goli_is_caught(self) -> None:
+        """`गोली` -> `गोलियां` changes the matra, so the singular is not a prefix.
+
+        The Latin side hid this: `neend ki goli` matches `goliyan` by
+        prefix, so the transliterated half passed while the Devanagari
+        half silently did not. One script cannot stand in for the other
+        when they pluralise differently.
+        """
+        assert detect_crisis("नींद की गोलियां खा लूंगा").category is SafetyCategory.CRISIS
+        assert detect_crisis("नींद की गोली खा लूंगा").category is SafetyCategory.CRISIS
+
+    @pytest.mark.parametrize(
+        "message",
+        [
+            "nas dikhane doctor ke paas jana hai",
+            "phansi ki saza ke baare me padha",
+            "ghar ki chhat repair karani hai",
+            "neend nahi aa rahi",
+            "छत पर पानी की टंकी है",
+            "नींद की समस्या है",
+            "नींद नहीं आ रही",
+            "मेरी शादी कब होगी",
+        ],
+    )
+    def test_the_innocent_neighbours_stay_quiet(self, message: str) -> None:
+        """Every method phrase names a real-world object or place.
+
+        `chhat` is a roof, `neend ki goli` is a prescription, `phansi`
+        is a legal sentence — so each one has an ordinary use that a
+        careless pattern would swallow.
+        """
+        assert detect_crisis(message).category is SafetyCategory.NONE, (
+            f"{message!r} was wrongly flagged"
+        )
+
+    def test_the_train_tradeoff_is_deliberate(self) -> None:
+        """`train ke neeche` is left bare, and this records the cost.
+
+        It flags `train ke neeche se tunnel jata hai`. §7 asks for a list
+        "biased heavily toward false positives", and the `end it with X`
+        comment already accepted flagging "end it with him" to catch
+        "end it with pills". In an astrology product the innocent
+        sentence is vanishingly rare and the guilty one is a method
+        statement.
+
+        If someone later narrows this, they have to change a test that
+        says out loud what is being traded away.
+        """
+        assert detect_crisis("train ke neeche se tunnel jata hai").category is (
+            SafetyCategory.CRISIS
         )

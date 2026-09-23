@@ -195,6 +195,56 @@ _CRISIS_PHRASES = (
     # negative cases, not by reading the pattern.
     r"मेरे बिना (?:सब|सभी)",  # "without me, everyone (would be better off)"
     r"मर जाऊ",  # "(I) will die" — जाऊं / जाऊँगा
+    # ─── method statements ───────────────────────────────────────────
+    #
+    # The gap a reviewer could not see, because absent things are not on
+    # the page. The English list carries `hang myself`, `jump off`,
+    # `overdose` and `cutting myself`; the Hinglish and Devanagari sides
+    # carried NONE — they covered statements of INTENT and nothing else.
+    # The comment on `end it with pills` above calls method statements
+    # "the highest-risk category in the whole list", and for two thirds
+    # of this audience the list had no category at all.
+    #
+    # Found by generating twenty-four plausible phrasings and running
+    # them: all twenty-four returned `none`. The shape of the list was
+    # English, translated — not Hindi, observed.
+    #
+    # Stems, not whole verbs: `kaat lunga` / `kaat dunga` / `kaat li`
+    # differ by tense and gender and mean the same thing.
+    r"nas kaat",
+    r"nass kaat",
+    r"phansi laga",
+    r"fansi laga",
+    r"zeher kha",
+    r"zahar kha",
+    r"neend ki goli",
+    r"chhat se kood",
+    r"chat se kood",
+    # Left bare, and the tradeoff is stated rather than hidden:
+    # `train ke neeche se tunnel jata hai` flags. §7 asks for a list
+    # "biased heavily toward false positives", and the comment on
+    # `end it with X` above already accepted flagging "end it with him"
+    # in order to catch "end it with pills". In an astrology product the
+    # innocent sentence is vanishingly rare and the guilty one is a
+    # method statement.
+    r"train ke neeche",
+    r"train ke niche",
+    r"khud ko khatam",
+    r"khud ko maar",
+    r"नस काट",
+    r"फांसी लगा",
+    r"फाँसी लगा",
+    r"जहर खा",  # ज़हर — nuqta normalised away
+    # `गोल`, not `गोली`: the plural is `गोलियां`, which changes the matra
+    # from ी to ि and so is NOT a suffix of the singular. The Latin
+    # `neend ki goli` matches `goliyan` by prefix and hid this — the two
+    # scripts pluralise differently and the transliterated half cannot
+    # stand in for the other.
+    r"नींद की गोल",
+    r"छत से कूद",
+    r"ट्रेन के नीचे",
+    r"खुद को खत्म",
+    r"खुद को मार",
 )
 
 CRISIS_PATTERN = re.compile("|".join(f"(?:{phrase})" for phrase in _CRISIS_PHRASES), re.IGNORECASE)
