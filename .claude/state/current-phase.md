@@ -58,6 +58,20 @@ Gate:  CLOSED 2026-09-23. §17 19/19, §14 14/14, §16 6/7.
        span, both directions. Userspace memory does not change on its
        own.
 
+       A SECOND run on 2026-09-23 — 12 GiB, 52 passes, twice the memory
+       — found ZERO. That does NOT overturn the first, and reading it as
+       good news would be the mistake this file exists to prevent.
+       A dirty run is conclusive; a clean one is not. The process can
+       only test the pages the kernel lends it, so a clean result means
+       "the faulty cells were not in today's 12 GiB", not "there are no
+       faulty cells". The script says so itself, in its own docstring.
+
+       Two clean-looking possibilities, neither comforting: the bad
+       cells sat outside the borrowed range, or the fault is
+       intermittent — temperature, timing, refresh. Intermittent is the
+       worse one, because it is the kind that passes every test you run
+       deliberately and corrupts the build you were not watching.
+
        Fifteen-plus corruption events across this project have one
        explanation: the ephemeris kernel, a golden dasha fixture, seven
        Go linker panics, a mypy cache, a Turbopack checksum.

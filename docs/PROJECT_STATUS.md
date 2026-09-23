@@ -4067,3 +4067,25 @@ Verified today: full integrity check clean, every tracked file matches the index
 **So memtest86+ answers "which DIMM", which is a laptop-repair question.** It is not a
 Phase 4 blocker and not a Phase 5 one. The accuracy number is the single measurement
 worth re-running once the hardware is replaced.
+
+## A second memory test came back clean, and that changes nothing
+
+2026-09-23. 12 GiB, 52 passes, twice the memory of the run that found seven errors —
+**zero errors.**
+
+Reading that as good news would be the exact mistake this project keeps writing
+warnings about. `scripts/memcheck.go` says it in its own docstring: a DIRTY run is
+conclusive, a CLEAN one is not. The process tests only the pages the kernel lends it,
+so today's result means *"the faulty cells were not in this 12 GiB"* — not *"there are
+no faulty cells"*. Yesterday's seven single-bit flips, every XOR a power of two, remain
+conclusive. Userspace memory does not change on its own.
+
+Two readings, neither comforting: the bad cells sat outside the borrowed range, or the
+fault is intermittent. **Intermittent is the worse one** — it passes every test you run
+deliberately and corrupts the build you were not watching, which is precisely the
+pattern this repository has logged fifteen times.
+
+The practical position is unchanged and is stated in `current-phase.md`: memtest86+
+answers "which DIMM", the integrity check answers "is anything corrupted right now"
+(clean, today, every tracked file), and CI answers "do the results reproduce on
+hardware with no known fault" (yes, ten runners).
