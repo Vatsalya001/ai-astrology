@@ -30,6 +30,7 @@ this ships. That is recorded as an open item, not as done.
 from __future__ import annotations
 
 import re
+import unicodedata
 from pathlib import Path
 
 from app.safety.categories import SafetyCategory, SafetyVerdict
@@ -154,9 +155,65 @@ _CRISIS_PHRASES = (
     r"sab (?:kuch )?khatam kar d",
     r"sab kuch khatam ho jaye",
     r"mere bina (?:sab|sabhi)",
+    # ─── Devanagari ──────────────────────────────────────────────────
+    #
+    # Until 2026-09-23 this list matched NOTHING in Devanagari script —
+    # `मुझे नहीं जीना`, `मैं मरना चाहता हूँ` and `आत्महत्या करना चाहता हूँ` all
+    # returned `none`, and no test asserted it either way. A guard that
+    # works for users who transliterate and fails for users who type in
+    # the script is a guard with a hole shaped like a keyboard setting.
+    #
+    # These are the DIRECT forms only — the ones whose meaning is
+    # dictionary-level rather than idiomatic, so they can be added
+    # without the native-speaker review that
+    # `docs/HINGLISH-CRISIS-REVIEW.md` is still waiting for. That review
+    # is about COVERAGE (what would a person actually type?) and this is
+    # not a substitute for it. It is the difference between zero and
+    # something.
+    #
+    # Written against the NORMALISED message — see `_normalise` below —
+    # so patterns use base consonants and never a nuqta. `ज़िंदगी` and
+    # `जिंदगी` are the same string by the time they reach here, which
+    # matters because people type both and two Unicode encodings exist
+    # for each.
+    r"मरना चाहत",  # मरना चाहता / चाहती — "(I) want to die"
+    r"मरना है",  # "(I) have to die"
+    r"जीना नहीं चाहत",  # "(I) don't want to live"
+    r"नहीं जीना",  # "(I) don't want to live" — the commonest short form
+    r"जीने का मन नहीं",  # "(I) don't feel like living"
+    r"जीने की इच्छा नहीं",  # same, more formal
+    r"आत्महत्या",  # suicide (Sanskrit-derived)
+    r"खुदकुशी",  # suicide (Urdu-derived; nuqta normalised away)
+    r"अपनी जान",  # "(take) my own life"
+    r"जान दे",  # "give up (my) life" — देना / दूंगा / दूँगी
+    r"जिंदगी खत्म",  # "life over"
+    r"सब खत्म कर",  # "end it all"
+    # `सब`/`सभी` required, exactly as `mere bina (?:sab|sabhi)` requires
+    # it on the Latin side. Bare `मेरे बिना` flags `मेरे बिना मत जाओ` —
+    # "don't go without me" — whose transliteration `mere bina mat jao`
+    # is already in the must-NOT-flag list. Caught by running the
+    # negative cases, not by reading the pattern.
+    r"मेरे बिना (?:सब|सभी)",  # "without me, everyone (would be better off)"
+    r"मर जाऊ",  # "(I) will die" — जाऊं / जाऊँगा
 )
 
 CRISIS_PATTERN = re.compile("|".join(f"(?:{phrase})" for phrase in _CRISIS_PHRASES), re.IGNORECASE)
+
+# The nuqta, which Devanagari encodes two ways.
+#
+# `ज़` is either U+095B or `ज` + U+093C, and a person typing on a phone
+# has no idea which their keyboard produced. An NFD pass decomposes the
+# precomposed form, dropping the mark then makes both identical, and NFC
+# puts everything else back. Matras are separate characters and survive
+# untouched — verified, because a normaliser that ate them would silently
+# break every pattern here.
+_NUQTA = "़"
+
+
+def _normalise(message: str) -> str:
+    """Collapse both nuqta encodings so one pattern matches either."""
+    decomposed = unicodedata.normalize("NFD", message)
+    return unicodedata.normalize("NFC", decomposed.replace(_NUQTA, ""))
 
 
 class MissingCrisisResponseError(RuntimeError):
@@ -215,7 +272,7 @@ def detect_crisis(message: str) -> SafetyVerdict:
     safety control that depends on a network call is a safety control
     with an outage.
     """
-    match = CRISIS_PATTERN.search(message)
+    match = CRISIS_PATTERN.search(_normalise(message))
     if match is None:
         return SafetyVerdict(category=SafetyCategory.NONE)
 

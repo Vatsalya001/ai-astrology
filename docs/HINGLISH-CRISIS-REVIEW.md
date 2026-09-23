@@ -47,9 +47,49 @@ Two questions, and the first matters far more:
 - `nahin? jeena` deliberately accepts both `nahi` and `nahin`.
 - `ho jaye` is kept separate from `ho gaya`, which is the ordinary past tense of
   something simply running out.
-- **Devanagari is not covered at all.** If people write मुझे नहीं जीना, none of this
-  matches. That is a known, unaddressed gap and the single most useful thing a
-  reviewer could tell us about.
+- ~~**Devanagari is not covered at all.**~~ **Partly closed 2026-09-23** — see the
+  second table below. The DIRECT forms now match; whether they are the forms people
+  actually type is still the question only you can answer.
+
+## The Devanagari phrases, added 2026-09-23
+
+These were added without a native-speaker review, on the narrow grounds that each
+one's meaning is dictionary-level rather than idiomatic — `आत्महत्या` means suicide and
+nothing else. **That is an argument about translation, not about usage**, and usage is
+what this review is for. Review them exactly as harshly as the table above.
+
+The first question matters far more here than anywhere else on this page: until this
+change the list matched **nothing** in Devanagari, so there is no reason to think the
+fifteen rows below are the right fifteen.
+
+| # | pattern | intended meaning | misses anything? | wrongly catches? |
+|---|---|---|---|---|
+| D1 | `मरना चाहत` | "(I) want to die" — covers चाहता and चाहती |  |  |
+| D2 | `मरना है` | "(I) have to die" |  |  |
+| D3 | `जीना नहीं चाहत` | "(I) don't want to live" |  |  |
+| D4 | `नहीं जीना` | "(I) don't want to live" — the short form |  |  |
+| D5 | `जीने का मन नहीं` | "(I) don't feel like living" |  |  |
+| D6 | `जीने की इच्छा नहीं` | same, more formal |  |  |
+| D7 | `आत्महत्या` | suicide (Sanskrit-derived) |  |  |
+| D8 | `खुदकुशी` | suicide (Urdu-derived) |  |  |
+| D9 | `अपनी जान` | "(take) my own life" |  |  |
+| D10 | `जान दे` | "give up (my) life" — देना / दूंगा / दूँगी |  |  |
+| D11 | `जिंदगी खत्म` | "life over" |  |  |
+| D12 | `सब खत्म कर` | "end it all" |  |  |
+| D13 | `मेरे बिना (?:सब\|सभी)` | "without me, everyone (would be better off)" |  |  |
+| D14 | `मर जाऊ` | "(I) will die" — जाऊं / जाऊँगा |  |  |
+
+### Two things to know before reviewing these
+
+**Nuqta is normalised away.** `ज़िंदगी` and `जिंदगी` are the same string by the time a
+pattern sees them, and so are `ख़ुदकुशी` and `खुदकुशी`. Devanagari encodes the nuqta two
+ways and a phone keyboard picks one without telling anyone, so do not report a pattern
+as missing a spelling that differs only in the dot.
+
+**`मेरे बिना` requires `सब`/`सभी`.** Bare, it flagged `मेरे बिना मत जाओ` — "don't go
+without me" — which is an ordinary sentence. The transliterated half of this list has
+always had that restriction; the Devanagari half briefly did not, and a negative test
+caught it.
 
 ## What happens on a match
 

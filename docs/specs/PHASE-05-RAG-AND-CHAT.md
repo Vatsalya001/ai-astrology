@@ -681,6 +681,19 @@ Global DoD **plus**:
 - [ ] Fabricated chart facts are blocked, proven by test
 - [ ] First token < 2 s locally, < 3 s p95 against a hosted provider
 - [ ] Prompt injection produces no system-prompt leak
+- [ ] **Every AI call logged by Go with model, prompt version, tokens, latency,
+      integer cost** — *inherited from PHASE-04 §16, where it could not be met.*
+      Phase 4 built and tested the machinery (`ailogs.Service.Record`,
+      `ai_request_logs`, `cost_micros` as `BIGINT`) and then had nothing to record:
+      its only Go AI call site is the admin playground, which deliberately writes no
+      row, because mixing operator experiments into the usage table would corrupt the
+      cost-per-request figure that table exists to produce. `ai_request_logs` has 0
+      rows and every caller of `Record` is a test.
+      **This phase is where the line becomes real** — chat is the first production
+      caller. Verify it by asserting a row EXISTS after a completed chat turn, with a
+      non-zero `latency_ms` and an integer `cost_micros`; the machinery already has
+      unit tests and what is missing is a caller, so a test that only exercises
+      `Record` directly would pass exactly as it does today.
 
 ---
 

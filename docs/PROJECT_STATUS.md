@@ -3942,3 +3942,51 @@ Every one was proven by breaking it and watching a test fail.
   ~1024 minimum. A test fails on the day the corpus crosses it.
 - CSP `script-src 'unsafe-inline'`, carried from Phase 3.
 - Hinglish crisis review and the Devanagari gap. Still needs a person.
+
+# Devanagari crisis detection, and the §16 line moved to Phase 5
+
+2026-09-23, closing what was closeable from the repo.
+
+## The crisis list matched nothing in Devanagari
+
+`मुझे नहीं जीना`, `मैं मरना चाहता हूँ` and `आत्महत्या करना चाहता हूँ` all returned `none`,
+and **no test asserted it either way** — so the gap was invisible rather than known. A
+guard that works for users who transliterate and fails for users who type in the script
+is a guard with a hole shaped like a keyboard setting.
+
+Fourteen direct forms added, on the narrow grounds that each one's meaning is
+dictionary-level rather than idiomatic. That is an argument about translation, not
+about usage, and **usage is still unreviewed** — `docs/HINGLISH-CRISIS-REVIEW.md` now
+carries a second table so the reviewer sees these too. Until this change there was
+nothing in Devanagari at all, so there is no reason to believe these are the right
+fourteen.
+
+**Nuqta is the trap.** `ज़` is either U+095B or `ज` + U+093C, two encodings that render
+identically and compare unequal, and a phone keyboard picks one without telling anyone.
+Messages are normalised — NFD, drop the nukta, NFC — so both spellings match one
+pattern. A test asserts matras survive that normaliser, because one that ate them would
+break every Devanagari pattern at once.
+
+**A negative test caught a real false positive.** Bare `मेरे बिना` flagged
+`मेरे बिना मत जाओ` — "don't go without me". The transliterated half of the list has
+always required `sab`/`sabhi` after it; the Devanagari half briefly did not.
+
+Deleting four of the new phrases now fails seven tests, each naming its own sentence.
+
+### A mutation that silently did nothing
+
+Worth recording, because it is the failure this whole audit has been about. The first
+deletion run reported four phrases removed and the suite stayed green — the script
+asserted `phrase in source` (true, the substring was there) and then replaced
+`phrase + "\n"` (never present, the lines carry trailing comments). It removed nothing
+and proved nothing. A mutation test needs its own assertion that the mutation applied.
+
+## §16's Go-logging line moved rather than deleted
+
+"Every AI call logged by Go" is now in PHASE-05 §15, where chat becomes the first
+production caller. It stays visibly unticked in PHASE-04 with a pointer, so the move
+reads as a decision rather than an item that vanished.
+
+The Phase 5 entry names the trap: the machinery already has unit tests, so a test that
+exercises `Record` directly will pass exactly as it does today. The assertion has to be
+that a row EXISTS after a real chat turn.

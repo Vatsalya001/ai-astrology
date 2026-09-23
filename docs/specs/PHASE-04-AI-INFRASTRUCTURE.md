@@ -746,7 +746,11 @@ Global DoD **plus**:
 - [x] PII guard verified to block production + non-paid provider
       `pytest tests/test_guards.py -q` — and see the base-URL limit noted in §14.
 - [ ] Every AI call logged by Go with model, prompt version, tokens, latency, integer cost
-      **NOT SATISFIABLE IN THIS PHASE, and the line should move to Phase 5.**
+      **NOT SATISFIABLE IN THIS PHASE. Moved to
+      [PHASE-05 §15](./PHASE-05-RAG-AND-CHAT.md#15-definition-of-done) on 2026-09-23**,
+      where chat becomes the first production caller. Left unticked here rather than
+      deleted, so the move is visible instead of looking like an item that quietly
+      vanished.
       Phase 4 has exactly one Go AI call site — the admin playground — and it
       deliberately writes no row, with a comment saying why: *"a playground run is an
       operator experimenting, and mixing it into the usage table would corrupt the
