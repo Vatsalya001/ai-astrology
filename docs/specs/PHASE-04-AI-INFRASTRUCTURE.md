@@ -656,7 +656,13 @@ defects it found are in [`docs/PHASE-04-GATE.md`](../PHASE-04-GATE.md).
       `pytest tests/test_orchestrator.py -k parrots_the_correction`
 - [x] `ai_request_logs` stores IDs and token counts — **never message content**
       No content column exists, so it cannot leak what it cannot store.
-      `psql -c "\d ai_request_logs"` + `go test ./internal/ailogs/...`
+      `go test ./internal/ailogs/... -count=1`, and the schema itself in
+      `services/api/db/migrations/000006_ai_request_logs.up.sql` — which is committed
+      and readable with the stack down, unlike a `psql` session.
+      (This line first cited `psql -c "\d ai_request_logs"`. That is not runnable:
+      `psql` is not installed on the host here, and the container form needs the
+      stack up. Caught by re-running every command on this page — which is the only
+      thing that distinguishes a citation from a claim.)
 - [x] `ai-service` not publicly reachable; `X-Internal-Token` required
       `pytest tests/test_http_surface.py -q` — constant-time compare, every route
       except the four `PUBLIC_PATHS`.
