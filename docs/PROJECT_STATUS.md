@@ -4089,3 +4089,43 @@ The practical position is unchanged and is stated in `current-phase.md`: memtest
 answers "which DIMM", the integrity check answers "is anything corrupted right now"
 (clean, today, every tracked file), and CI answers "do the results reproduce on
 hardware with no known fault" (yes, ten runners).
+
+# A docs-only commit turned CI red, and the cause was a hardcoded timeout
+
+2026-09-23. Noticed while confirming the helpline commit was green: the run *before*
+it had failed — on a commit that changed only Markdown, so the change could not have
+caused it.
+
+    --- FAIL: TestTheStartupCheckPassesAgainstARealBrowser (20.02s)
+        chrome startup check: unable to execute *log.EnableParams: context deadline exceeded
+
+Chrome was found and launched; it just did not answer inside 20 seconds on a shared
+GitHub runner, in a job that had downloaded it moments earlier. Three local runs with
+`-race` passed, so the failure is real and environmental rather than a code defect.
+
+The cause is an API flaw worth naming: `StartupCheck` did
+`context.WithTimeout(ctx, 20*time.Second)` **unconditionally**, so a caller that
+allowed two minutes still got twenty seconds. A timeout argument is the caller saying
+how long it is willing to wait; a callee is not positioned to overrule it.
+
+Now the default applies only when the caller set no deadline — production still boots
+with 20s because it passes `context.Background()`, and the integration test asks for 90.
+
+**An intermittently red gate is worse than a slow one.** People learn to re-run it
+instead of reading it, which is the same erosion this repository fights everywhere else.
+
+## The first test for this fix was vacuous, and the mutation caught it
+
+The obvious test drove `StartupCheck` with a 1ms deadline and asserted it returned
+fast. Mutating the fix away — restoring the unconditional 20s — left that test
+**passing**, because `context.WithTimeout` already takes the *earlier* of two
+deadlines. Go handles the short direction for free; the bug was the long one, and the
+comfortable test could not see it.
+
+The decision is now a three-line pure function, `withStartupDeadline`, tested
+directly: a caller asking for longer must not be shortened (the case the flake needed),
+a caller asking for less must not be lengthened (the control that stops "respect the
+caller" being implemented as "never apply a deadline"), and no deadline gets the
+default (the control that stops a browserless worker hanging at boot).
+
+Re-running the mutation now fails exactly the middle subtest and passes the other two.

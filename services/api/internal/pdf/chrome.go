@@ -162,8 +162,49 @@ func (c *Chrome) PrintToPDF(ctx context.Context, pageURL string) ([]byte, error)
 // the worker image has no usable Chrome involves a user clicking
 // download and getting an error, minutes after a deploy that looked
 // green.
+// The default only applies when the caller set no deadline of its own.
+// Long enough for a cold Chrome on a loaded machine, short enough that a
+// worker with no usable browser fails its boot rather than hanging.
+const startupCheckTimeout = 20 * time.Second
+
+// withStartupDeadline applies the default only when the caller set none.
+//
+// Extracted so it can be tested without starting a browser. The first
+// version of this fix was tested through `StartupCheck` with a 1ms
+// deadline — which passes whether or not the fix is present, because
+// `context.WithTimeout` already takes the EARLIER of two deadlines. Go
+// handles the short direction for free; the bug was the LONG one, and
+// the comfortable test could not see it.
+func withStartupDeadline(ctx context.Context) (context.Context, context.CancelFunc) {
+	if _, hasDeadline := ctx.Deadline(); hasDeadline {
+		return ctx, func() {}
+	}
+	return context.WithTimeout(ctx, startupCheckTimeout)
+}
+
 func (c *Chrome) StartupCheck(ctx context.Context) error {
-	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	/*
+	   Honour the caller's deadline; impose one only if there is none.
+
+	   This used to be an unconditional `WithTimeout(ctx, 20s)`, which
+	   silently OVERRODE the caller: a context allowing two minutes still
+	   got twenty seconds. That is backwards — a timeout argument is the
+	   caller saying how long it is willing to wait, and a callee is not
+	   in a position to know better.
+
+	   It also made CI intermittently red. Cold-starting Chrome on a
+	   shared GitHub runner, in a job that had just downloaded it,
+	   exceeded 20s and failed with
+
+	     unable to execute *log.EnableParams: context deadline exceeded
+
+	   on a DOCS-ONLY commit — so the failure could not have been caused
+	   by the change, and the next commit passed. An intermittently red
+	   gate is worse than a slow one: people learn to re-run it instead
+	   of reading it, which is the same erosion this repository fights
+	   everywhere else.
+	*/
+	ctx, cancel := withStartupDeadline(ctx)
 	defer cancel()
 
 	opts := append(chromedp.DefaultExecAllocatorOptions[:],

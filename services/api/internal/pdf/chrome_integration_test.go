@@ -66,8 +66,47 @@ func TestTheStartupCheckPassesAgainstARealBrowser(t *testing.T) {
 		t.Fatalf("NewChrome: %v", err)
 	}
 
-	if err := browser.StartupCheck(context.Background()); err != nil {
+	// 90s, not the 20s default. A cold Chrome on a shared CI runner —
+	// in a job that may have just downloaded it — has exceeded 20s and
+	// turned this red on a docs-only commit, where the change could not
+	// possibly have caused it.
+	//
+	// The deadline is the CALLER's to choose, which is why StartupCheck
+	// no longer overrides it. Production still boots with the 20s
+	// default because it passes a context with no deadline.
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+
+	if err := browser.StartupCheck(ctx); err != nil {
 		t.Fatalf("StartupCheck against a real browser failed: %v", err)
+	}
+}
+
+// TestStartupCheckRespectsAShorterCallerDeadline is the other direction,
+// and the one that proves the change is not simply "wait longer".
+//
+// A caller asking for 1ms must get 1ms. Without this, `StartupCheck`
+// could go back to imposing its own timeout unconditionally and only the
+// slow case would notice — which is how the flake arrived in the first
+// place.
+func TestStartupCheckRespectsAShorterCallerDeadline(t *testing.T) {
+	browser, err := pdf.NewChrome(chromePath(t))
+	if err != nil {
+		t.Fatalf("NewChrome: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Millisecond)
+	defer cancel()
+
+	start := time.Now()
+	if err := browser.StartupCheck(ctx); err == nil {
+		t.Fatal("a 1ms deadline should not have been enough to start a browser")
+	}
+
+	// Well under the 20s default, so this fails if the default is ever
+	// re-imposed on top of the caller's context.
+	if elapsed := time.Since(start); elapsed > 5*time.Second {
+		t.Fatalf("took %s — the caller's 1ms deadline was overridden", elapsed)
 	}
 }
 
