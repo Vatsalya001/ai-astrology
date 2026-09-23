@@ -2,30 +2,36 @@
 
 ```
 Phase: 4 — AI Infrastructure
-Gate:  17 of 19 §17 items ticked in the spec, each against a named,
-       re-runnable command. TWO REMAIN OPEN — both below.
+Gate:  CLOSED 2026-09-23. §17 19/19, §14 14/14, §16 6/7.
        21 tasks done. Nothing is exposed to users in this phase.
 
        Read the boxes in docs/specs/PHASE-04-AI-INFRASTRUCTURE.md, not
-       this line. It used to read "✅ 19 of 19 closed" while eighteen of
-       nineteen boxes in the spec were unticked and the one [x] was a
-       descope, not a completion — nothing had ever been ticked, and the
-       closure existed only here. A count in a state file is the thing
-       that rots; the boxes are the artifact.
+       this line. Each carries the command that proves it. This line
+       once read "✅ 19 of 19 closed" while eighteen of those boxes were
+       unticked and the one [x] was a descope, not a completion —
+       nothing had ever been ticked, and the closure existed only here.
+       A count in a state file is the thing that rots; the boxes are the
+       artifact. That is why no per-item detail lives here now.
 
-       ── WHAT IS STILL OPEN ────────────────────────────────────
-       1. §17 "Ollama runs fast/chat/deep locally at zero cost", and
-          the matching §16 line. Ollama is bound to 127.0.0.1:11434 so
-          no container can reach it. Needs OLLAMA_HOST=0.0.0.0, which
-          exposes it beyond loopback — an operator's decision, not a
-          code change. The wiring in the repo is correct.
-       2. §16 "Every AI call logged by Go". Phase 4 has one Go AI call
-          site, the admin playground, which deliberately writes no row.
-          The machinery is built and tested; nothing exists to record
-          until Phase 5 ships chat. The line belongs in Phase 5.
+       Closing it took an execution audit that re-ran 91 claims and
+       found 30 false, then eleven fixes. The audit and every fix are in
+       docs/PROJECT_STATUS.md, newest sections last.
 
-       Neither is fixable from this repository today. Everything else
-       that was found IS fixed.
+       ── THE ONE LINE NOT MET ──────────────────────────────────
+       §16 "Every AI call logged by Go with model, prompt version,
+       tokens, latency, integer cost". Phase 4 has exactly one Go AI
+       call site — the admin playground — and it deliberately writes no
+       row, because mixing operator experiments into the usage table
+       would corrupt the cost-per-request figure that table exists to
+       produce. The machinery is built and tested; there is nothing to
+       record until Phase 5 ships chat. The line belongs to Phase 5 and
+       should move there rather than be ticked here.
+
+       ── WHAT A READER SHOULD STILL DISTRUST ───────────────────
+       The containerised `ai` service cannot reach Ollama on this
+       machine (bound to 127.0.0.1). Use `task dev:ai`. Hinglish crisis
+       phrases are unreviewed and Devanagari matches nothing.
+       memtest86+ is still unrun.
 
        Accuracy CLOSED at 180/200 = 90.0% (qwen/qwen3.8-27b via Groq,
        prompt v4, 4 provider errors — under the 5% the script tolerates

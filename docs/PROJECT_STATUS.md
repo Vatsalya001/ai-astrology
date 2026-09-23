@@ -3880,3 +3880,65 @@ belongs in Phase 5.
 Hinglish crisis phrases still unreviewed by a native speaker, and Devanagari matches
 nothing. `memtest86+` still unrun. `services/ai/.env` still holds a live Groq key in a
 now-public repo — nothing leaks it, and it is worth rotating.
+
+# Phase 4 gate closed
+
+2026-09-23. **§17 19/19 · §14 14/14 · §16 6/7.**
+
+Every box carries the command that proves it. The one line not met —
+§16 "every AI call logged by Go" — has nothing to log: Phase 4's only Go AI call site
+is the admin playground, which deliberately writes no row and explains why. The
+machinery is built and tested. That line belongs to Phase 5.
+
+## The last two took verification, not code
+
+**"Ollama runs `fast`, `chat` and `deep` tiers locally at zero cost"** read as blocked
+on a machine problem. It was not. All three tiers answer from Ollama —
+
+    ✓ fast  llama3.2:3b   cost_micros=0
+    ✓ chat  qwen2.5:7b    cost_micros=0
+    ✓ deep  qwen2.5:7b    cost_micros=0
+
+— through `provider_from_settings()`, the factory `app/api/complete.py` itself calls,
+rather than a provider the script built for itself. `scripts/verify_local_tiers.py`
+prints the resolved configuration first and fails if anything cost money, because a
+tier that quietly answered from a hosted provider looks identical to one that did not.
+
+What is broken is narrower than it looked: the *containerised* ai service cannot reach
+a loopback-bound Ollama. `task dev:ai` is the documented way to run this service from
+source and it works. Worth separating — "the gate item is unmet" and "one run mode
+needs `OLLAMA_HOST=0.0.0.0`" are different sentences, and only the second is true.
+
+**The state-files box was ticked last, deliberately**: it is the only item whose truth
+depends on every other one being settled.
+
+## What closing this gate actually required
+
+Eleven defects, none of which a reading of the checklist would have found:
+
+| | |
+|---|---|
+| Fallback API key reached Sentry | Redacted primary, leaked fallback, same string |
+| Corrective retry validated against the wrong prompt | Users served our internal correction text |
+| 26 of 50 crisis phrases untested | Deleting them left 214 tests green |
+| Egress test could not fail | Subset check against the filter that built it |
+| SDK ban missed 13 of 17 vectors | incl. `urllib.request`, `socket`, `subprocess` |
+| `NoProviderAvailableError` not a `ProviderError` | Provider outage = unhandled 500 |
+| Three guards failed open on `"Production"` | PII, token and read-only DB checks at once |
+| Killed provider replayed 3× | `httpx` vs `httpx2` — isinstance never matched |
+| Breaker untested on the shipped chain | Disabling it left 881 tests green |
+| Routing override untested | Returning a copy left 124 tests green |
+| Injection detection was a mock of itself | No test ever fed a real detector a real string |
+| Validator warned on death and illness predictions | Now blocks; tone predictions still warn |
+
+Every one was proven by breaking it and watching a test fail.
+
+## Phase 5 inherits
+
+- §16's Go-logging line, which becomes real when chat ships.
+- The fact index. Phase 4's validator blocks every personal placement because the
+  index is always empty (`NoChartContext`) — a weaker test than it will be.
+- The cache breakpoint, which has never engaged: the prefix is ~770 tokens against the
+  ~1024 minimum. A test fails on the day the corpus crosses it.
+- CSP `script-src 'unsafe-inline'`, carried from Phase 3.
+- Hinglish crisis review and the Devanagari gap. Still needs a person.

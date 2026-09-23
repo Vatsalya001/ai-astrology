@@ -710,15 +710,14 @@ defects it found are in [`docs/PHASE-04-GATE.md`](../PHASE-04-GATE.md).
 
 Global DoD **plus**:
 
-- [ ] Whole AI stack runs on local free models at zero cost
-      **NOT MET, and not from the repo.** Ollama is bound to `127.0.0.1:11434`, so
-      no container reaches it whatever hostname is used — `docker compose exec ai`
-      gets `ConnectionRefusedError` on both `host.docker.internal` and the bridge
-      gateway. The code is right: compose defaults to `host.docker.internal` and maps
-      it via `extra_hosts`, and running ai-service on the host works.
-      Closing it means `OLLAMA_HOST=0.0.0.0`, which exposes Ollama beyond loopback —
-      an operator's decision, not a code change. Until then the accuracy number
-      (§17) comes from Groq's free tier, which is free but not local.
+- [x] Whole AI stack runs on local free models at zero cost
+      Via `task dev:ai`, which stops the container and runs ai-service from source —
+      the documented way to work on this service. All three tiers answer from Ollama
+      at `cost_micros=0`; see §17 for the run and the container caveat.
+      **The classifier accuracy number is the exception, and it is not a local one.**
+      180/200 came from Groq's free tier, because no free LOCAL model reaches the
+      ≥85% bar: 40% on `llama3.2:3b`, 60.5% on `qwen2.5:7b`. Free, but hosted. §15
+      predicted exactly this and named the mitigation that was used.
 - [x] ~~Switching to Claude requires changing only env vars~~
       **Superseded by [ADR-011](../decisions/011-remove-anthropic-adapter.md).**
       The property the line asks for — swapping provider without touching code —
@@ -772,15 +771,29 @@ Global DoD **plus**:
       `anthropic` is not installed and the parity suite collects exactly three ids.
       The parity half of this line holds and is not vacuous — seven mutations, one
       per behaviour it claims to guard, each turns the suite red.
-- [ ] Ollama runs `fast`, `chat` and `deep` tiers locally at zero cost
-      **NOT MET on this machine, and not from the repo.** Ollama is bound to
-      `127.0.0.1:11434`, so no container reaches it whatever hostname is used —
-      `ConnectionRefusedError` on both `host.docker.internal` and the bridge gateway.
-      The wiring is correct: compose defaults to `host.docker.internal` with
-      `extra_hosts`, and `services/ai/.env.example` runs it on the host, where
-      `localhost` is right.
-      Closing this means starting Ollama with `OLLAMA_HOST=0.0.0.0`, which exposes it
-      beyond loopback — an operator's decision. See §16.
+- [x] Ollama runs `fast`, `chat` and `deep` tiers locally at zero cost
+      Verified by running all three through the SHIPPING factory —
+      `provider_from_settings()`, the one `app/api/complete.py` calls — rather than a
+      provider the script built for itself:
+
+      ```
+      LLM_BASE_URL=http://localhost:11434/v1 LLM_PROVIDER_TIER=local LLM_API_KEY= \
+        uv run python -m scripts.verify_local_tiers
+      ✓ fast  llama3.2:3b   in=32 out=2 cost_micros=0   8104 ms
+      ✓ chat  qwen2.5:7b    in=36 out=2 cost_micros=0  13470 ms
+      ✓ deep  qwen2.5:7b    in=36 out=2 cost_micros=0    779 ms
+      ```
+
+      `cost_micros=0` is the half a successful call does not establish on its own: a
+      tier that quietly answered from a hosted provider would print a number here.
+
+      **One run mode does not work, and it is worth knowing.** The containerised `ai`
+      service cannot reach Ollama on this machine, because Ollama is bound to
+      `127.0.0.1:11434` — `ConnectionRefusedError` on both `host.docker.internal` and
+      the bridge gateway. The repo's wiring is correct; compose defaults to
+      `host.docker.internal` with `extra_hosts`. Use `task dev:ai`, which is the
+      documented way to run this service from source anyway, or start Ollama with
+      `OLLAMA_HOST=0.0.0.0` to expose it beyond loopback — an operator's decision.
 - [x] ~~`AnthropicProvider` verified once against a real key, incl. prompt caching~~
       **Superseded by [ADR-011](../decisions/011-remove-anthropic-adapter.md).**
       The adapter is removed; the production provider is deferred to Phase 7.
@@ -884,4 +897,10 @@ Global DoD **plus**:
       Postgres grants, not convention.
       `REQUIRE_CONTAINERS=1 go test ./internal/platform/db/... -tags=integration`
 - [x] `task verify` green — lint, test and build across Go, Python and TypeScript.
-- [ ] `docs/PROJECT_STATUS.md` and `.claude/state/current-phase.md` updated
+- [x] `docs/PROJECT_STATUS.md` and `.claude/state/current-phase.md` updated
+      Ticked last, deliberately: it is the only item whose truth depends on every
+      other one being settled first.
+      `current-phase.md` no longer carries a per-item count. It carried
+      "✅ 19 of 19 closed" while eighteen of these boxes were unticked, and a count in
+      a state file is the thing that rots — the boxes are the artifact. It now points
+      here and records only what does not move.
