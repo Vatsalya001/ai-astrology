@@ -15,9 +15,11 @@ one attempt they were willing to make, and they do not try again. No test can
 check it: `test_it_carries_a_helpline_number` proved a *number* was present, not
 that it *connects*.
 
-So the numbers are out until a human has dialled each one.
+So the numbers were out until a human had dialled each one.
 `findahelpline.com` is maintained by people whose job that is, covers every
-country rather than one, and cannot go stale here.
+country rather than one, and cannot go stale here — so it stays, alongside them.
+
+**They came back on 2026-09-23.** See the log below.
 
 ## Putting them back
 
@@ -40,11 +42,33 @@ This closes the open item that has sat on the crisis path since the numbers were
 removed: the response's one external claim had never been checked by a person, and
 now has been.
 
-### What this does NOT close
+**2026-09-23 — the three numbers, dialled by Vatsalya from India.**
 
-The directory is verified; **no local number has been added back.** Steps 1–3 above
-still apply if you want one inline — and a local number is still the better answer
-for someone in distress than a lookup, so it is still worth doing.
+| number | service | confirmed |
+|---|---|---|
+| **14416** | Tele-MANAS, Government of India | connects, free, 24x7, multilingual |
+| **9820466726** | AASRA | connects, 24x7, confidential |
+| **9999666555** | Vandrevala Foundation | connects, free, 24x7, phone and WhatsApp |
+
+All three are now in `crisis.en.md` and `crisis.hi.md`, **identical in both** —
+`test_both_languages_offer_the_same_numbers` fails if they drift, because the
+likeliest version of that is somebody updating one file and leaving the Hindi
+reader, who is likelier to need an Indian line, on the stale list.
+
+The directory stays underneath them. A local number is the better answer for
+someone in distress; the directory covers everyone this product does not.
+
+### Where the verification marker lives, and why you will not see it
+
+`verified:` is an HTML comment inside each response file. It has to be in the file —
+`test_no_unverified_phone_number_creeps_back` reads the raw bytes and fails on a
+phone number with no dial date beside it, which is what stops an un-dialled number
+being pasted in.
+
+`load_crisis_response` strips comments before returning. Without that, somebody in
+crisis would receive a note about re-verification schedules underneath their helpline
+numbers. Two tests hold the pair together: one asserts the marker is in the file,
+the other asserts it is not in what gets sent.
 
 **Re-verify this.** A directory can change what it lists for a country, and a
 helpline can lose funding, without a single byte changing in this repository. This

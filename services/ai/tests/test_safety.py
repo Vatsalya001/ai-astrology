@@ -473,29 +473,89 @@ class TestTheStaticResponse:
         the chart.
         """
         path = Path(crisis_module.__file__).parent / "responses" / "crisis.en.md"
+        raw = path.read_text()
 
-        assert load_crisis_response("en") == path.read_text().strip()
+        # The file minus its provenance comment, and nothing else. This
+        # used to assert equality with the whole file; the loader now
+        # strips `<!-- verified: ... -->` so a note about dial dates does
+        # not reach somebody in crisis.
+        #
+        # Asserted as "every line of prose survives" rather than
+        # "something was removed", because a loader that returned an
+        # empty string would satisfy the second.
+        served = load_crisis_response("en")
+        prose = crisis_module._COMMENT.sub("", raw).strip()
+
+        assert served == prose
+        assert "14416" in served
+        # And the stripping really happened — otherwise this test passes
+        # on a loader that does nothing, which is the state it replaced.
+        assert "<!--" in raw and "<!--" not in served
 
     def test_it_carries_a_route_to_trained_help(self) -> None:
-        """The property that replaced "carries a phone number".
+        """Both a local number and the directory.
 
-        Three Indian helplines used to be listed here. They were
-        TRANSCRIBED, not dialled — and a transcribed number is a claim
-        about the world that goes stale without anything in this
-        repository changing.
+        The three Indian helplines were removed once because they had
+        been TRANSCRIBED, not dialled — a transcribed number is a claim
+        about the world that goes stale without anything here changing,
+        and a wrong helpline number is worse than no number: it costs
+        someone in crisis the one attempt they were willing to make.
 
-        A wrong helpline number is worse than no number: it costs
-        someone in crisis the one attempt they were willing to make, and
-        they do not try again. The old test proved a *number* was
-        present, never that it *connects*, which is the only thing that
-        matters and the one thing no test can do.
+        They came back on 2026-09-23, after a human dialled each one and
+        confirmed it connects, is free and is staffed. That is the bar
+        `responses/README.md` sets, and it is the only bar that means
+        anything — no test can dial a phone.
 
-        `findahelpline.com` is maintained by people whose job that is,
-        covers every country rather than one, and cannot go stale here.
+        The directory stays as well. A local number is the better answer
+        for someone in distress, and `findahelpline.com` is maintained
+        by people whose job that is and covers every country.
         """
         for language in ("en", "hi"):
             text = load_crisis_response(language)
             assert "findahelpline.com" in text, f"{language} offers no route to help"
+            assert "14416" in text, f"{language} lost the Tele-MANAS number"
+
+    def test_the_verification_marker_never_reaches_the_reader(self) -> None:
+        """Provenance lives in the file and must not be sent.
+
+        The `verified:` marker has to be IN the response file, because
+        `test_no_unverified_phone_number_creeps_back` reads the raw
+        bytes and is what stops an un-dialled number being pasted in.
+        The file is otherwise served verbatim — so without stripping,
+        somebody in crisis would receive a note about verification dates
+        and re-verification schedules underneath their helpline numbers.
+        """
+        for language in ("en", "hi"):
+            text = load_crisis_response(language)
+            assert "<!--" not in text, f"{language} leaked a comment to the reader"
+            assert "verified:" not in text.lower(), f"{language} leaked its provenance"
+            assert "re-verify" not in text.lower()
+
+        # And the marker really is in the file — otherwise this test and
+        # the creep guard would both pass on a file with no provenance
+        # at all, which is the state they exist to prevent.
+        for language in ("en", "hi"):
+            raw = (crisis_module.RESPONSES_DIR / f"crisis.{language}.md").read_text()
+            assert "verified:" in raw.lower(), f"crisis.{language}.md records no dial date"
+
+    def test_both_languages_offer_the_same_numbers(self) -> None:
+        """A Hindi reader must not get a different, less-verified set.
+
+        Two lists drift. The likeliest version of that here is somebody
+        updating a number in one file and not the other, which leaves
+        the Hindi reader — the one likelier to need an Indian line — on
+        the stale one.
+        """
+        numbers = {
+            language: set(re.findall(r"\d{5,10}", load_crisis_response(language)))
+            for language in ("en", "hi")
+        }
+
+        assert numbers["en"] == numbers["hi"], (
+            f"the two languages list different helpline numbers: "
+            f"en={sorted(numbers['en'])} hi={sorted(numbers['hi'])}"
+        )
+        assert numbers["en"], "neither language lists a number"
 
     @pytest.mark.parametrize("language", ["en", "hi"])
     def test_no_unverified_phone_number_creeps_back(self, language: str) -> None:

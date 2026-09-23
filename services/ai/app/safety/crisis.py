@@ -37,6 +37,10 @@ from app.safety.categories import SafetyCategory, SafetyVerdict
 
 RESPONSES_DIR = Path(__file__).parent / "responses"
 
+# Provenance in the response files, stripped before anything is sent.
+# See `load_crisis_response`.
+_COMMENT = re.compile(r"<!--.*?-->", re.DOTALL)
+
 # Phrase-level, not word-level, and that is the entire reason this list
 # is usable. "die" alone flags "I'm dying to know"; "want to die" does
 # not. The bias toward false positives is real and deliberate, but it is
@@ -326,7 +330,19 @@ def load_crisis_response(language: str = "en") -> str:
             f"there is nothing to send instead."
         )
 
-    text = path.read_text().strip()
+    # HTML comments carry provenance — which numbers were dialled, and
+    # when — and must never reach the person reading this.
+    #
+    # The marker has to live IN the file: `test_no_unverified_phone_
+    # number_creeps_back` reads the raw bytes and fails on a phone
+    # number with no `verified:` beside it, which is what stops an
+    # un-dialled number being pasted in. So the provenance and the
+    # message share a file and only one of them is sent.
+    #
+    # Stripped here rather than in the caller, because every caller
+    # would have to remember, and the one that forgets sends a comment
+    # about verification dates to somebody in crisis.
+    text = _COMMENT.sub("", path.read_text()).strip()
     if not text:
         raise MissingCrisisResponseError(f"{path} is empty")
 
