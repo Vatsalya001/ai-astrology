@@ -688,13 +688,34 @@ defects it found are in [`docs/PHASE-04-GATE.md`](../PHASE-04-GATE.md).
       checking the response string passes while the bypass is broken, as long as
       something eventually produces the right words.
       `pytest tests/test_safety.py tests/test_orchestrator.py -q`
-      **Caveat, and it is real:** the phrase list was half unprotected — 26 of 50
-      phrases were matched by no test, including `suicide`, `self-harm` and both
-      feminine Hinglish forms, and deleting them left the suite green.
-      `CRISIS_CORPUS` now pins one sentence per phrase. Separately, **Devanagari is
-      not matched at all** and the Hinglish list has never been reviewed by a native
-      speaker — see [`docs/HINGLISH-CRISIS-REVIEW.md`](../HINGLISH-CRISIS-REVIEW.md),
-      whose reviewer column is still empty.
+      **How this line got from "ticked" to actually true**, because the sequence is
+      the point:
+
+      1. The phrase list was half unprotected — 26 of 50 phrases were matched by no
+         test, including `suicide`, `self-harm` and both feminine Hinglish forms.
+         Deleting them left the suite green. `CRISIS_CORPUS` now pins one sentence
+         per phrase.
+      2. **Devanagari matched nothing at all**, and no test asserted it either way,
+         so the gap was invisible rather than known. Fourteen direct forms added,
+         with nuqta normalisation so `ज़िंदगी` and `जिंदगी` are one string.
+      3. A native speaker reviewed the list on 2026-09-23 and confirmed every
+         pattern's meaning. That closed the TRANSLATION question — and could not
+         close coverage, because absent things are not on the page. Twenty-four
+         generated phrasings were then run against the detector and **all
+         twenty-four missed**: the Hinglish and Devanagari sides had **no method
+         statements at all**, a category the English side had carried from the
+         start. Twenty-two added.
+      4. Seven indirect and farewell phrasings, approved individually by the same
+         reviewer, with the false positives they buy measured and pinned by tests.
+
+      The list is now 100 phrases — 70 Latin, 30 Devanagari — from 50, all Latin.
+
+      **Still open and not closeable here:** whether these are the phrasings real
+      users write is a question production data answers.
+      [`docs/HINGLISH-CRISIS-REVIEW.md`](../HINGLISH-CRISIS-REVIEW.md) records what
+      was reviewed, what it closed, and which two patterns to revisit first if the
+      flag rate is too high. **Nobody has dialled the helpline** the static response
+      points at — that remains an open item, not a done one.
 
 ---
 
@@ -847,8 +868,8 @@ Global DoD **plus**:
 - [x] Crisis input short-circuits to a static human-written response
       Asserted on the provider receiving nothing, both via the offline keyword pass
       (zero model calls) and the model screener. Verified live with every provider
-      unreachable. **See §14 for the phrase-coverage defect and the open Devanagari
-      gap.**
+      unreachable. Covers Latin, Hinglish and Devanagari — **see §14 for how that
+      list got from 50 phrases to 100, and for what is still open.**
 - [x] Output validator blocks fabricated chart facts, ~~unsupported certainty~~
       **harmful predictions**, and prompt leaks
       **Wording amended 2026-09-23, and a real gap closed behind it.**

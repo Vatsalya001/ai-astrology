@@ -3990,3 +3990,30 @@ reads as a decision rather than an item that vanished.
 The Phase 5 entry names the trap: the machinery already has unit tests, so a test that
 exercises `Record` directly will pass exactly as it does today. The assertion has to be
 that a row EXISTS after a real chat turn.
+
+# The gate docs went stale within hours of the fix
+
+2026-09-23, asked "is Phase 4 completed now?" — and the honest check found the same
+drift pattern this phase was reopened for, just on a shorter timescale.
+
+Three claims were false because **I had fixed the thing they described**:
+
+- `PHASE-04 §14`: "Devanagari is not matched at all ... whose reviewer column is still
+  empty" — it matches thirty phrases, and the column is signed.
+- `PHASE-04 §17`: "the open Devanagari gap" — closed.
+- `current-phase.md`: "Hinglish crisis phrases are unreviewed and Devanagari matches
+  nothing" — reviewed 2026-09-23, and it matches.
+
+`current-phase.md` had also grown a second contradiction of exactly the kind it warns
+about in its own text: **two sections describing what is open**, one of them saying the
+open list is "deliberately NOT listed here" while the other listed it. Merged into one.
+The test count in the same file still said 873; it is 1128.
+
+None of this is cosmetic. A gate whose annotations describe a gap that no longer exists
+teaches the next reader to discount the annotations — which is precisely how "19 of 19
+closed" survived over eighteen unticked boxes.
+
+**The lesson, sharper than before:** fixing a defect creates a second obligation to the
+document that described it, and that obligation comes due immediately. The audit's rule
+was "execute the checks rather than reading them". The corollary is that a check which
+passes can still leave prose behind that is now false.

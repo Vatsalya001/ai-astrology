@@ -29,41 +29,22 @@ Gate:  CLOSED 2026-09-23. §17 19/19, §14 14/14, §16 6/7.
 
        ── WHAT A READER SHOULD STILL DISTRUST ───────────────────
        The containerised `ai` service cannot reach Ollama on this
-       machine (bound to 127.0.0.1). Use `task dev:ai`. Hinglish crisis
-       phrases are unreviewed and Devanagari matches nothing.
+       machine (bound to 127.0.0.1). Use `task dev:ai`.
+
+       The crisis list was reviewed on 2026-09-23 and grew from 50
+       phrases to 100 across three scripts — but whether those are the
+       phrasings real users write is a question only production data
+       answers, and NOBODY HAS DIALLED THE HELPLINE the static response
+       points at. That is the one open item on the safety path.
+
        memtest86+ is still unrun.
 
-       Accuracy CLOSED at 180/200 = 90.0% (qwen/qwen3.8-27b via Groq,
-       prompt v4, 4 provider errors — under the 5% the script tolerates
-       before it refuses to report a number).
+       Accuracy CLOSED at 180/200 = 90.0%, reproduced at 183/200 =
+       91.5% (qwen/qwen3.8-27b via Groq, prompt v4). Hosted, not local:
+       no free local model reaches the 85% bar.
 
-       The Anthropic line is SUPERSEDED by ADR-011: the adapter is
-       removed, production provider deferred to Phase 7. Its purpose —
-       verify an adapter against a real vendor once — is met by
-       `scripts/verify_provider.py openai-compatible` against Groq.
-
-       ⚠️  NOT a clean bill of health. See PROJECT_STATUS.md: two
-       single-bit flips were found in the committed ephemeris kernel on
-       this machine, memtest86+ has never been run, and every number
-       above was measured here.
-
-       ── WHAT IS OPEN ──────────────────────────────────────────
-       Deliberately NOT listed here.
-
-       This block has gone stale four times. Every time it named a
-       moving fact — "commits unpushed", "CI has not run since
-       2026-09-16", "memtest86+ UNRUN" — the fact moved and the file
-       did not, and §17 item 19 is "state files updated", so each drift
-       was itself an open gate item. Fixing it a fifth time would buy
-       one more day.
-
-       The drift surface is the duplication. So: the open list lives in
-       ONE place, `docs/PROJECT_STATUS.md`, appended chronologically and
-       never rewritten. Read its last few sections.
-
-       What belongs here is what does not move: which phase, whether
-       its gate closed, and the one caveat that outlives any single
-       finding.
+       The Anthropic line is SUPERSEDED by ADR-011 — adapter removed,
+       production provider deferred to Phase 7.
 
        ── THE CAVEAT THAT OUTLIVES EVERYTHING ──────────────────────
        🔴 THIS MACHINE HAS CONFIRMED FAILING RAM.
@@ -118,7 +99,7 @@ at `58fe1f2`. Three §11 security items were carried forward — see below.
 | 4.19 | Admin config, usage, incidents, playground | ✅ SUPER_ADMIN only, break-tested four ways |
 | 4.21 | Provider parity suite | ✅ one suite, four adapters, each through its own SDK |
 
-**873 Python tests** in `services/ai`, `mypy --strict` clean, both import contracts kept.
+**1128 Python tests** in `services/ai`, `mypy --strict` clean, both import contracts kept.
 Go: `go build`/`go vet` clean, unit + integration suites green.
 
 **Intent-classifier accuracy — met on a hosted model, not on a local one.**
