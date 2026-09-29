@@ -257,6 +257,26 @@ type CompleteResult struct {
 	Text             string          `json:"text"`
 }
 
+// EmbedRequest defines model for EmbedRequest.
+type EmbedRequest struct {
+	Texts []string `json:"texts"`
+}
+
+// EmbedResponse Vectors, plus what produced them.
+//
+// `model` and `dimensions` are not decoration. The ingester writes
+// `embedding_model` into every chunk row, and migration 000007's
+// comment explains why: a corpus embedded across a model change is
+// unfixable without it, because nothing in the data says which rows
+// need redoing.
+type EmbedResponse struct {
+	Dimensions int         `json:"dimensions"`
+	Embeddings [][]float32 `json:"embeddings"`
+	LatencyMs  int         `json:"latency_ms"`
+	Model      string      `json:"model"`
+	ProviderId string      `json:"provider_id"`
+}
+
 // HTTPValidationError defines model for HTTPValidationError.
 type HTTPValidationError struct {
 	Detail *[]ValidationError `json:"detail,omitempty"`
@@ -400,6 +420,9 @@ type HealthHealthGetParams struct {
 
 // CompleteV1CompletePostJSONRequestBody defines body for CompleteV1CompletePost for application/json ContentType.
 type CompleteV1CompletePostJSONRequestBody = CompleteRequest
+
+// EmbedV1EmbedPostJSONRequestBody defines body for EmbedV1EmbedPost for application/json ContentType.
+type EmbedV1EmbedPostJSONRequestBody = EmbedRequest
 
 // PatchRoutingV1RoutingPatchJSONRequestBody defines body for PatchRoutingV1RoutingPatch for application/json ContentType.
 type PatchRoutingV1RoutingPatchJSONRequestBody = RoutingPatch
@@ -603,6 +626,32 @@ type ClientInterface interface {
 	// Corresponds with POST /v1/complete (the `CompleteV1CompletePost` operationId).
 	CompleteV1CompletePost(ctx context.Context, body CompleteV1CompletePostJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// EmbedV1EmbedPostWithBody Embed
+	//
+	// Embed a batch in one call.
+	//
+	// Not a loop of single-text requests: every provider rate-limits per
+	// request, and a 600-document corpus at one call each is both slow and
+	// the fastest way to get throttled.
+	//
+	// Takes any type of body and a specified content type.
+	//
+	// Corresponds with POST /v1/embed (the `EmbedV1EmbedPost` operationId).
+	EmbedV1EmbedPostWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// EmbedV1EmbedPost Embed
+	//
+	// Embed a batch in one call.
+	//
+	// Not a loop of single-text requests: every provider rate-limits per
+	// request, and a 600-document corpus at one call each is both slow and
+	// the fastest way to get throttled.
+	//
+	// Takes a body of the `application/json` content type.
+	//
+	// Corresponds with POST /v1/embed (the `EmbedV1EmbedPost` operationId).
+	EmbedV1EmbedPost(ctx context.Context, body EmbedV1EmbedPostJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// GetRoutingV1RoutingGet Get Routing
 	//
 	// Corresponds with GET /v1/routing (the `GetRoutingV1RoutingGet` operationId).
@@ -730,6 +779,52 @@ func (c *Client) CompleteV1CompletePostWithBody(ctx context.Context, contentType
 // Corresponds with POST /v1/complete (the `CompleteV1CompletePost` operationId).
 func (c *Client) CompleteV1CompletePost(ctx context.Context, body CompleteV1CompletePostJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewCompleteV1CompletePostRequest(c.Server, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// EmbedV1EmbedPostWithBody Embed
+//
+// Embed a batch in one call.
+//
+// Not a loop of single-text requests: every provider rate-limits per
+// request, and a 600-document corpus at one call each is both slow and
+// the fastest way to get throttled.
+//
+// Takes any type of body and a specified content type.
+//
+// Corresponds with POST /v1/embed (the `EmbedV1EmbedPost` operationId).
+func (c *Client) EmbedV1EmbedPostWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewEmbedV1EmbedPostRequestWithBody(c.Server, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// EmbedV1EmbedPost Embed
+//
+// Embed a batch in one call.
+//
+// Not a loop of single-text requests: every provider rate-limits per
+// request, and a 600-document corpus at one call each is both slow and
+// the fastest way to get throttled.
+//
+// Takes a body of the `application/json` content type.
+//
+// Corresponds with POST /v1/embed (the `EmbedV1EmbedPost` operationId).
+func (c *Client) EmbedV1EmbedPost(ctx context.Context, body EmbedV1EmbedPostJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewEmbedV1EmbedPostRequest(c.Server, body)
 	if err != nil {
 		return nil, err
 	}
@@ -888,6 +983,46 @@ func NewCompleteV1CompletePostRequestWithBody(server string, contentType string,
 	}
 
 	operationPath := fmt.Sprintf("/v1/complete")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
+// NewEmbedV1EmbedPostRequest calls the generic EmbedV1EmbedPost builder with application/json body
+func NewEmbedV1EmbedPostRequest(server string, body EmbedV1EmbedPostJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewEmbedV1EmbedPostRequestWithBody(server, "application/json", bodyReader)
+}
+
+// NewEmbedV1EmbedPostRequestWithBody constructs an http.Request for the EmbedV1EmbedPost method, with any body, and a specified content type
+func NewEmbedV1EmbedPostRequestWithBody(server string, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/embed")
 	if operationPath[0] == '/' {
 		operationPath = "." + operationPath
 	}
@@ -1083,6 +1218,32 @@ type ClientWithResponsesInterface interface {
 	// Corresponds with POST /v1/complete (the `CompleteV1CompletePost` operationId).
 	CompleteV1CompletePostWithResponse(ctx context.Context, body CompleteV1CompletePostJSONRequestBody, reqEditors ...RequestEditorFn) (*CompleteV1CompletePostResponse, error)
 
+	// EmbedV1EmbedPostWithBodyWithResponse Embed
+	//
+	// Embed a batch in one call.
+	//
+	// Not a loop of single-text requests: every provider rate-limits per
+	// request, and a 600-document corpus at one call each is both slow and
+	// the fastest way to get throttled.
+	//
+	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /v1/embed (the `EmbedV1EmbedPost` operationId).
+	EmbedV1EmbedPostWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*EmbedV1EmbedPostResponse, error)
+
+	// EmbedV1EmbedPostWithResponse Embed
+	//
+	// Embed a batch in one call.
+	//
+	// Not a loop of single-text requests: every provider rate-limits per
+	// request, and a 600-document corpus at one call each is both slow and
+	// the fastest way to get throttled.
+	//
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /v1/embed (the `EmbedV1EmbedPost` operationId).
+	EmbedV1EmbedPostWithResponse(ctx context.Context, body EmbedV1EmbedPostJSONRequestBody, reqEditors ...RequestEditorFn) (*EmbedV1EmbedPostResponse, error)
+
 	// GetRoutingV1RoutingGetWithResponse Get Routing
 	//
 	// Returns a wrapper object for the known response body format(s).
@@ -1219,6 +1380,54 @@ func (r CompleteV1CompletePostResponse) StatusCode() int {
 
 // ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
 func (r CompleteV1CompletePostResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type EmbedV1EmbedPostResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *EmbedResponse
+	// JSON422 the response for an HTTP 422 `application/json` response
+	JSON422 *HTTPValidationError
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r EmbedV1EmbedPostResponse) GetJSON200() *EmbedResponse {
+	return r.JSON200
+}
+
+// GetJSON422 returns the response for an HTTP 422 `application/json` response
+func (r EmbedV1EmbedPostResponse) GetJSON422() *HTTPValidationError {
+	return r.JSON422
+}
+
+// GetBody returns the raw response body bytes
+func (r EmbedV1EmbedPostResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r EmbedV1EmbedPostResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r EmbedV1EmbedPostResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r EmbedV1EmbedPostResponse) ContentType() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Header.Get("Content-Type")
 	}
@@ -1397,6 +1606,44 @@ func (c *ClientWithResponses) CompleteV1CompletePostWithResponse(ctx context.Con
 	return ParseCompleteV1CompletePostResponse(rsp)
 }
 
+// EmbedV1EmbedPostWithBodyWithResponse Embed
+//
+// Embed a batch in one call.
+//
+// Not a loop of single-text requests: every provider rate-limits per
+// request, and a 600-document corpus at one call each is both slow and
+// the fastest way to get throttled.
+//
+// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /v1/embed (the `EmbedV1EmbedPost` operationId).
+func (c *ClientWithResponses) EmbedV1EmbedPostWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*EmbedV1EmbedPostResponse, error) {
+	rsp, err := c.EmbedV1EmbedPostWithBody(ctx, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseEmbedV1EmbedPostResponse(rsp)
+}
+
+// EmbedV1EmbedPostWithResponse Embed
+//
+// Embed a batch in one call.
+//
+// Not a loop of single-text requests: every provider rate-limits per
+// request, and a 600-document corpus at one call each is both slow and
+// the fastest way to get throttled.
+//
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /v1/embed (the `EmbedV1EmbedPost` operationId).
+func (c *ClientWithResponses) EmbedV1EmbedPostWithResponse(ctx context.Context, body EmbedV1EmbedPostJSONRequestBody, reqEditors ...RequestEditorFn) (*EmbedV1EmbedPostResponse, error) {
+	rsp, err := c.EmbedV1EmbedPost(ctx, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseEmbedV1EmbedPostResponse(rsp)
+}
+
 // GetRoutingV1RoutingGetWithResponse Get Routing
 //
 // Returns a wrapper object for the known response body format(s).
@@ -1509,6 +1756,39 @@ func ParseCompleteV1CompletePostResponse(rsp *http.Response) (*CompleteV1Complet
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
 		var dest AIResponseEnvelopeCompleteResult
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest HTTPValidationError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON422 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseEmbedV1EmbedPostResponse parses an HTTP response from a EmbedV1EmbedPostWithResponse call
+func ParseEmbedV1EmbedPostResponse(rsp *http.Response) (*EmbedV1EmbedPostResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &EmbedV1EmbedPostResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest EmbedResponse
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}

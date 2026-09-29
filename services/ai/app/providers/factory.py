@@ -24,9 +24,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from app.providers.base import LLMProvider, ModelMap
-from app.providers.google_provider import GoogleProvider
+from app.providers.base import EmbeddingProvider, LLMProvider, ModelMap
+from app.providers.google_provider import GoogleEmbeddingProvider, GoogleProvider
 from app.providers.mock import MockProvider
+from app.providers.ollama_embeddings import OllamaEmbeddingProvider
 from app.providers.openai_compatible import OpenAICompatibleProvider
 from app.settings import Settings, settings
 
@@ -129,4 +130,66 @@ def describe(config: Settings | None = None, model_override: str | None = None) 
     return (
         f"provider={config.llm_provider} tier={config.llm_provider_tier} "
         f"fast={models.fast} at {where}"
+    )
+
+
+def embedding_from_settings(config: Settings | None = None) -> EmbeddingProvider:
+    """Build the embedding provider `EMBEDDING_PROVIDER` names.
+
+    Separate from `provider_from_settings` because the two are separately
+    configured and separately swappable: a local Ollama for chat with
+    hosted embeddings is a sensible combination, and so is the reverse.
+
+    ── Why this exists at all, rather than being built at the call site ──
+
+    Exactly the reason the module docstring gives for the completion
+    factory. Phase 5 has two callers — the `/v1/embed` route and the
+    retriever — and a corpus embedded by one model but searched with
+    vectors from another does not error. Cosine similarity over vectors
+    from two different models returns numbers, they are just meaningless,
+    and every symptom looks like bad retrieval tuning.
+
+    So construction happens once, and `describe_embedding()` prints what
+    was resolved.
+
+    ── Why the dimension comes from settings ──
+
+    `EMBEDDING_DIM` is the single source, and it must agree with the
+    `vector(768)` column in migration 000007. The providers assert their
+    own output width at construction, so a mismatch is a startup crash
+    rather than a column that silently accepts the wrong shape.
+    """
+    config = config or settings
+
+    match config.embedding_provider:
+        case "ollama":
+            return OllamaEmbeddingProvider(
+                # `embedding_base_url`, NOT `llm_base_url`. The two are
+                # independent — see the setting's docstring for what
+                # deriving it cost.
+                base_url=config.embedding_base_url.removesuffix("/v1").removesuffix("/"),
+                model=config.embedding_model,
+                dimensions=config.embedding_dim,
+            )
+        case "google":
+            return GoogleEmbeddingProvider(
+                api_key=config.llm_api_key,
+                model=config.embedding_model,
+                dimensions=config.embedding_dim,
+            )
+
+
+def describe_embedding(config: Settings | None = None) -> str:
+    """One line naming the embedding backend a run resolved.
+
+    Printed by the ingester before it starts, for the same reason
+    `describe()` exists: a corpus embedded under a heading naming one
+    model and vectors from another is unfixable after the fact, because
+    nothing in the data says which rows are wrong.
+    """
+    config = config or settings
+    where = config.embedding_base_url if config.embedding_provider == "ollama" else "vendor API"
+    return (
+        f"embedding_provider={config.embedding_provider} "
+        f"model={config.embedding_model} dim={config.embedding_dim} at {where}"
     )

@@ -4353,3 +4353,58 @@ in `services/ai/.env` and should come out when `gemini-3.6-flash` recovers:
 ```
 LLM_MODEL_CHAT=gemini-3.5-flash-lite   # temporary; remove when 3.6-flash is not 503
 ```
+
+# The RAM corrupted a dependency, and the integrity check could not see it
+
+2026-09-30, found while running `task verify` for task 5.3. Twelve web test FILES failed
+to load while every test that ran passed — 436 passing, 12 suites unloadable, which is a
+shape that reads like a tooling problem.
+
+It was not:
+
+```
+node_modules/lucide-react/dist/cjs/lucide-react.js:4805
+["path", { d: "M16 2v3#, key: "otl347" }],
+                      ^ should be "
+```
+
+`"` is `0x22`, `#` is `0x23`. **XOR `0x01` — one bit.** The sixteenth recorded
+corruption event on this machine, and the first one caught in a dependency rather than
+in a tracked file.
+
+`npm install --workspace=web lucide-react --force` fixed it. **The suite then reported
+606 passing rather than 436** — so 170 tests had been silently not running, because the
+file they live in could not import a package.
+
+## The part worth acting on
+
+`check-integrity.sh` reported **clean** throughout, and was right to: it compares
+tracked files against the git index, and `node_modules` is not tracked. There is no
+index to compare against.
+
+So the corruption net has a shape worth stating plainly:
+
+| what | covered by | detects a flip? |
+|---|---|---|
+| tracked source, fixtures, the ephemeris kernel | `check-integrity.sh`, in CI and `task verify` | yes |
+| `node_modules`, Go build cache, mypy cache, vite cache | nothing | **no** |
+
+The caches are self-healing — clear and rebuild — but nothing *tells* you to. This one
+announced itself as "invalid JS syntax" in a file nobody had edited, which is at least a
+loud symptom. A flip in a `.js` file that stays syntactically valid would not announce
+anything.
+
+`package-lock.json` has integrity hashes for every package, so `npm ci` would have
+caught this at install time. It does not re-verify what is already on disk. **`npm ci`
+rather than a cache clear is the right response to anything that looks like a parse
+error in `node_modules`.**
+
+## Why this belongs in the Phase 5 record
+
+Because the phase gate is about to start depending on a 600-document corpus and its
+embeddings, and neither is a tracked file in the sense the integrity check understands:
+the authored markdown is tracked, the vectors in Postgres are not. A single-bit flip in
+an embedding is invisible — it is a float, every value is plausible, and the only
+symptom is a retrieval result that is slightly wrong. Task 5.4 should write the corpus
+checksum somewhere the ingester can verify, and that is now a design constraint rather
+than a nice idea.

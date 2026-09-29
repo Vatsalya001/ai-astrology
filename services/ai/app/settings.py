@@ -234,7 +234,30 @@ class Settings(BaseSettings):
     # back, at the point where it would mean something.
 
     # ─── Embeddings ───────────────────────────────────────────────
-    embedding_provider: str = "ollama"
+    # A Literal, not a str, for the reason factory.py explains about
+    # `llm_provider`: adding a third embedding backend without adding it
+    # to `embedding_from_settings` should be a mypy --strict failure at
+    # that match statement, not an `else` branch that silently serves the
+    # wrong vectors. Wrong vectors do not error — they rank as noise.
+    embedding_provider: Literal["ollama", "google"] = "ollama"
+
+    embedding_base_url: str = "http://localhost:11434"
+    """Where the Ollama embedding server is. Independent of `llm_base_url`.
+
+    It was derived from `llm_base_url` for about five minutes, on the
+    reasoning that both point at the same Ollama. They do not have to:
+    hosted chat with local embeddings is a sensible combination and so is
+    the reverse, and this project is currently running exactly the first
+    — `LLM_PROVIDER=google` with `LLM_BASE_URL=` empty, because the
+    Google adapter uses its SDK and needs no URL.
+
+    Deriving it produced `base_url=""`, which does not fail at
+    construction. It fails on the first embed call, as a connection error
+    naming an empty host, during ingestion of a corpus — the point at
+    which the least context is available to interpret it.
+
+    Ignored when `EMBEDDING_PROVIDER=google`.
+    """
     embedding_model: str = "nomic-embed-text"
     # Never hardcode this anywhere else. nomic-embed-text is 768; most
     # hosted models are 1024. A pgvector column is fixed-dimension, so a

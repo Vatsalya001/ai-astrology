@@ -88,6 +88,65 @@
         "title": "CompleteResult",
         "type": "object"
       },
+      "EmbedRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "texts": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 256,
+            "minItems": 1,
+            "title": "Texts",
+            "type": "array"
+          }
+        },
+        "required": [
+          "texts"
+        ],
+        "title": "EmbedRequest",
+        "type": "object"
+      },
+      "EmbedResponse": {
+        "description": "Vectors, plus what produced them.\n\n`model` and `dimensions` are not decoration. The ingester writes\n`embedding_model` into every chunk row, and migration 000007's\ncomment explains why: a corpus embedded across a model change is\nunfixable without it, because nothing in the data says which rows\nneed redoing.",
+        "properties": {
+          "dimensions": {
+            "title": "Dimensions",
+            "type": "integer"
+          },
+          "embeddings": {
+            "items": {
+              "items": {
+                "type": "number"
+              },
+              "type": "array"
+            },
+            "title": "Embeddings",
+            "type": "array"
+          },
+          "latency_ms": {
+            "title": "Latency Ms",
+            "type": "integer"
+          },
+          "model": {
+            "title": "Model",
+            "type": "string"
+          },
+          "provider_id": {
+            "title": "Provider Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "embeddings",
+          "model",
+          "dimensions",
+          "provider_id",
+          "latency_ms"
+        ],
+        "title": "EmbedResponse",
+        "type": "object"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -577,6 +636,48 @@
         "summary": "Complete",
         "tags": [
           "ai"
+        ]
+      }
+    },
+    "/v1/embed": {
+      "post": {
+        "description": "Embed a batch in one call.\n\nNot a loop of single-text requests: every provider rate-limits per\nrequest, and a 600-document corpus at one call each is both slow and\nthe fastest way to get throttled.",
+        "operationId": "embed_v1_embed_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EmbedRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EmbedResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Embed",
+        "tags": [
+          "embeddings"
         ]
       }
     },

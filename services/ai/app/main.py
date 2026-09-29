@@ -22,7 +22,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from app import middleware, telemetry
-from app.api import complete, health
+from app.api import complete, embed, health
 from app.env_check import assert_no_typos
 from app.guards import run_all_startup_guards
 from app.observability import configure as configure_logging
@@ -79,3 +79,4 @@ app = FastAPI(
 middleware.install(app, internal_token=settings.internal_token)
 app.include_router(health.router)
 app.include_router(complete.router)
+app.include_router(embed.router)
