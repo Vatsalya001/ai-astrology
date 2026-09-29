@@ -4154,3 +4154,53 @@ bytes are still true.
 The one countermeasure that seems to work is what these entries do — grep for the claim
 immediately after changing the thing it describes, in the same sitting, before the
 memory of having written it fades.
+
+# The MinIO image cannot be pulled any more, and CI is blocked on it
+
+2026-09-29. The e2e job failed on a docs-only commit:
+
+    minio Error unauthorized: access to the requested resource is not authorized
+    ✗ docker compose failed
+
+Markdown cannot break an image pull, so this is environmental — but it is **not
+transient**, which is what makes it worth a section rather than a retry.
+
+`docker pull quay.io/minio/minio:RELEASE.2025-04-22T22-12-26Z` fails locally too, with
+`401 UNAUTHORIZED`. So does every alternative path:
+
+| ref | result |
+|---|---|
+| `quay.io/minio/minio:RELEASE.2025-04-22T22-12-26Z` (what compose pins) | 401 |
+| `quay.io/minio/minio:latest` | failed |
+| `minio/minio:latest` (Docker Hub) | pull access denied |
+| `quay.io/minio/minio:RELEASE.2024-01-16…` and `…2023-09-04…` | failed |
+| `bitnami/minio:latest` | failed |
+
+Controls pulled fine in the same session — `alpine:3` and `postgres:17-alpine` — so it
+is MinIO specifically, not this network and not a rate limit.
+
+**This means a fresh `docker compose up` cannot work on any machine.** It has been
+working here only because the container was created while the image was still
+available; `docker images` shows the pinned quay tag is not even in the local cache.
+The comment in `docker-compose.yml` already records one move — Docker Hub's
+`minio/minio` stopped being published, hence quay.io — and quay.io has now followed.
+
+## Not fixed, deliberately
+
+Swapping the object store needs an ADR (`no new technology without one`) and the choice
+is not obvious, because `storage.go:117` uses `PresignedGetObject` — the PDF download
+flow hands the browser a signed URL, so any replacement must implement presigned GETs,
+not merely `PutObject`.
+
+Three candidates were confirmed **pullable** in the same session:
+
+- `chrislusf/seaweedfs` — small, fast to start, S3 gateway supports presigned URLs.
+  Closest to a drop-in for this use.
+- `localstack/localstack` — the most complete S3 emulation, and the heaviest; adds real
+  seconds to every CI e2e run.
+- `adobe/s3mock` — purpose-built mock, smallest, least production-like. It is a test
+  double rather than a server, which cuts against `.claude/rules/testing.md`'s
+  preference for real infrastructure in integration tests.
+
+**Until this is decided, the e2e job will keep failing.** Every other CI job is
+unaffected — they do not use object storage — so the rest of the gate still verifies.
