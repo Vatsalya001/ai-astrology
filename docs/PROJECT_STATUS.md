@@ -4287,3 +4287,69 @@ carries a supersession note pointing at ADR-013 and at the files that are curren
 
 That distinction is worth keeping: a spec for a closed phase is a record, and a record
 you edit to match the present is no longer evidence of anything.
+
+# Gemini verified against a real key — and the chat tier is down at Google
+
+2026-09-29. `google-genai 2.24.0`, free-tier key, `scripts/verify_provider google`.
+Recorded because the script asks for it, and because the first run failed four times in
+a row in a way that looked like our configuration and was not.
+
+## The tiers, probed individually
+
+`verify_provider` defaults every probe to `tier="chat"`, so all four of its checks hit
+one model and all four reported `503`. Probing the models directly separated them:
+
+| tier | model | result |
+|---|---|---|
+| fast | `gemini-3.5-flash-lite` | **200 OK** |
+| chat | `gemini-3.6-flash` | **503 UNAVAILABLE** — *"experiencing high demand"*, 5/5 attempts over 100 s |
+| deep | `gemini-3.1-pro-preview` | **429 RESOURCE_EXHAUSTED** — expected; `deep` is the paid tier and this is a free key |
+
+The key is fine: `ListModels` returns 200 and all three models are listed. So this is
+Google-side capacity on one model, not our config, not the adapter, and not the key.
+
+**5 of 5 over 100 seconds is not the "spike" the error message describes**, so it was
+worth separating rather than retrying and moving on.
+
+## The model list lies, confirmed empirically
+
+`settings.py` already warns that Google's `ListModels` returns models a new key cannot
+call. Tested:
+
+| model | `generateContent` |
+|---|---|
+| `gemini-2.5-flash` | **404 NOT_FOUND** |
+| `gemini-2.5-flash-lite` | 404 |
+| `gemini-2.0-flash` | 404 |
+
+All three are listed. None is callable. That comment is now backed by a run rather than
+by a memory of one — and it is the reason not to "fix" a 404 by copying a name out of
+the model list.
+
+## Verified about the adapter
+
+With `LLM_MODEL_CHAT=gemini-3.5-flash-lite` as a temporary override, all three checks
+ran: `finish_reason` parsed as `stop`, token accounting produced
+`input_tokens=3747, cached=0`, and latency was 3–17 s.
+
+## Two things that did NOT verify, and are not claimed
+
+- **Implicit caching.** `cached_input_tokens` stayed `0` across three consecutive calls
+  with an identical ~3.7k-token prefix. The script says it "may need two or three
+  runs"; it got three. The `promptTokenCount`-is-inclusive subtraction is therefore
+  still unexercised against a non-zero cached count.
+- **The safety-block path.** The refusal probe returned `finish_reason=stop` with the
+  model declining politely *in prose* — not the `200-with-no-candidates` shape the
+  adapter maps to `finish_reason=refusal`. So the branch that exists specifically to
+  stop an empty response being rendered as an answer is still unverified against a live
+  model. Its unit tests cover the shape; nothing has yet produced the shape for real.
+
+## What to do about the chat tier
+
+Nothing in the repository. `DEFAULT_MODELS` is unchanged — pinning the chat tier to
+`flash-lite` permanently would trade quality for a Google outage. The override belongs
+in `services/ai/.env` and should come out when `gemini-3.6-flash` recovers:
+
+```
+LLM_MODEL_CHAT=gemini-3.5-flash-lite   # temporary; remove when 3.6-flash is not 503
+```
