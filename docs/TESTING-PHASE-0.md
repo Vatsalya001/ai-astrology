@@ -41,7 +41,7 @@ docker compose ps
 |---|---|---|
 | `ayana-postgres` | 5433 | Postgres 16 + pgvector |
 | `ayana-redis` | 6381 | cache, rate-limit windows |
-| `ayana-minio` | 9000 / 9001 | S3-compatible object storage |
+| `ayana-minio` | 9000 / 9001 | S3-compatible object storage — **now `ayana-storage`, SeaweedFS, same ports** ([ADR-013](decisions/013-object-storage-seaweedfs.md)). Kept as the container name this Phase 0 run actually observed |
 | `ayana-mailpit` | 1025 / 8025 | SMTP sink + web UI |
 | `ayana-astro` | 8100 | deterministic chart computation |
 | `ayana-ai` | 8200 | LLM orchestration |

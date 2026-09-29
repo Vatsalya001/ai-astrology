@@ -4263,3 +4263,27 @@ Recorded because both looked alarming and neither was real:
   answers 503 with every health check green.
 - **One visual snapshot** fails under four-worker contention and passes alone (15/15).
   Pre-existing and unrelated — the chart SVG touches no storage.
+
+# Five documents still described MinIO
+
+2026-09-29, swept immediately after the swap rather than waiting to be asked. The
+interval on this drift is now within the same sitting, which is the only cadence that
+has worked.
+
+Split by what the document is *for*, because the right fix differs:
+
+**Describes the system now — corrected in place.**
+`ARCHITECTURE.md`'s diagram said `MinIO (S3-compatible) :9000/9001`, and
+`00-OVERVIEW.md`'s technology table listed MinIO as the object-storage choice. Both are
+read as current, so both now say SeaweedFS, the table with a pointer to ADR-013.
+`PHASE-03`'s PDF flow said `MinIO/S3` and now says `object store` — the flow is what
+matters there, not the vendor.
+
+**Records what a closed phase specified — annotated, not rewritten.**
+`PHASE-00-FOUNDATION.md` mentions MinIO three times including a compose block, and
+`TESTING-PHASE-0.md` names the `ayana-minio` container a real Phase 0 run observed.
+Editing those to match today would erase that the choice changed and why, so each
+carries a supersession note pointing at ADR-013 and at the files that are current.
+
+That distinction is worth keeping: a spec for a closed phase is a record, and a record
+you edit to match the present is no longer evidence of anything.

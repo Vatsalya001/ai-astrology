@@ -473,7 +473,7 @@ everything user-facing.
 |---|---|---|
 | PostgreSQL + pgvector | `pgvector/pgvector:pg16` Docker | Neon, Supabase |
 | Redis | `redis:7-alpine` Docker | Upstash |
-| Object storage | MinIO Docker | Cloudflare R2 |
+| Object storage | **SeaweedFS Docker** ([ADR-013](../decisions/013-object-storage-seaweedfs.md) — was MinIO until its images stopped being pullable) | Cloudflare R2 |
 | Geocoding | **GeoNames dump in your own Postgres** — recommended | Nominatim (strict policy) |
 | Timezone lookup | `timezonefinder` (Python, offline) | — |
 | SMS OTP | Log to stdout in dev | — (SMS costs money everywhere) |

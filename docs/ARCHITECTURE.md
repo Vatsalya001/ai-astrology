@@ -39,7 +39,7 @@ Last verified against a running system: 2026-09-13 (Phase 0).
             ┌───────────────────────────────────────────────┐
             │  PostgreSQL 16 + pgvector + pg_trgm     :5433  │
             │  Redis 7                                :6381  │
-            │  MinIO (S3-compatible)             :9000/9001  │
+            │  SeaweedFS (S3-compatible)         :9000/9001  │
             │  Mailpit                           :1025/8025  │
             └───────────────────────────────────────────────┘
 ```

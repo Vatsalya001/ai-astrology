@@ -11,6 +11,17 @@
 
 No product features are built in this phase. Resist the urge.
 
+> **Where this spec no longer matches the repo.** Every mention of **MinIO** below —
+> the deliverable line, the scope list and the compose block — was superseded on
+> 2026-09-29 by [ADR-013](../decisions/013-object-storage-seaweedfs.md): MinIO's images
+> stopped being anonymously pullable, so the stack runs **SeaweedFS** on the same host
+> ports with the same credentials.
+>
+> Left as written, deliberately. This file records what Phase 0 *specified*; editing a
+> closed phase's spec to match today would erase the fact that the choice changed and
+> the reason it had to. The current shape of the stack is in
+> [`docs/ARCHITECTURE.md`](../ARCHITECTURE.md) and `docker-compose.yml`.
+
 ---
 
 ## 1. Scope
@@ -110,6 +121,11 @@ services:
     image: redis:7-alpine
     ports: ["6379:6379"]
 
+  # SUPERSEDED 2026-09-29 by ADR-013: MinIO's images stopped being
+  # anonymously pullable and the stack runs SeaweedFS on the same host
+  # ports. Left as written — this file records what Phase 0 specified,
+  # and rewriting a closed phase's spec to match today hides the fact
+  # that the choice changed and why.
   minio:
     image: minio/minio
     command: server /data --console-address ":9001"

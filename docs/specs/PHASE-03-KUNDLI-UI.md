@@ -305,7 +305,7 @@ GET  /api/v1/charts/{id}/pdf/{jobID} → { status, url? }
 ```
 asynq task → chromedp drives headless Chrome
           → renders a print-styled Next.js route with a signed one-time token
-          → PDF bytes → MinIO/S3 → signed URL (24 h)
+          → PDF bytes → object store → signed URL (24 h)
           → notification when ready
 ```
 
