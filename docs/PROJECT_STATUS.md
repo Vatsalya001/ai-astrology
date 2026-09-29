@@ -4129,3 +4129,28 @@ caller" being implemented as "never apply a deadline"), and no deadline gets the
 default (the control that stops a browserless worker hanging at boot).
 
 Re-running the mutation now fails exactly the middle subtest and passes the other two.
+
+# Three more documents said the helpline was undialled
+
+2026-09-23. Swept for the drift pattern immediately after adding the numbers, rather
+than waiting to be asked again — the last two rounds both found it, and the interval
+is now measured in minutes rather than days.
+
+Three places still claimed the work was open:
+
+- `PHASE-04 §14` — *"Nobody has dialled the helpline… that remains an open item, not a
+  done one."* Rewritten as step 5 of the crisis sequence, naming the three numbers.
+- `current-phase.md` — *"A human must dial each crisis helpline number."* Struck through
+  with the date and the numbers, plus the re-dial interval.
+- `PHASE-04-GATE.md` — a row closed *"by removing the numbers"*, which was the right
+  answer in September and is no longer the current one. Superseded in place rather than
+  rewritten, so the reasoning that led to removal stays visible.
+
+Every one of them was true when written. That is the whole difficulty: **a fix creates
+an obligation to the prose that described the problem, and the prose has no test.**
+`check-integrity.sh` can prove a file is the bytes we committed; nothing proves those
+bytes are still true.
+
+The one countermeasure that seems to work is what these entries do — grep for the claim
+immediately after changing the thing it describes, in the same sitting, before the
+memory of having written it fades.

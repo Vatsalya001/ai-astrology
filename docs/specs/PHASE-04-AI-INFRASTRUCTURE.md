@@ -710,12 +710,22 @@ defects it found are in [`docs/PHASE-04-GATE.md`](../PHASE-04-GATE.md).
 
       The list is now 100 phrases — 70 Latin, 30 Devanagari — from 50, all Latin.
 
+      5. The response's one external claim was checked. **All three Indian helplines
+         were dialled from India on 2026-09-23** — Tele-MANAS 14416, AASRA
+         9820466726, Vandrevala 9999666555 — and each connects, is free and is
+         staffed. They are back in `crisis.en.md` and `crisis.hi.md`, identical in
+         both, with `findahelpline.com` beneath them for everyone this product does
+         not cover. The dial date lives in the file as an HTML comment that
+         `load_crisis_response` strips, so the provenance a guard needs never
+         reaches a person in crisis.
+
       **Still open and not closeable here:** whether these are the phrasings real
       users write is a question production data answers.
       [`docs/HINGLISH-CRISIS-REVIEW.md`](../HINGLISH-CRISIS-REVIEW.md) records what
       was reviewed, what it closed, and which two patterns to revisit first if the
-      flag rate is too high. **Nobody has dialled the helpline** the static response
-      points at — that remains an open item, not a done one.
+      flag rate is too high. The helpline numbers need **re-dialling roughly every
+      six months** — a service can change number or lose funding without a byte
+      changing here, which is why they were removed once before.
 
 ---
 

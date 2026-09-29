@@ -181,9 +181,14 @@ Owed to the Phase 4 gate and **not closeable by the suite**:
 - The ≥85% intent-accuracy number — `uv run python -m scripts.measure_intent_accuracy`
   against local Ollama. CI asserts the keyword pre-pass only, which is the half that
   is pure code.
-- **A human must dial each crisis helpline number** in
+- ~~**A human must dial each crisis helpline number**~~ **Done 2026-09-23.** All
+  three dialled from India — Tele-MANAS 14416, AASRA 9820466726, Vandrevala
+  9999666555 — each connects, is free and is staffed, and all three are back in
   `services/ai/app/safety/responses/`. No test can check a phone number is correct,
-  and a wrong one costs someone the single attempt they were willing to make.
+  which is why the dial date is recorded in the file itself.
+  **Re-dial roughly every six months.** A service can change number or lose funding
+  without a byte changing here — that is exactly how these came to be removed once
+  before, having been transcribed rather than called.
 
 ---
 
