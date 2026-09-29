@@ -214,14 +214,27 @@ cmd_up() {
   $COMPOSE up -d --build --wait > "$RUN_DIR/compose.log" 2>&1 \
     || { tail -20 "$RUN_DIR/compose.log"; die "docker compose failed"; }
 
-  # The bucket. A separate invocation because minio-init runs to
+  # The bucket. A separate invocation because storage-init runs to
   # completion, and the --wait above counts an exited container as a
   # failure — so it sits behind a compose profile and is started here,
   # after storage is healthy.
   #
-  # `mc mb --ignore-existing` makes this a no-op on every run after the
-  # first, so it costs a second and never needs a conditional.
-  $COMPOSE --profile init up minio-init --exit-code-from minio-init \
+  # `s3.bucket.create` is idempotent enough for this: on a second run it
+  # reports the bucket exists and still exits 0, so this costs a second
+  # and never needs a conditional.
+  #
+  # Removed first, and that is not tidiness. This container is behind a
+  # PROFILE, so `docker compose down -v` does not touch it — it survives
+  # as an Exited container still referencing the network that `down`
+  # deleted, and the next `up` fails with
+  #
+  #   failed to set up container networking: network <id> not found
+  #
+  # which reads like a Docker fault rather than a stale container. It
+  # cost a cold start to find, and it was latent in the MinIO setup too.
+  $COMPOSE --profile init rm -fs storage-init >> "$RUN_DIR/compose.log" 2>&1 || true
+
+  $COMPOSE --profile init up storage-init --exit-code-from storage-init \
     >> "$RUN_DIR/compose.log" 2>&1 \
     || die "could not create the object-storage bucket — see $RUN_DIR/compose.log"
 
@@ -455,7 +468,7 @@ cmd_status() {
   printf '  %s%-34s%s  %s\n' "$BLUE" "http://localhost:$WEB_PORT/status"  "$RESET" "system status — live health of all six dependencies"
   echo
   printf '  %s%-34s%s  %s\n' "$BLUE" "http://localhost:8025"              "$RESET" "Mailpit — every outbound email lands here, none are sent"
-  printf '  %s%-34s%s  %s\n' "$BLUE" "http://localhost:9001"              "$RESET" "MinIO console — object storage (minioadmin / minioadmin)"
+  printf '  %s%-34s%s  %s\n' "$BLUE" "http://localhost:9001"              "$RESET" "SeaweedFS filer — a file browser, not an object-store console (ADR-013)"
   echo
 
   say "APIs"
@@ -695,7 +708,10 @@ cmd_down() {
     || warn "$COMPOSE down reported a problem — see $RUN_DIR/compose-down.log"
 
   info "Postgres and MinIO data survive in named volumes."
-  info "To wipe them too: $COMPOSE down -v"
+  # `--profile init` included deliberately: without it the bucket-init
+  # container survives the wipe and breaks the next start. See the note
+  # in the up path.
+  info "To wipe them too: $COMPOSE --profile init down -v"
 }
 
 # ─── dispatch ────────────────────────────────────────────────────────

@@ -1,0 +1,19 @@
+{
+  "identities": [
+    {
+      "name": "ayana-dev",
+      "credentials": [
+        {
+          "accessKey": "minioadmin",
+          "secretKey": "minioadmin"
+        }
+      ],
+      "actions": [
+        "Read:astro-dev",
+        "Write:astro-dev",
+        "List:astro-dev",
+        "Tagging:astro-dev"
+      ]
+    }
+  ]
+}

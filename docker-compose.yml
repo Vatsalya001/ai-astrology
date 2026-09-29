@@ -47,26 +47,49 @@ services:
       timeout: 3s
       retries: 10
 
-  minio:
-    # quay.io, not Docker Hub: `minio/minio` there is no longer
-    # anonymously pullable, which passes locally off a warm cache and
-    # fails every CI run on a cold one.
+  storage:
+    # SeaweedFS, not MinIO. See ADR-013.
+    #
+    # MinIO's images stopped being anonymously pullable — Docker Hub
+    # first, then quay.io — and every tag tried returned 401 or "access
+    # denied", including two older releases and bitnami's. Controls
+    # (`alpine:3`, `postgres:17-alpine`) pulled fine in the same session,
+    # so it was MinIO specifically. The stack had been starting here only
+    # off a container that predated the withdrawal; a cold machine could
+    # not bring it up at all, and CI proved that on a docs-only commit.
     #
     # Pinned, like every other image here. `:latest` means a green build
     # today and a red one tomorrow with an unchanged commit.
-    image: quay.io/minio/minio:RELEASE.2025-04-22T22-12-26Z
-    container_name: ayana-minio
-    command: server /data --console-address ":9001"
-    environment:
-      MINIO_ROOT_USER: minioadmin
-      MINIO_ROOT_PASSWORD: minioadmin
+    image: chrislusf/seaweedfs:3.97
+    container_name: ayana-storage
+    # `server -s3` is the all-in-one: master, volume, filer and the S3
+    # gateway in one process. Right for development, and explicitly not
+    # a production topology — see ADR-013's scope note.
+    command: >
+      server -s3 -dir=/data
+      -s3.config=/etc/seaweedfs/s3conf.json
     ports:
-      - "127.0.0.1:9000:9000"   # S3 API
-      - "127.0.0.1:9001:9001"   # web console
+      - "127.0.0.1:9000:8333"   # S3 API — same host port MinIO used
+      - "127.0.0.1:9001:8888"   # filer UI. A file browser, NOT an
+                                # object-store console; see ADR-013
     volumes:
-      - miniodata:/data
+      - storagedata:/data
+      - ./infrastructure/seaweedfs/s3conf.json:/etc/seaweedfs/s3conf.json:ro
     healthcheck:
-      test: ["CMD", "mc", "ready", "local"]
+      # `wget` and `127.0.0.1`, and both were learned the hard way.
+      #
+      # `curl` is in `:latest` and NOT in `:3.97`, which is pinned here —
+      # probing one image while pinning another is how this check first
+      # shipped broken. Verified against 3.97 specifically.
+      #
+      # `127.0.0.1`, not `localhost`: busybox wget resolves the name to
+      # ::1 and SeaweedFS binds IPv4 only, so the check got
+      # "connection refused" from a server that was up and answering.
+      #
+      # Still no second image, which was the point: MinIO's check shelled
+      # out to `mc`, another image from the same publisher, carrying
+      # exactly the withdrawal risk that caused ADR-013.
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8333/status"]
       interval: 5s
       timeout: 3s
       retries: 10
@@ -81,9 +104,12 @@ services:
   #
   # Runs to completion and exits; `mc mb --ignore-existing` makes a
   # restart a no-op rather than an error.
-  minio-init:
-    image: quay.io/minio/mc:RELEASE.2025-04-16T18-13-26Z
-    container_name: ayana-minio-init
+  storage-init:
+    # The SAME image as the store itself, so provisioning adds no second
+    # dependency to withdraw. `mc` used to do this and was the other
+    # half of the MinIO problem.
+    image: chrislusf/seaweedfs:3.97
+    container_name: ayana-storage-init
     # Behind a profile, so a plain `docker compose up` does not start it.
     #
     # Not tidiness — `up --wait` blocks until every started service is
@@ -98,12 +124,11 @@ services:
     # implied by a depends_on nobody reads.
     profiles: ["init"]
     depends_on:
-      minio:
+      storage:
         condition: service_healthy
     entrypoint: >
       /bin/sh -c "
-      mc alias set local http://minio:9000 minioadmin minioadmin &&
-      mc mb --ignore-existing local/astro-dev &&
+      echo 's3.bucket.create -name astro-dev' | weed shell -master=storage:9333 &&
       echo 'bucket astro-dev ready'
       "
 
@@ -174,4 +199,4 @@ services:
 
 volumes:
   pgdata:
-  miniodata:
+  storagedata:

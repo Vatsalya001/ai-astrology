@@ -4204,3 +4204,62 @@ Three candidates were confirmed **pullable** in the same session:
 
 **Until this is decided, the e2e job will keep failing.** Every other CI job is
 unaffected — they do not use object storage — so the rest of the gate still verifies.
+
+# Object storage: MinIO out, SeaweedFS in (ADR-013)
+
+2026-09-29. The image withdrawal recorded above is fixed rather than worked around.
+[ADR-013](decisions/013-object-storage-seaweedfs.md) has the full reasoning; this
+records what the swap actually cost, because almost none of it was the part that looked
+hard.
+
+The application code did not change. `minio-go` is an S3 client and was never tied to
+the MinIO server, so `internal/platform/storage` talks to SeaweedFS unmodified.
+
+## Four things went wrong, and each was found by running it
+
+**The health check used a binary the pinned image does not have.** `curl` is in
+`chrislusf/seaweedfs:latest` and not in `:3.97`. I probed one and pinned the other —
+the same "measure what ships" error this repo has logged twice before, this time about
+an image rather than a provider.
+
+**`localhost` resolved to the wrong address family.** With `wget` in place, the check
+still failed: busybox resolves `localhost` to `::1`, SeaweedFS binds IPv4 only, and the
+container reported *connection refused* against a server that was up and answering
+`/status`. Pinned to `127.0.0.1`.
+
+**SeaweedFS creates buckets on write, and MinIO refused to.** This is the one that
+mattered. A PUT to `a-bucket-that-does-not-exist` succeeded and the bucket appeared
+holding 264 bytes — silently deleting a safety property `storage.New` documents in its
+own comment: *"a bucket conjured by the first write hides a misconfigured bucket name
+behind a working-looking service, and the first sign is objects nobody can find."*
+Fixed by scoping the dev identity to `Read:astro-dev` rather than `Read`, with no
+`Admin`. `TestTheBucketIsNotCreatedOnDemand` fails if it is ever widened.
+
+**The bucket-init container survives `docker compose down -v`.** It is behind a
+profile, so `down` does not touch it; it lingers as an Exited container holding a
+reference to the network `down` deleted, and the next `up` fails with
+`network <id> not found` — which reads like a Docker fault rather than a stale
+container. Latent in the MinIO setup too; `scripts/ayana` now removes it first.
+
+## What was verified, and how
+
+- `TestPresignedURLsWorkAgainstTheRealGateway` — the shipping `storage.Client`, a real
+  gateway, signed GET returns 200 with matching bytes.
+- `TestAnUnsignedGetIsRefused` — the control, and it carries equal weight. Without it
+  the first test passes against a world-readable bucket where presigning is decoration
+  and every generated PDF is public to anyone who guesses a key.
+- The full PDF e2e: browser → Go API → worker → Chrome → SeaweedFS → presigned
+  download, asserting `%PDF-` magic bytes and a size floor. 9/9.
+- A genuine cold start: `--profile init down -v`, then `up`, then 161 e2e tests.
+
+## Two failures during verification that were NOT this change
+
+Recorded because both looked alarming and neither was real:
+
+- **Transits 503.** `down -v` wipes the database, but the host-run worker survived it —
+  `ayana up` reported "already running" and skipped the restart, so the startup transit
+  refresh never ran against the fresh DB. Restarting the worker fixed it. Worth knowing:
+  after any `down -v`, restart the worker or transits stay empty and `/kundli/transits`
+  answers 503 with every health check green.
+- **One visual snapshot** fails under four-worker contention and passes alone (15/15).
+  Pre-existing and unrelated — the chart SVG touches no storage.
