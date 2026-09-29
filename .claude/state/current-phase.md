@@ -1,9 +1,21 @@
 # Current phase
 
 ```
-Phase: 4 — AI Infrastructure
-Gate:  CLOSED 2026-09-23. §17 19/19, §14 14/14, §16 6/7.
-       21 tasks done. Nothing is exposed to users in this phase.
+Phase: 5 — RAG & "Chat With My Kundli"  ◀ IN PROGRESS
+       Started 2026-09-29. Task list is PHASE-05 §10 (20 tasks).
+       DONE: 5.1 knowledge schema + all three index types.
+
+       This is the first phase whose output reaches a user, which
+       changes what "tested" has to mean. Two adapter paths carried
+       forward from Phase 4 are UNVERIFIED against a live model and
+       both matter here: implicit prompt caching (cached_input_tokens
+       never came back non-zero) and the safety-block path
+       (finish_reason=refusal from a 200-with-no-candidates, which no
+       live model has yet produced). The second is the one that stops
+       an empty response being rendered as an answer.
+
+Phase 4 gate: CLOSED 2026-09-23. §17 19/19, §14 14/14, §16 6/7.
+       21 tasks done. Nothing was exposed to users in that phase.
 
        Read the boxes in docs/specs/PHASE-04-AI-INFRASTRUCTURE.md, not
        this line. Each carries the command that proves it. This line
