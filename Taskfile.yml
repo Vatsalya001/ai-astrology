@@ -315,6 +315,21 @@ tasks:
     cmds:
       - ./scripts/check-integrity.sh
 
+  integrity:toolchain:
+    desc: Re-hash the extracted Go toolchain against the zip it came from
+    # The gap that produced corruption event #17 on 2026-10-03. Tracked
+    # files are covered by check-integrity.sh and node_modules by
+    # `npm ci`; the Go module cache was covered by nothing, and three
+    # files in it had thirteen single-bit flips between them — including
+    # the ASSEMBLER, where wrong machine code comes out and no test
+    # looks.
+    #
+    # Not in `verify`: it reads 11,518 files and takes about a minute,
+    # which is too slow for the commit gate. Run it when a build fails
+    # in a way that makes no sense.
+    cmds:
+      - ./scripts/check-toolchain.sh
+
   integrity:gate:
     desc: The dirty-tree-safe half — fails only on mismatches git cannot see
     # Was "not in verify" because on a working tree the full check flags

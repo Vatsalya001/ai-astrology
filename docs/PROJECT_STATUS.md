@@ -4778,3 +4778,123 @@ old width. The corpus is in git; that is what makes the second one a plan rather
 hope.
 
 `task verify` green.
+
+---
+
+# Phase 5 task 5.7 (part 1) — the core corpus, and corruption event #17 (2026-10-03)
+
+## The corpus
+
+**123 documents, 593 chunks**, all parsing and chunking cleanly. The core categories
+are complete:
+
+| category | documents |
+|---|---|
+| nakshatras | 27 — all of them |
+| yogas | 24 |
+| houses | 12 — all of them |
+| signs | 12 — all of them |
+| planets | 9 — all of them |
+| dashas | 11 — the system plus each of the nine periods |
+| topic guidance | 14, keyed to the real `Intent` enum values |
+| aspects | 5 |
+| remedies | 4 |
+
+§16 wants ≥400. The remaining ~280 are the combinatorial blocks — 9 planets × 12
+houses and 9 × 12 signs — which are deliberately **not** written yet: retrieval (5.6)
+gets built and measured against these 123 first, so that if the chunk metadata schema
+turns out wrong for retrieval it is discovered at 123 documents rather than at 450.
+Re-authoring 450 is the expensive mistake.
+
+### What the corpus does differently from the genre
+
+The thing worth noting about these documents is how much of them is about **frequency
+and limits**, because that is where published astrology content is least honest:
+
+- Mangal Dosha covers roughly **half of all charts** by construction. Every mention
+  says so
+- Sade Sati occupies 7.5 of Saturn's 29.5-year cycle, so about **a quarter of all
+  people are in it at any moment** — around 2 billion right now. Stated plainly
+- Budha-Aditya yoga requires Mercury and the Sun in one sign, which is most charts
+- Raja yogas (kendra-trikona lord connections) occur in most charts
+- Kala Sarpa yoga is largely a **modern construction** with weak textual standing and
+  is not rare
+
+Three documents exist specifically to refuse things rather than to assert them:
+`daridra-yoga`, `medical-boundary` and `legal-boundary`. Each says what the classical
+sources claim, then why the response does not repeat it, and the reasoning is the same
+every time: the claim is not supportable, it is not actionable, and the reliance is
+costly. `remedies-ethics` names the commercial pattern explicitly — common
+configuration, alarming description, paid remedy — and declines each step of it.
+
+That material is in the corpus rather than in the prompt on purpose. A prompt
+instruction not to be alarmist is a rule the model may or may not follow; a retrieved
+chunk that says "this affects half of all charts and the cancellations are extensive"
+is evidence the model has to answer with.
+
+## Corruption event #17 — and the first one in a build tool
+
+`task verify` failed with a **syntax error inside the Go standard library**:
+
+```
+internal/fuzz/fuzz.go:108:3: syntax error: unexpected keyword defer, expected expression
+```
+
+Line 107 read `context.WithTimeout(ctx, opts.Timeout(` — a `)` that had become a `(`.
+`0x29` → `0x28`: **XOR 0x01, one bit.**
+
+The module cache still held the hash-verified zip the toolchain was extracted from, so
+the authoritative bytes were on disk and could be diffed rather than guessed. That
+turned a plausible diagnosis into an exact one — and the exact one was worse:
+
+| file | differing bytes | single-bit |
+|---|---|---|
+| `src/internal/fuzz/fuzz.go` | 5 | 5 |
+| `pkg/tool/linux_amd64/asm` | 3 | 3 |
+| `pkg/tool/linux_amd64/cgo` | 6 | 5 |
+
+Three files of **11,518**, with 14 differing bytes, 13 of them a single flipped bit.
+Within each file the offsets cluster — the three in `asm` sit inside 800 bytes of each
+other — which looks like a localised failure rather than scattered events.
+
+**Two of the three are binaries, and one is the assembler.** That is a different
+category of problem from a corrupt source file. A syntax error stops the build; a
+flipped bit in `asm` emits wrong machine code, nothing errors, and every object it
+produced afterwards inherits it. Only the source file announced itself. The other four
+flips in `fuzz.go` were inside identifiers and comments and would never have surfaced.
+
+Repaired in place from the zip — after checking the zip's own CRCs first, because
+repairing from a corrupt reference is worse than not repairing — then `go clean -cache`,
+because the build cache may have held objects the damaged assembler produced.
+
+### The gap this closes
+
+`docs/PROJECT_STATUS.md` already carried a table after the lucide-react flip saying the
+Go module cache was covered by **nothing**. `scripts/check-toolchain.sh` is that
+sentence turned into a check: every extracted toolchain file re-hashed against the zip,
+with `--repair` to rewrite mismatches in place. `task integrity:toolchain`.
+
+Proven by breaking it: one bit flipped in a comment in `src/strings/builder.go`.
+`go build ./...` **exited 0** — it did not notice, and would not have. The check
+reported the offset, the XOR, and that a one-bit difference means corruption rather than
+an edit; `--repair` fixed it; a re-check came back clean.
+
+Not in `verify` — 11,518 files is about a minute, too slow for a commit gate. It is the
+thing to run when a build fails in a way that makes no sense.
+
+### One bug in the check itself, worth recording
+
+The first version resolved the toolchain version with `go version` from the repository
+root, which answers **go1.22.2** — the system install that ADR-007 exists because of.
+It found no matching zip and **exited 0**. A check that passes by looking at the wrong
+thing, which is the same measurement-under-the-wrong-heading failure this repo has now
+hit three times: twice with provider factories in Phase 4, once here. It now resolves
+the version from inside the Go module, where the answer is go1.26.8.
+
+### What this says about the pending hardware work
+
+Seventeen events, and this one is thirteen single-bit flips in three files with
+clustered offsets. The DIMM replacement on the open list is no longer a tidy-up item.
+Everything this machine builds passes through that assembler.
+
+`task verify` green: 1145 Python, 310 astro, 606 web, Go unit + `-race`.
