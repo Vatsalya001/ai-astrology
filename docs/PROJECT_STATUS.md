@@ -4659,3 +4659,122 @@ service to `storage-init` and `Taskfile.yml` still called `minio-init`. The one 
 reference the earlier sweep missed, because it is a name rather than prose.
 
 `task verify` green: 1145 Python, 310 astro, 606 web, Go unit + `-race`.
+
+---
+
+# Phase 5 task 5.5 — the embedding-dimension migration (2026-10-03)
+
+§4 says to write this while the corpus is small rather than discovering it at 100k
+chunks. Done when "documented, tested on a copy" — both halves are real:
+`docs/RUNBOOK-embedding-dimension-change.md`, and an integration test that runs all
+four phases against a throwaway Postgres with the real migrations and a real embedded
+corpus in it.
+
+## The thing that makes this not a type change
+
+pgvector columns are fixed-dimension, and **there is no transformation from a
+768-dimension vector to a 1024-dimension one**. The models have different geometry;
+padding or truncating gives vectors of the right shape that are semantically
+meaningless, and nothing errors. Retrieval keeps working and keeps being subtly wrong.
+Every chunk has to be re-embedded.
+
+The one-liner is the trap:
+
+```sql
+ALTER TABLE knowledge_chunks ALTER COLUMN embedding TYPE vector(1024);  -- fails
+```
+
+That failure is the *good* outcome. The bad one is somebody fixing it with a
+drop-and-add, which succeeds, discards every vector in the corpus, and leaves a
+knowledge base that keyword-searches fine and vector-searches not at all.
+`TestTheSwapNeverAltersTheColumnTypeInPlace` keeps that statement out of the
+generated SQL.
+
+## Four phases, with the destructive one gated
+
+| phase | what | safe on a live system? |
+|---|---|---|
+| 1 `--emit` → `task migrate` | add `embedding_v2 vector(N)` + a partial index on the rows still to do | **yes** — nullable column, no table rewrite, live column untouched |
+| 2 `--backfill` | re-embed every chunk into the shadow column, resumable | yes |
+| 3 `--verify` | the parity check, read-only | yes |
+| 4 `--swap` | drop old column, rename new, rebuild both indexes, in one transaction | **no** |
+
+The command refuses more than one phase per invocation, so `--backfill --swap` cannot
+run the destructive step in the same breath as the step whose output it depends on,
+with nobody having read the verify. And `--swap` **re-runs the parity check itself**
+rather than trusting that someone ran it: a gate is only a gate if it cannot be
+skipped, and "I ran verify a minute ago" is not a property of the database.
+
+## The parity check is the only thing between a bad backfill and an unrecoverable corpus
+
+Phases 1 and 2 are recoverable — drop the shadow column, run it again. Phase 4 drops
+the live vectors. So every check answers one question: *what would be true after a
+swap, and silently wrong?*
+
+- **any chunk missing a shadow vector** → the swap drops its live vector and leaves it
+  unembedded: invisible to vector search, still matching keyword search
+- **wrong-width shadow vectors** → the model behind ai-service is not the one the plan
+  is for
+- **more than one `embedding_model`** → cosine similarity across models is a number
+  with no meaning, so ranking is arbitrary and nothing looks wrong
+- **every shadow vector byte-identical to the live one** → the backfill copied the
+  column instead of re-embedding. This is the shortcut somebody reaches for when the
+  model is slow (`SET embedding_v2 = embedding`), and every other check passes against
+  it
+- **empty corpus** → almost always the wrong `DATABASE_URL`, and finding that out
+  after swapping the right one is worse
+
+Each of those five is proven by a test that makes the condition true and asserts the
+refusal.
+
+## Two decisions worth keeping
+
+**The backfill reads chunk text from the database, not from
+`packages/content/knowledge/`.** This phase must change the vectors and nothing else.
+Re-chunking at the same time would move boundaries *and* change the model, and the two
+effects on retrieval quality would be impossible to separate afterwards. Re-chunking is
+`ingest-kb --apply --force`, on a different day.
+
+**Deliberately not a `task` alias.** A model change is a once-a-year event that rebuilds
+every vector in the product. Putting it behind a short task name next to `task migrate`
+is how it gets run by accident; the runbook spells out `go run ./cmd/rewidth-kb`.
+
+## What the integration test asserts
+
+All four phases on a real copy, and the assertion the whole procedure exists to make
+true: the chunk count **and an `md5` of all chunk text** are unchanged across the swap.
+A dimension change must not cost a single chunk.
+
+Also: `embedding` ends up `vector(1024)` under the same name with `embedding_v2` gone;
+no chunk is left unembedded; vector search returns neighbours afterwards; and both
+indexes are checked **by access method** — `kc_embedding_idx` must be `hnsw`,
+`kc_unembedded_idx` must be `btree`. Same reasoning as the 5.1 schema test: an index
+recreated as a btree keeps its name and answers `ORDER BY embedding <=> $1` by scanning
+the whole corpus. Nothing fails, recall is identical, only latency changes.
+
+Phase 1 is applied twice in that test, because an operator unsure whether it worked
+runs it again — both statements are `IF NOT EXISTS` so the second run is a no-op rather
+than an error reading as "something is broken".
+
+## Verified by running it, not only by testing it
+
+Against the live dev database: phase exclusivity refused, `--to` required, a same-width
+plan refused ("from and to are both 768; there is nothing to do"), `--verify` before
+phase 1 failing with "did phase 1 run?", and `--emit` writing a correct
+`000009_embedding_1024.{up,down}.sql` pair.
+
+That generated pair was **deleted after inspection** — committing it would have applied
+on the next `task migrate`, adding a shadow column nobody was going to backfill. The
+generator refuses to overwrite an existing file for the same family of reason: a
+migration that already exists has probably been applied somewhere, and rewriting it is
+how two environments end up with one version number and two schemas.
+
+The generated `down` is where `.claude/rules/database.md`'s "every migration has a real
+down" gets honest. The down for a dimension change cannot restore the old vectors —
+they were dropped and cannot be recomputed from the new ones. So the file says that, in
+the file, where somebody reaching for it at 2am will read it, and names the two real
+recoveries: restore the backup, or `ingest-kb --apply --force` against a model of the
+old width. The corpus is in git; that is what makes the second one a plan rather than a
+hope.
+
+`task verify` green.
