@@ -161,6 +161,15 @@ tasks:
     desc: Open a psql shell against the dev database
     cmds: [docker compose exec postgres psql -U astro -d astro_dev]
 
+  kb:check:
+    desc: Parse and chunk the knowledge corpus; writes nothing, needs nothing running
+    # Chunking is pure Go by design (PHASE-05 §4), so the step that decides
+    # what gets embedded is reviewable before anything is paid for. Errors
+    # name the file and the field.
+    dir: '{{.API_DIR}}'
+    cmds:
+      - go run ./cmd/ingest-kb --check {{.CLI_ARGS}}
+
   # ─── Quality gates ────────────────────────────────────────────────
 
   lint:

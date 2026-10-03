@@ -4408,3 +4408,122 @@ an embedding is invisible — it is a float, every value is plausible, and the o
 symptom is a retrieval result that is slightly wrong. Task 5.4 should write the corpus
 checksum somewhere the ingester can verify, and that is now a design constraint rather
 than a nice idea.
+
+---
+
+# Phase 5 task 5.2 — deterministic chunking (2026-10-03)
+
+`internal/knowledge` + `cmd/ingest-kb --check`. 350-token windows, 50-token overlap,
+no database, no model, no network. The acceptance criterion from §10 is "same input →
+same chunks, byte-identical", and that phrase covers two different promises:
+
+| test | promise | catches |
+|---|---|---|
+| `TestChunkingIsByteIdenticalAcrossRuns` | same binary, 20 repeats | map iteration, clocks, pointer-order dependence |
+| `TestChunkingMatchesGolden` | same **input**, across code changes | a refactor that quietly moves a boundary |
+
+The second is the one that matters in six months. A chunk boundary that moves
+invalidates the embeddings on both sides of it, nothing errors, and the symptom is
+retrieval that is subtly worse with no commit to blame. Committing the boundaries as a
+reviewable artefact is the only way that change is ever noticed.
+
+## Design decisions worth keeping
+
+**JSON front matter, not YAML.** `metadata` lands in a JSONB column verbatim, and YAML
+resolves `language: no` (Norwegian) to `false` and `sign: y` to `true`. In a filter
+surface that failure is silent and surfaces months later as a retrieval bug. Also no
+new dependency: `encoding/json` has exactly one parse of any input, which is the
+property determinism needs.
+
+**Headings are hard boundaries.** No chunk and no overlap crosses one. §4's premise is
+that astrology content is atomic — "Saturn in the 10th house" is one idea — and a
+heading is the strongest statement an author makes about where one idea ends. Bleeding
+the tail of a "Career" section into the head of a "Marriage" one is the dilution §4
+warns about.
+
+**Token counts are estimates, and the design survives their being wrong.** There is no
+Go implementation of `nomic-embed-text`'s WordPiece vocabulary, and vendoring a 30k
+vocab to decide where to cut a paragraph is not a good trade. So: the estimator leans
+high (chunks come out small, never large), the window is 350 against a model that
+accepts 2048 — the estimate has to be wrong by 5× before anything truncates — and
+`token_count` is stored, so the values are re-derivable without re-embedding.
+
+## 23 mutations, 23 caught
+
+Each one breaks a single guard; the battery reports a mutation that fails to apply as a
+failure rather than skipping it, which is the trap that makes a mutation run look
+rigorous while testing nothing.
+
+Five survived the first pass, and all five were informative:
+
+**Two were my mutations being wrong.** Replacing the Devanagari branch with `case
+false:` sent those runes to `default:`, which also charges one token per rune — a
+behaviourally identical "mutation". The real one is widening `isLatinWordRune`.
+
+**Two were guards that turned out to be dead code**, and both are now deleted:
+
+- A danda (`।`) special-case in the sentence splitter. The general rule already covers
+  it: `unicode.IsLower` is false for a caseless script, so Devanagari passes the
+  "next character could begin a sentence" test exactly as a capital does. Removing the
+  branch also fixed two cases it got wrong — a danda ending a paragraph split off an
+  empty sentence, and a danda used as a digit separator split mid-number.
+- An `if len(units) == 0 { continue }` for empty sections. `windowUnits` already emits
+  nothing when there are no units.
+
+**One was a real gap in my test.** Widening the window step-back floor from
+`next > start+1` to `next > start` left every test green — and that line is the entire
+termination argument for the windower. The input that reaches it is specific: a window
+whose whole content fits inside the overlap budget, which needs a short unit followed
+by one too large to join it. `TestWindowingTerminatesWhenAShortUnitPrecedesALongOne`
+now constructs exactly that, under a 5-second watchdog rather than `go test -timeout`,
+because a hang there takes the package down after ten minutes and dumps every
+goroutine. With the floor widened it now fails in 5.00s.
+
+Its fixture has a load-bearing capital letter: `Short. a long clause…` merges into one
+unit via the lowercase-continuation rule, the window comes out full, the step-back has
+nothing it can carry, and the test passes against broken code. That is what the first
+version of the test did.
+
+## Three defects the tests found in my own code
+
+1. **`1947. A year…` was an ordered list item.** Digits, period, space. Classified as a
+   list, the whole paragraph became one unsplittable unit, so a long one got cut at a
+   word boundary instead of a sentence boundary. Fixed by capping the marker at two
+   digits and by classifying per **line** rather than per block — which also fixed the
+   commonest layout in the corpus, a lead-in sentence glued to its list, previously
+   wrong in one direction or the other.
+
+2. **Blank lines vanished from inside code fences.** Per-line units meant a blank line
+   was not a unit. In code a blank line is content. Code and tables are now one unit
+   each, verbatim.
+
+3. **A relative corpus path that depended on the caller's directory.**
+   `../../packages/content/knowledge` is right from `services/api`, where `task` runs,
+   and wrong from `services/api/cmd/ingest-kb`, where `go test` runs. Now found by
+   walking up to `Taskfile.yml`.
+
+## Shipped
+
+- `internal/knowledge/` — `document.go`, `chunk.go`, `segment.go`, `tokens.go`
+- `cmd/ingest-kb` — `--check`, `--print N`, `--corpus`; `task kb:check`
+- `internal/config/knowledgebase.go` — `KB_CHUNK_SIZE_TOKENS`, `KB_CHUNK_OVERLAP_TOKENS`,
+  `KB_EMBED_BATCH_SIZE`, embedded into `Config` so the service and the command cannot
+  disagree about the window
+- `packages/content/knowledge/` — README (the authoring format, the licence rules) and
+  4 seed documents. §16 wants ≥400; task 5.7 is the authoring job and `--check` reports
+  progress toward it rather than enforcing it
+- A `FuzzChunkDocumentTerminates` seed corpus, because the windower's step size depends
+  on content and the real corpus is 600 documents nobody has written yet
+
+`--check` without the flag exits **3** rather than 0: a command that prints a summary
+and exits clean reads as "ingested", and the next person to look would find an empty
+table and no error anywhere.
+
+Guards the ingester enforces ahead of the database, so the error names a file instead of
+surfacing from inside a 600-document transaction: unknown front-matter fields,
+`kd_identity_idx` collisions (one authored document silently overwriting another),
+blank required fields, `authority` range, lowercase `language`, and `metadata` being a
+JSON object. Every bad document is reported in one run — an author fixing a corpus one
+error per run is an author who stops fixing it.
+
+`task verify` green: 1145 Python, 606 web, Go unit + `-race`.

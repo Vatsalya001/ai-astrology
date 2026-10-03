@@ -138,6 +138,11 @@ type Config struct {
 	// and never performs one.
 	ChromePath string `env:"CHROME_PATH" envDefault:""`
 
+	// ─── Knowledge base (Phase 5) ───────────────────────────────
+	// Embedded so `cmd/ingest-kb` and the service read one definition of
+	// the chunk window. See knowledgebase.go.
+	KnowledgeBase
+
 	// ─── Feature flags ──────────────────────────────────────────
 	FeatureAIChat        bool `env:"FEATURE_AI_CHAT_ENABLED"          envDefault:"false"`
 	FeatureVoice         bool `env:"FEATURE_VOICE_ENABLED"            envDefault:"false"`

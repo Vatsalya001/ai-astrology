@@ -1,0 +1,65 @@
+{
+  "title": "Chunker Edge Cases",
+  "checksum": "f66780db2e9d652078d6e0eb3d213a715c8845d6159ad26598a379ae71c80c8b",
+  "chunks": [
+    {
+      "index": 0,
+      "section": "",
+      "token_count": 174,
+      "metadata": {
+        "topic": [
+          "testing"
+        ]
+      },
+      "content": "# Chunker Edge Cases\n\nThis document exists to pin the chunker's behaviour on the inputs that would otherwise only appear in a real corpus months from now. It is not astrology.\n\nDecimals must not split a sentence: the Moon moves approximately 13.2 degrees per day, and Ketu sits 180.0 degrees from Rahu. Abbreviations are the other case, e.g. this clause, i.e. this one, and references to Dr. Raman's tables. Something like etc. mid-sentence must also hold together.\n\nTransliterated Sanskrit is charged as words rather than as letters: Viśākhā, Bṛhat Parāśara Horā Śāstra, Pūrvāṣāḍhā."
+    },
+    {
+      "index": 1,
+      "section": "A table must stay whole",
+      "token_count": 73,
+      "metadata": {
+        "_section": "A table must stay whole",
+        "topic": [
+          "testing"
+        ]
+      },
+      "content": "# Chunker Edge Cases — A table must stay whole\n\n| Planet | House | Reading |\n|---|---|---|\n| Saturn | 10 | Authority, slowly |\n| Jupiter | 9 | Teaching, travel |\n| Mars | 3 | Courage, siblings |"
+    },
+    {
+      "index": 2,
+      "section": "A code fence must stay whole",
+      "token_count": 51,
+      "metadata": {
+        "_section": "A code fence must stay whole",
+        "topic": [
+          "testing"
+        ]
+      },
+      "content": "# Chunker Edge Cases — A code fence must stay whole\n\n```\n# this hash is not a heading\nweight = vector * 0.6 + keyword * 0.4\n\n# neither is this one\n```"
+    },
+    {
+      "index": 3,
+      "section": "A lead-in paragraph glued to its list",
+      "token_count": 121,
+      "metadata": {
+        "_section": "A lead-in paragraph glued to its list",
+        "topic": [
+          "testing"
+        ]
+      },
+      "content": "# Chunker Edge Cases — A lead-in paragraph glued to its list\n\nOccupations traditionally associated with this placement include:\n\n- Administration, law and the judiciary\n- Research requiring decades\n  rather than quarters\n- Institutions of long standing\n\n1947. A year opening a paragraph is prose, not list item one thousand nine hundred and forty-seven, and treating it as a list makes the whole paragraph one unsplittable unit."
+    },
+    {
+      "index": 4,
+      "section": "A paragraph after the empty section",
+      "token_count": 68,
+      "metadata": {
+        "_section": "A paragraph after the empty section",
+        "topic": [
+          "testing"
+        ]
+      },
+      "content": "# Chunker Edge Cases — A paragraph after the empty section\n\nA section containing only a heading produces no chunk, because a chunk that is nothing but a title embeds to something plausible and then competes with passages that have content."
+    }
+  ]
+}
