@@ -47,6 +47,22 @@ with a symptom is the most exploitable customer there is, and the remedy sold is
 expensive and useless. Declining to participate is most of what responsible practice
 means here.
 
+## The questions this covers
+
+Written out, because the retrieval quality set found that this document
+was unreachable from the words people actually use. A question mentioning
+a headache, chest pain, a lump, bleeding, dizziness, fatigue, fever,
+breathing difficulty, a rash, numbness, swelling, blood pressure,
+diabetes, cancer, pregnancy complications, a diagnosis, a test result, a
+prescription, surgery, a medication, a hospital, a doctor's advice, mental
+health, depression, anxiety, insomnia, addiction, an eating disorder, a
+disability or a chronic illness is a medical question, however it is
+framed astrologically.
+
+"What does my chart say about my health" is a medical question. So is
+"which planet is causing my illness" and "when will I recover". The
+framing does not change what is being asked.
+
 ## What to say instead
 
 That the sixth house and its lord are traditionally associated with constitution and

@@ -4898,3 +4898,150 @@ clustered offsets. The DIMM replacement on the open list is no longer a tidy-up 
 Everything this machine builds passes through that assembler.
 
 `task verify` green: 1145 Python, 310 astro, 606 web, Go unit + `-race`.
+
+---
+
+# Phase 5 task 5.6 — hybrid retrieval (2026-10-03)
+
+**recall@8 = 1.000 (48/48), MRR 0.896** against the real 595-chunk corpus and a real
+embedding model. §11's target is 0.85 and §16 gates on it.
+
+`app/retrieval/` reads the knowledge base as `astro_ro` through asyncpg — the one place
+Python touches Postgres directly, SELECT only, enforced by grants.
+
+## Three things wrong with §4's retrieval SQL, each found by measuring
+
+§4 supplies the query, and copying it verbatim would have shipped a retriever that
+worked and was quietly half as good. All three failures are silent: nothing errors,
+results still come back, and no test fails.
+
+### 1. `plainto_tsquery` is conjunctive
+
+```
+plainto_tsquery('english','career authority')  ->  'career' & 'author'   0 matches
+to_tsquery('english','career | authority')                               3 matches
+```
+
+`websearch_to_tsquery` ANDs too. On any multi-word question — every real question — the
+conjunction fails, the `FULL OUTER JOIN` yields no keyword rows, and the vector half
+still returns results. The hybrid would be **silently vector-only**, and §4's own premise
+that "keyword search nails exact entities" would be false in practice.
+
+### 2. The two halves are not on the same scale
+
+Fixing the tsquery was not enough, and the measurement said so in one line:
+**"found by keyword search alone: 0"** across 48 questions.
+
+```
+cosine similarity   0.45 .. 0.85     (nomic-embed-text)
+ts_rank             0.00 .. 0.06     (a few matching terms)
+```
+
+At §9's weights of 0.6/0.4, the keyword half contributes **about 4%** of the combined
+score. It cannot promote anything. "What is a bhukti?" is the concrete case: the word
+is in the antardasha document, keyword search finds it, and a ~0.024 keyword
+contribution is swamped by a 0.39 vector score for *phonetically* similar documents —
+Bhadra Yoga, Bhadrapada nakshatra. The right chunk was found and could not win.
+
+`ts_rank` is now scaled onto [0, 1] against a measured ceiling. The keyword half now
+rescues one chunk the vector half misses.
+
+### 3. `RAG_MIN_SCORE=0.25` sits below the model's noise floor
+
+**`nomic-embed-text` scores unrelated text at 0.45–0.49 cosine, not near zero.** It does
+not use the bottom half of [0, 1], so a threshold chosen as though cosine ran from
+"unrelated" to "identical" is calibrated against a range the model never visits. At 0.25
+every off-domain question — "what is the capital of France" — returned a full eight
+chunks.
+
+Raising the raw-cosine floor to 0.30 was the first attempt and it was worse: the window
+between the best off-domain score (0.297) and the worst on-domain one (0.332) is about
+**10%**, and a real question — "I keep losing money as fast as I make it" — fell inside
+it and retrieved **nothing at all**.
+
+The fix is to rescale cosine so the model's baseline maps to zero. Then the floor has a
+real window, swept against the quality set:
+
+| floor | recall@8 | off-domain leaking |
+|---|---|---|
+| 0.03 | 1.000 | 1 |
+| **0.05 – 0.15** | **1.000** | **0** |
+| 0.20 | 0.958 | 0 |
+| 0.25 | 0.938 | 0 |
+
+0.10 sits inside a 3× window. A threshold with a 3× window is a setting; one with a 10%
+window is a latent bug.
+
+`VECTOR_BASELINE = 0.45` is **model-specific**, and task 5.5's dimension-change runbook
+has to re-measure it — which is why it is a named constant rather than inlined.
+
+## The quality set is grouped, not just counted
+
+48 labelled questions, and the grouping is the point: a set of fifty that all exercise
+vector similarity would score 1.000 while half the system was dead. Groups are exact
+entities, natural-language life questions, mechanism questions, sign/planet/dasha
+breadth — and **two off-domain questions**, so "recall is high" cannot coexist with a
+retriever that answers everything.
+
+Each entry carries a `tests` field saying why it exists. A quality set whose entries
+have no stated purpose becomes a list nobody can prune or extend.
+
+### Three corpus gaps it found
+
+- **A medical question missed the boundary document.** "I have a headache and a pain in
+  my chest" retrieved emotional-support and general guidance. The boundary document
+  contained no symptom vocabulary at all — neither half of the hybrid could reach it.
+  Intent routing (5.8) is the real fix; the document now also lists the words a worried
+  person actually types
+- **"What can you tell me from my palm?" retrieved Hasta Nakshatra**, whose name means
+  "hand". A genuinely instructive near-miss: the embedding matched the concept
+  correctly and the concept was the wrong one. "palmistry" stems to `palmistri` and
+  does not match `palm`
+- **"What is a bhukti?" retrieved Bhadra Yoga** — phonetic, not semantic. The word
+  appeared once, parenthesised, and stemmed away from the plural the document used
+
+## 19 mutations, 19 caught — after six survivors forced real fixes
+
+Six survived the first pass and **not one was a bad mutation**. Every single one exposed
+a test that proved less than it claimed:
+
+- **The min-score floor.** The test embedder used `byte / 255`, so every component was
+  positive and any two hash vectors had cosine ~0.75. Nothing could score low, so the
+  floor could not be exercised. Signed components fixed it — and that is also how a real
+  embedding space behaves
+- **The FULL OUTER JOIN.** Four fixture documents against a candidate limit of 20 meant
+  both halves returned *everything*, the candidate sets were identical, and a LEFT JOIN —
+  which loses every keyword-only hit in production — was indistinguishable. The limit is
+  now injectable and the test uses 2
+- **Array containment.** The test was named "a topic array is matched by containment" and
+  did not test that: the boost it asserted came from `planet` and `house`, both scalars.
+  Now tested directly against `_contains`
+- **The tie-break on chunk id.** Python's sort is stable and Postgres happened to return
+  a consistent order. Extracting `order_chunks` made it testable — equal-scoring chunks
+  fed in *descending* id order is the only way to tell a stable sort from a sorted one
+- **The tsquery operator regex.** Redundant with the `isalnum` filter for *stripping* —
+  but the regex substitutes a **space**, so `saturn&venus` becomes two terms instead of
+  the single bogus term `saturnvenus`. The mutation was right that the old test didn't
+  cover it
+- **The empty-tsquery guard.** This one I had simply documented wrongly. The comment
+  claimed an empty tsquery is a syntax error. It is not — Postgres emits
+  `NOTICE: text-search query doesn't contain lexemes` and returns a query matching
+  nothing. Established by running it rather than by reading the docs. The guard is kept
+  for the NOTICE and the pointless GIN scan, and **dropped from the battery with the
+  reason recorded** rather than left as a permanent "SURVIVED" line that trains the next
+  reader to ignore survivors
+
+## Also shipped
+
+- `asyncpg-stubs` as a dev dependency rather than an `ignore_missing_imports` override.
+  The override would have turned `asyncpg.Pool` into `Any` — silently removing
+  `--strict` from the one module in this service that runs SQL
+- Postgres in the Python CI job, with the `astro_ro` role created explicitly. The
+  role test was first written against `public.knowledge_documents`, which does not
+  exist in CI: it would have failed with `UndefinedTableError` instead of
+  `InsufficientPrivilegeError` and proved nothing about grants
+- The language filter tested in **both** directions, against a fixture that is genuinely
+  stored as `hi`. The first version was English with a Hindi title, so the test passed on
+  the absence of any `hi` row rather than on the filter excluding one
+
+`task verify` green: 1188 Python (40 new), 310 astro, 606 web, Go unit + `-race`.

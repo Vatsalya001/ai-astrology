@@ -15,7 +15,13 @@ dependencies = [
     # covers Ollama, LM Studio, Groq, OpenRouter and Cerebras — all of
     # which are free for development. See ADR-004.
     "openai>=1.54",
-    # Phase 5 adds: asyncpg, pgvector
+    # Retrieval reads the knowledge base directly as `astro_ro`
+    # (PHASE-05 §4, "Executed from Python via asyncpg on the read-only
+    # role"). No ORM and no pgvector Python package: the vector is sent
+    # as pgvector's own text form and cast in the SQL, exactly as the Go
+    # ingester does, so neither side needs a vector type in its own
+    # language.
+    "asyncpg>=0.30",
     "google-genai>=1.0",
 ]
 
@@ -43,6 +49,13 @@ dev = [
     # is a comment.
     "import-linter>=2.1",
     "pytest-cov>=6.0",
+    # asyncpg ships no py.typed marker. Real stubs rather than an
+    # `ignore_missing_imports` override, because the override would turn
+    # `asyncpg.Pool` into `Any` — silently removing --strict from the one
+    # module in this service that runs SQL. The existing override above is
+    # for packages that are deliberately NOT installed, which is a
+    # different situation and a different justification.
+    "asyncpg-stubs>=0.30",
 ]
 
 [tool.ruff]

@@ -8,7 +8,9 @@
 }
 ---
 
-A mahadasha supplies a theme and an antardasha supplies the register within it. For
+An **antardasha** — also called a **bhukti**, and the two words mean the same thing
+throughout this corpus — is a sub-period within a mahadasha. A mahadasha supplies a
+theme and an antardasha, or bhukti, supplies the register within it. For
 the long periods — Venus at twenty years, Saturn at nineteen, Rahu at eighteen — the
 sub-period is where the reading actually happens.
 

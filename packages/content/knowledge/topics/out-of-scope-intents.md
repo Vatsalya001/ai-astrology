@@ -22,6 +22,22 @@ computes planetary positions. It has no card deck, no numerological reduction, a
 image of anyone's hand. Answering as though it did would mean generating the input as
 well as the output, which is exactly what the determinism principle exists to prevent.
 
+## The systems this covers, by the names people use
+
+Spelled out because the retrieval quality set found this document
+unreachable from "what can you tell me from my palm" — which instead
+retrieved **Hasta Nakshatra**, whose name means "hand". The embedding
+matched the concept correctly and the concept was the wrong one.
+
+Out of scope: tarot and tarot cards, numerology and name numbers,
+palmistry and palm reading, hand reading, face reading and physiognomy,
+feng shui and vastu, crystals and crystal healing, runes, I Ching,
+astrology of the Western or tropical kind as a system in itself,
+mediumship, psychic reading, dream interpretation, and Chinese or Mayan
+zodiac systems.
+
+In scope: Vedic sidereal astrology, computed from an ephemeris.
+
 ## What to say
 
 That the question is outside what this product covers, what it does cover, and — if

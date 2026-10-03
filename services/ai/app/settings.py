@@ -264,6 +264,81 @@ class Settings(BaseSettings):
     # literal in a migration means re-embedding the whole corpus later.
     embedding_dim: int = Field(default=768, ge=64, le=4096)
 
+    # ─── Retrieval (PHASE-05 §9) ──────────────────────────────────
+    rag_top_k: int = Field(default=8, ge=1, le=50)
+    """How many chunks reach the model.
+
+    §4: "Cap retrieval at 6 to 8 chunks. More context is not better context;
+    it dilutes attention and costs tokens." The upper bound here is 50
+    rather than unbounded so a mistyped env var cannot quietly send
+    thousands of tokens of corpus into every request.
+    """
+
+    rag_vector_weight: float = Field(default=0.6, ge=0.0, le=1.0)
+    rag_keyword_weight: float = Field(default=0.4, ge=0.0, le=1.0)
+    """The hybrid split. They are not required to sum to 1.
+
+    Not normalised, because the scores they weight are not on the same
+    scale: a cosine similarity is in [0, 1] and `ts_rank` is typically
+    well under 0.1. The weights are therefore a tuning surface rather
+    than a probability split, and the retrieval quality set is what says
+    whether a pair is any good.
+    """
+
+    rag_min_score: float = Field(default=0.10, ge=0.0, le=1.0)
+    """Below this combined score a chunk is dropped rather than ranked.
+
+    A floor matters more than a ceiling here. A nearest-neighbour query
+    has no concept of "no match" — it always returns its `LIMIT` worth of
+    rows — so without a floor, a question the corpus cannot answer still
+    retrieves eight chunks, which the model then paraphrases confidently.
+
+    ── Why 0.10, and why it is not comparable to §9's 0.25 ──
+
+    Because the scores it is applied to are normalised, and §9's number
+    was written for raw ones. See `VECTOR_BASELINE` and
+    `TSRANK_CEILING` in app/retrieval/query.py for why the raw scores
+    had to be rescaled at all.
+
+    Swept against the 48-question quality set and the real 593-chunk
+    corpus:
+
+        floor   recall@8   off-domain questions still returning chunks
+        0.01    1.000      1
+        0.03    1.000      1
+        0.05    1.000      0
+        0.10    1.000      0
+        0.15    1.000      0
+        0.20    0.958      0
+        0.25    0.938      0
+
+    So the usable window is **0.05 to 0.15** — perfect recall with
+    nothing off-domain getting through. 0.10 sits inside it with roughly
+    2x headroom below and 1.5x above.
+
+    This is worth contrasting with the first attempt, which applied a
+    floor to raw cosine scores. There the window was 0.297 to 0.332 —
+    about 10% — and a real question ("I keep losing money as fast as I
+    make it") fell below a floor set inside it and retrieved nothing at
+    all. A threshold with a 3x window is a setting; one with a 10%
+    window is a latent bug.
+    """
+
+    rag_metadata_boost: float = Field(default=1.35, ge=1.0, le=5.0)
+    """Multiplier for chunks matching the user's actual placements.
+
+    §4: "If the chart has Saturn in the 10th, the 'Saturn in 10th house'
+    chunk should win regardless of embedding similarity. This small rule
+    does more for answer quality than any amount of embedding-model
+    tuning."
+
+    Lower bound 1.0, so the setting can disable the boost but cannot
+    invert it into a penalty.
+    """
+
+    chat_recent_message_window: int = Field(default=6, ge=0, le=50)
+    """How many prior messages go into the prompt. §9."""
+
     @model_validator(mode="after")
     def _default_models_to_the_provider(self) -> "Settings":
         """Fill the tier models nobody configured from the provider's row.

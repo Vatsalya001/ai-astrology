@@ -190,12 +190,62 @@ jobs:
       matrix:
         service: [astro, ai]
 
+    # Postgres for ai-service's retrieval tests (PHASE-05 task 5.6).
+    #
+    # Started for BOTH matrix legs, which is deliberate: a service block
+    # cannot be conditional on the matrix value, and astro-service simply
+    # ignores it. astro-service has no database access at all — that is
+    # invariant 2 and is enforced by it having no DSN and no driver, not
+    # by CI withholding a container.
+    #
+    # pgvector's image rather than plain postgres, because the retrieval
+    # tests create a `vector(768)` column.
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: astro
+          POSTGRES_PASSWORD: astro
+          POSTGRES_DB: astro_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U astro"
+          --health-interval 5s --health-timeout 3s --health-retries 10
+
+    env:
+      # The retrieval tests skip themselves when these are unreachable,
+      # so a local run without Docker still passes — but in CI they must
+      # RUN, which is why both roles are named here rather than relying
+      # on the defaults that point at the dev stack's port 5433.
+      TEST_DATABASE_URL: postgresql://astro:astro@localhost:5432/astro_test
+      TEST_DATABASE_URL_RO: postgresql://astro_ro:astro_ro@localhost:5432/astro_test
+
     defaults:
       run:
         working-directory: services/${{ matrix.service }}
 
     steps:
       - uses: actions/checkout@v4
+
+      # The read-only role the single-writer rule depends on (ADR-001).
+      # The dev stack creates it in 01-init.sql; the CI service container
+      # does not run that, so it is created here — and `astro_ro` having
+      # no write grant is itself asserted by
+      # test_retrieval_runs_as_a_role_that_cannot_write.
+      - name: Create the astro_ro role
+        if: matrix.service == 'ai'
+        run: |
+          PGPASSWORD=astro psql -h localhost -U astro -d astro_test -v ON_ERROR_STOP=1 <<'SQL'
+          DO $$ BEGIN
+            IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'astro_ro') THEN
+              CREATE ROLE astro_ro LOGIN PASSWORD 'astro_ro';
+            END IF;
+          END $$;
+          GRANT CONNECT ON DATABASE astro_test TO astro_ro;
+          GRANT USAGE ON SCHEMA public TO astro_ro;
+          GRANT SELECT ON ALL TABLES IN SCHEMA public TO astro_ro;
+          ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO astro_ro;
+          SQL
 
       - uses: astral-sh/setup-uv@v3
         with:
