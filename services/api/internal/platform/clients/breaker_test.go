@@ -204,7 +204,7 @@ func TestAServiceThatHangsThroughOurBudgetStillTripsTheBreaker(t *testing.T) {
 func TestACompletionThatExhaustsOurBudgetTripsTheBreaker(t *testing.T) {
 	service := newHangingService(t, `{"result":{"text":"x"},"telemetry":{"trace_id":"t","job_type":"chat_response"}}`)
 
-	ai, err := newAI(service.server.URL, "token-long-enough", 40*time.Millisecond, 40*time.Millisecond)
+	ai, err := newAI(service.server.URL, "token-long-enough", 40*time.Millisecond, 40*time.Millisecond, 40*time.Millisecond)
 	if err != nil {
 		t.Fatalf("newAI: %v", err)
 	}
@@ -232,7 +232,7 @@ func TestAbandonedCompletionsDoNotTripTheBreaker(t *testing.T) {
 	// completion fail against a provider that is answering fine.
 	service := newHangingService(t, `{"result":{"text":"Saturn is traditionally read as patience."},"telemetry":{"trace_id":"t","job_type":"chat_response"}}`)
 
-	ai, err := newAI(service.server.URL, "token-long-enough", 5*time.Second, 5*time.Second)
+	ai, err := newAI(service.server.URL, "token-long-enough", 5*time.Second, 5*time.Second, 5*time.Second)
 	if err != nil {
 		t.Fatalf("newAI: %v", err)
 	}

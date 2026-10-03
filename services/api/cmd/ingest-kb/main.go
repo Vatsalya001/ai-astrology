@@ -79,6 +79,10 @@ func main() {
 		"directory of authored markdown, searched recursively")
 	check := flag.Bool("check", false,
 		"parse and chunk only; write nothing and contact nothing")
+	apply := flag.Bool("apply", false,
+		"embed through ai-service and write to Postgres")
+	force := flag.Bool("force", false,
+		"re-embed documents whose stored checksum already matches")
 	printN := flag.Int("print", 0,
 		"print the first N chunks in full, for eyeballing boundaries")
 	flag.Parse()
@@ -104,14 +108,22 @@ func main() {
 
 	report(corpus, chunkCfg, *printN)
 
+	if *apply {
+		if err := applyCorpus(corpus, cfg, *force, logger); err != nil {
+			logger.Error("ingest", slog.Any("err", err))
+			os.Exit(1)
+		}
+		return
+	}
+
 	if !*check {
-		// Task 5.4 is the embed-and-insert half. Refusing explicitly rather
-		// than silently succeeding: a command that prints a summary and
-		// exits 0 reads as "ingested", and the next person to look would
-		// find an empty table and no error anywhere.
+		// Neither flag given. Refusing explicitly rather than silently
+		// succeeding: a command that prints a summary and exits 0 reads as
+		// "ingested", and the next person to look would find an empty
+		// table and no error anywhere.
 		fmt.Fprintln(os.Stderr,
-			"\nnothing was written: embedding and insertion are task 5.4.\n"+
-				"Re-run with --check to make that explicit.")
+			"\nnothing was written. Pass --check to confirm that is what you wanted,\n"+
+				"or --apply to embed and store the corpus.")
 		os.Exit(3)
 	}
 }

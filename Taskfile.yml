@@ -46,14 +46,19 @@ tasks:
   # ─── Infrastructure ───────────────────────────────────────────────
 
   up:
-    desc: Start Postgres, Redis, MinIO and Mailpit
+    desc: Start Postgres, Redis, SeaweedFS and Mailpit
     cmds:
       - docker compose up -d
       # The bucket, once the storage is healthy. Separate because
-      # minio-init runs to completion, and `up --wait` counts an exited
+      # storage-init runs to completion, and `up --wait` counts an exited
       # container as a failure — see the profile note in compose.
-      - docker compose --profile init up minio-init --exit-code-from minio-init
-      - echo "Postgres :5433 · Redis :6381 · MinIO :9001 · Mailpit :8025"
+      #
+      # The service is `storage-init`, not `minio-init`: ADR-013 replaced
+      # MinIO with SeaweedFS and this line kept the old name, so `task up`
+      # died on "no such service". It is the one MinIO reference the
+      # rename swept past, because it is a name rather than prose.
+      - docker compose --profile init up storage-init --exit-code-from storage-init
+      - echo "Postgres :5433 · Redis :6381 · SeaweedFS :9000 (filer UI :8888) · Mailpit :8025"
 
   down:
     desc: Stop all containers

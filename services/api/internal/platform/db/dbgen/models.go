@@ -201,6 +201,37 @@ type Dasha struct {
 	Metadata  []byte
 }
 
+type KnowledgeChunk struct {
+	ID             pgtype.UUID
+	DocumentID     pgtype.UUID
+	Content        string
+	ChunkIndex     int32
+	TokenCount     int32
+	Embedding      string
+	EmbeddingModel string
+	Metadata       []byte
+	Tsv            interface{}
+	CreatedAt      time.Time
+}
+
+type KnowledgeDocument struct {
+	ID              pgtype.UUID
+	Title           string
+	Category        string
+	Content         string
+	Language        string
+	Source          string
+	Authority       int16
+	AstrologySystem string
+	Metadata        []byte
+	IsActive        bool
+	Version         int32
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
+	// SHA-256 of the authored file, whole file including front matter. Empty means unknown, which the ingester treats as needing re-ingestion.
+	SourceChecksum string
+}
+
 type Place struct {
 	ID          int32
 	Name        string

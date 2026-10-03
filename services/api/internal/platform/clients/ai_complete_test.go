@@ -315,7 +315,7 @@ func TestACompletionIsNotCappedByTheGeneralTimeout(t *testing.T) {
 	}))
 	t.Cleanup(server.Close)
 
-	ai, err := newAI(server.URL, "token-long-enough", general, completion)
+	ai, err := newAI(server.URL, "token-long-enough", general, completion, general)
 	if err != nil {
 		t.Fatalf("newAI: %v", err)
 	}
@@ -351,7 +351,7 @@ func TestTheCompletionBudgetStillBounds(t *testing.T) {
 	}))
 	t.Cleanup(server.Close)
 
-	ai, err := newAI(server.URL, "token-long-enough", general, completion)
+	ai, err := newAI(server.URL, "token-long-enough", general, completion, general)
 	if err != nil {
 		t.Fatalf("newAI: %v", err)
 	}

@@ -159,15 +159,22 @@ type AI struct {
 	// constant so a test can shrink it — and so it is visibly the same
 	// value the transport was sized from.
 	completionTimeout time.Duration
+
+	// Per-call budget for Embed. A field for the same two reasons, and
+	// the second one is why this is not just the constant: the transport
+	// is sized from the largest of the budgets, and a budget that is not
+	// visibly one of the inputs to that max is a budget that silently
+	// stops applying.
+	embedTimeout time.Duration
 }
 
 func NewAI(baseURL, token string, timeout time.Duration) (*AI, error) {
-	return newAI(baseURL, token, timeout, completionTimeout)
+	return newAI(baseURL, token, timeout, completionTimeout, embedTimeout)
 }
 
-// newAI takes both budgets so a test can shrink them.
+// newAI takes the budgets so a test can shrink them.
 //
-// ── Why the transport budget is the LARGER of the two ──
+// ── Why the transport budget is the LARGEST of them ──
 //
 // http.Client.Timeout bounds the whole call and cannot be extended by a
 // per-request context — a context deadline can only ever make a request
@@ -177,14 +184,19 @@ func NewAI(baseURL, token string, timeout time.Duration) (*AI, error) {
 // seconds failed as a timeout with a comment above it claiming it had a
 // minute and a half.
 //
+// Phase 5's Embed walked into the same wall from the other side. Its
+// budget is 120s — longer than a completion's, because sixty-four chunks
+// through a cold local embedding model genuinely takes that long — and
+// with the transport sized from max(timeout, completion) it would have
+// been capped at 90s by a line that says nothing about embedding.
+// `embedTimeout` is therefore in the max, and
+// TestAnEmbedIsNotCappedByTheCompletionTimeout is what says so.
+//
 // Raising it is safe for the other caller on this client. Health bounds
 // itself: httpapi/health.go wraps each probe in its own context, so a
 // long transport budget cannot make the status page hang.
-func newAI(baseURL, token string, timeout, completion time.Duration) (*AI, error) {
-	transportBudget := timeout
-	if completion > transportBudget {
-		transportBudget = completion
-	}
+func newAI(baseURL, token string, timeout, completion, embed time.Duration) (*AI, error) {
+	transportBudget := max(timeout, completion, embed)
 
 	api, err := aiclient.NewClientWithResponses(
 		strings.TrimRight(baseURL, "/"),
@@ -200,6 +212,7 @@ func newAI(baseURL, token string, timeout, completion time.Duration) (*AI, error
 		// pointer is published to any other goroutine. See the field.
 		slots:             make(chan struct{}, maxConcurrentCompletions),
 		completionTimeout: completion,
+		embedTimeout:      embed,
 	}, nil
 }
 

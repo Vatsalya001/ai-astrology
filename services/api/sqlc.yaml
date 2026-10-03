@@ -40,3 +40,28 @@ sql:
         overrides:
           - db_type: "timestamptz"
             go_type: "time.Time"
+
+          # pgvector's `vector` as a Go string.
+          #
+          # Left alone, sqlc maps it to `*pgvector.Vector` and imports
+          # github.com/pgvector/pgvector-go — a new direct dependency
+          # that also has to be registered with every pgx pool before
+          # the type can be encoded.
+          #
+          # Overridden because no Go code in this service does arithmetic
+          # on an embedding. It receives 768 floats from ai-service, hands
+          # them to Postgres, and never looks at them again. The queries
+          # cast with `::vector` from pgvector's own documented text form
+          # (`'[0.1,0.2,…]'`), so Postgres does the parsing and the
+          # validation — including rejecting a vector of the wrong width,
+          # which is the failure that matters.
+          #
+          # This is the right call for Phase 5 and worth revisiting in
+          # Phase 6 if anything in Go starts comparing vectors. It would
+          # be wrong to keep the override and then write float parsing by
+          # hand.
+          - db_type: "vector"
+            go_type: "string"
+          - db_type: "vector"
+            nullable: true
+            go_type: "string"

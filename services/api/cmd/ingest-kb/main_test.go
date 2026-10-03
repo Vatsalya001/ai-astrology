@@ -1,13 +1,19 @@
 package main
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Vatsalya001/ai-astrology/services/api/internal/knowledge"
+	"github.com/Vatsalya001/ai-astrology/services/api/internal/platform/clients"
 )
 
 func TestLoadCorpusReturnsDocumentsInAFixedOrder(t *testing.T) {
@@ -232,5 +238,72 @@ func writeRaw(t *testing.T, dir, name, content string) {
 	path := filepath.Join(dir, name)
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatalf("write %s: %v", path, err)
+	}
+}
+
+// ─── the ai-service adapter ──────────────────────────────────────────
+
+func TestABlankModelNameIsRefused(t *testing.T) {
+	// `embedding_model` is stored on every chunk, and migration 000007
+	// says why: a corpus embedded across a model change is unfixable
+	// without it, because nothing in the data says which rows need
+	// redoing. A blank one would also violate `kc_model_not_blank` — from
+	// inside the transaction, after the embeddings have been paid for.
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"embeddings":  [][]float32{{0.1, 0.2}},
+			"model":       "",
+			"dimensions":  2,
+			"provider_id": "test",
+			"latency_ms":  1,
+		})
+	}))
+	t.Cleanup(server.Close)
+
+	ai, err := clients.NewAI(server.URL, "token-long-enough", 2*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, _, err = (&aiEmbedder{ai: ai}).Embed(context.Background(), []string{"a"})
+	if err == nil {
+		t.Fatal("a blank model name was accepted")
+	}
+	if !strings.Contains(err.Error(), "model") {
+		t.Errorf("error does not name the problem: %v", err)
+	}
+}
+
+func TestTheModelNameComesFromTheResponseNotFromConfig(t *testing.T) {
+	// Reading it from this process's environment would record what the
+	// ingester BELIEVED ai-service was running — and those differ exactly
+	// when it matters, which is after somebody changed the model on one
+	// side.
+	t.Setenv("EMBEDDING_MODEL", "a-model-this-process-believes-in")
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"embeddings":  [][]float32{{0.1, 0.2}},
+			"model":       "what-actually-ran",
+			"dimensions":  2,
+			"provider_id": "test",
+			"latency_ms":  1,
+		})
+	}))
+	t.Cleanup(server.Close)
+
+	ai, err := clients.NewAI(server.URL, "token-long-enough", 2*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, model, err := (&aiEmbedder{ai: ai}).Embed(context.Background(), []string{"a"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if model != "what-actually-ran" {
+		t.Errorf("model is %q, want the one the response reported", model)
 	}
 }

@@ -4527,3 +4527,135 @@ JSON object. Every bad document is reported in one run — an author fixing a co
 error per run is an author who stops fixing it.
 
 `task verify` green: 1145 Python, 606 web, Go unit + `-race`.
+
+---
+
+# Phase 5 task 5.4 — the ingestion pipeline (2026-10-03)
+
+`chunk → POST /v1/embed → INSERT documents + chunks in one transaction`, per §4.
+Verified end to end against real Ollama and real Postgres, not just in tests:
+
+```
+$ go run ./cmd/ingest-kb --apply
+  ingested  houses/tenth-house.md       4 chunks
+  ingested  nakshatras/rohini.md        4 chunks
+  ingested  planets/saturn.md           4 chunks
+  ingested  yogas/gajakesari.md         4 chunks
+  chunks written  16   embeddings 16   model nomic-embed-text   elapsed 5.241s
+
+$ go run ./cmd/ingest-kb --apply        # again, nothing changed
+  unchanged ...                         elapsed 11ms   embeddings 0
+```
+
+5.241s → **11ms** on a re-run, with zero embeddings computed. That is §16's
+"deterministic and re-runnable without duplicates" being cheap rather than merely
+correct, and it is what migration 000008's `source_checksum` buys.
+
+Read back from Postgres: **768 dimensions, L2 norm exactly 1.000000**, zero chunks
+with a NULL embedding, one embedding model.
+
+## Three decisions, each with a failure mode behind it
+
+**Embedding happens outside the transaction; the transaction is per document.** §4
+requires documents and chunks to go in together — a document visible without its
+chunks is one retrieval cannot reach but the §16 count includes. A per-document
+transaction gives that. Wrapping the whole corpus in one would add all-or-nothing
+*across* documents, worth less than it costs: ingestion is idempotent, so a run that
+dies halfway is fixed by running it again, and in exchange the locks stay short.
+Holding a transaction open across a 600-document run of HTTP round trips blocks
+`ALTER TABLE`, holds back vacuum, and turns one slow provider into a database
+incident.
+
+**Chunks are replaced, never merged.** Re-chunking can produce a different *number*
+of chunks, and an upsert keyed on `(document_id, chunk_index)` leaves the previous
+run's tail behind: orphan chunks at indexes the new run never reached, still matching
+keyword search, still being retrieved — and the only chunks in the corpus whose text
+no authored file contains.
+
+**The embedding crosses into Postgres as text and is cast with `::vector`.** Left
+alone, sqlc maps `vector(768)` to `*pgvector.Vector` and adds a direct dependency
+that also has to be registered with every pgx pool. Overridden to `string`, because
+no Go code here does arithmetic on an embedding — it receives 768 floats, hands them
+over, and never looks at them again. Postgres does the parsing *and the validation*:
+`TestAWrongWidthVectorIsRejectedByPostgres` confirms `vector(768)` rejects 1, 767 and
+769, which is the check that matters, since a column loose enough to accept a wrong
+width makes every similarity score in the product meaningless with nothing erroring.
+
+## A bug caught by a comment the codebase had already written
+
+`embedTimeout` is 120s, because sixty-four chunks through a cold local model genuinely
+takes that long. `clients.go` sized its HTTP transport from `max(general, completion)`
+— 90s — and `http.Client.Timeout` cannot be extended by a per-request context. So
+every embed would have been silently capped at 90s by a line that says nothing about
+embedding.
+
+The file already carried a long comment about this exact trap, written when
+`Complete`'s 90s budget turned out to be dead code behind a 10s transport. The budget
+is now in the max, and `TestAnEmbedIsNotCappedByTheCompletionTimeout` is the sibling
+of the test that was written the first time.
+
+## 18 mutations, 18 caught — after five rounds of fixing my own battery
+
+Three mutations did not compile, so they proved nothing; retargeted at lines that do.
+Two more are worth writing down:
+
+**The alignment check survived.** Removing the vector-count check in `embedBatched`
+left every test green, because the fake embedder always returned exactly as many
+vectors as it was asked for. The guard exists for the worst failure in this pipeline —
+vectors are zipped against chunks **by position**, so one missing vector attaches
+every embedding after it to the wrong passage, and the corpus then retrieves
+confidently and wrongly with nothing erroring. The fake now has a `shortBy` and
+`TestAShortBatchFromTheEmbedderIsRefused` exercises it.
+
+**A test that proved the wrong thing.** `TestTheEmbedBudgetStillBounds` had the
+transport and the per-call deadline set to the same value, so either alone cut the
+call and deleting the per-call deadline changed nothing. It proved that *a* bound
+existed, not that the *embed* bound did. With `general` now the largest budget the two
+are separable — the call fails at **120.9ms**, measured, against a 2s transport.
+
+Worth noting about that test: it takes ~800ms regardless, because `httptest.Close`
+waits for the in-flight handler to finish sleeping. Reading the test's own duration as
+the call's duration would make the assertion look satisfied by anything, which is how
+the loose version of it got written.
+
+## A spec-level finding for task 5.6
+
+§4's retrieval SQL uses `plainto_tsquery`, and **`plainto_tsquery` is conjunctive**:
+
+```
+plainto_tsquery('english','career authority')  →  'career' & 'author'   →  0 matches
+to_tsquery('english','career | authority')     →                            3 matches
+```
+
+`websearch_to_tsquery` ANDs too. So on any multi-word question — which is every real
+question — the keyword half of the hybrid contributes **nothing**, the `FULL OUTER
+JOIN` simply yields no `kw` rows, and the vector half still returns results. The
+hybrid would be silently vector-only, and §4's premise that "keyword search nails
+exact entities" would be false in practice.
+
+Task 5.6 must build the tsquery with OR semantics rather than copying §4 verbatim,
+and the retrieval quality set has to include a query where the keyword half is what
+finds the right chunk — otherwise recall@8 could hit 0.85 with half the system dead.
+
+## Shipped
+
+- Migration 000008: `source_checksum` + `kd_checksum_idx`, with a real `down`
+- `db/queries/knowledge.sql` — upsert on `kd_identity_idx`, chunk replace, the
+  `::vector` insert, corpus counts, checksum listing
+- `internal/knowledge/ingest.go` — the pipeline, over consumer-declared `Embedder`
+  and `Store` interfaces, so the whole thing is testable without Docker or a model
+- `cmd/ingest-kb/{store,apply}.go` — the Postgres and ai-service adapters, kept out
+  of `internal/knowledge` so chunking stays free of database imports
+- `internal/platform/clients/ai_embed.go` — generated client wrapper, outside the
+  completion semaphore (a batch job holding those slots would 429 real users while
+  the corpus loads) and marked idempotent (embedding is pure; `ai-service` holds
+  `astro_ro` and has no write to duplicate)
+- 6 integration tests against real pgvector Postgres: wrong-width rejection, real
+  rollback, `ON CONFLICT` matching the real index, the generated `tsv` column
+  populating itself, `astro_ro` able to read and **still unable to delete**
+
+`task up` was broken, and found while running this: ADR-013 renamed the compose
+service to `storage-init` and `Taskfile.yml` still called `minio-init`. The one MinIO
+reference the earlier sweep missed, because it is a name rather than prose.
+
+`task verify` green: 1145 Python, 310 astro, 606 web, Go unit + `-race`.

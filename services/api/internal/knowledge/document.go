@@ -1,9 +1,15 @@
 // Package knowledge parses and chunks the authored astrology corpus.
 //
 // It is the Go half of PHASE-05 §4's ingestion split — "Go orchestrates,
-// Python embeds". Everything here is pure: no database, no HTTP, no clock.
-// That is what makes `cmd/ingest-kb` reproducible and lets the whole
-// chunking contract be proven by golden files with no model involved.
+// Python embeds".
+//
+// Parsing and chunking are pure: no database, no HTTP, no clock, no
+// filesystem. That is what makes `cmd/ingest-kb --check` reproducible and
+// lets the whole chunking contract be proven by golden files with no model
+// involved. `ingest.go` orchestrates the I/O, and it does so through
+// interfaces declared in this package — so even the full pipeline is
+// testable without a database or a model, which is what lets it run in CI
+// under the rule that CI never calls one.
 //
 // ── Why the front matter is JSON and not YAML ──
 //
