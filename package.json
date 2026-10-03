@@ -2,7 +2,7 @@
   "name": "ai-astrology",
   "version": "0.1.0",
   "private": true,
-  "description": "AI Astrology Companion — monorepo root",
+  "description": "AI Astrology Companion \u2014 monorepo root",
   "workspaces": [
     "apps/*",
     "packages/*"
@@ -21,5 +21,11 @@
   "devDependencies": {
     "@axe-core/playwright": "^4.13.0",
     "@playwright/test": "^1.63.0"
+  },
+  "overrides": {
+    "brace-expansion": "^5.0.12",
+    "minimatch": {
+      "brace-expansion": "^1.1.21"
+    }
   }
 }
