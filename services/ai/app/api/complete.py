@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import AsyncIterator
+from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 
@@ -226,8 +227,27 @@ class _ChainProvider:
         return any((await self._chain.health()).values())
 
 
+@dataclass(frozen=True)
+class OrchestratorParts:
+    """The pieces both the blocking and the streaming pipeline need.
+
+    Extracted so `/v1/chat` builds from the SAME provider chain as
+    `/v1/complete`, which matters for one specific reason: the circuit
+    breaker's state lives in the provider. Two chains would mean two
+    breakers, so a provider that had failed five times on the chat path
+    would still be considered healthy by the completion path — and the
+    breaker would need twice as many failures to open as it is
+    configured for.
+    """
+
+    provider: LLMProvider
+    classifier: IntentClassifier
+    screener: SafetyClassifier
+    router: ModelRouter
+
+
 @lru_cache(maxsize=1)
-def get_orchestrator() -> Orchestrator:
+def get_orchestrator_parts() -> OrchestratorParts:
     """Built once per process, and cached for the breaker's sake.
 
     `lru_cache` rather than a module-level constant so that importing
@@ -236,7 +256,7 @@ def get_orchestrator() -> Orchestrator:
     """
     provider: LLMProvider = _ChainProvider(get_provider_chain())
 
-    return Orchestrator(
+    return OrchestratorParts(
         provider=provider,
         # Classification and screening run on the same chain. They are
         # `fast`-tier jobs and the tier is chosen per request by the
@@ -245,6 +265,24 @@ def get_orchestrator() -> Orchestrator:
         classifier=IntentClassifier(provider, prompt_version=settings.prompt_version_intent),
         screener=SafetyClassifier(provider, prompt_version=settings.prompt_version_safety),
         router=ModelRouter(),
+    )
+
+
+@lru_cache(maxsize=1)
+def get_orchestrator() -> Orchestrator:
+    """The blocking pipeline, one per process.
+
+    Shares `get_orchestrator_parts`'s router by reference, not by copy:
+    `Orchestrator.router` is what the admin PATCH mutates, and an
+    override applied to a copy would return 200 and change nothing.
+    """
+    parts = get_orchestrator_parts()
+
+    return Orchestrator(
+        provider=parts.provider,
+        classifier=parts.classifier,
+        screener=parts.screener,
+        router=parts.router,
         prompt_version=settings.prompt_version_chat,
     )
 

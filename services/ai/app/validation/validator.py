@@ -23,6 +23,7 @@ context, say — and looping would burn money discovering that slowly.
 
 from __future__ import annotations
 
+import logging
 import re
 from typing import Literal
 
@@ -30,6 +31,8 @@ from pydantic import BaseModel, Field
 
 from app.validation.claims import Claim, extract_claims
 from app.validation.facts import FactIndex
+
+log = logging.getLogger(__name__)
 
 ViolationType = Literal[
     "unsupported_certainty",
@@ -198,6 +201,28 @@ class OutputValidator:
         # re-shingling a 4000-word prefix per message is real CPU on the
         # hot path.
         self._prompt_shingles = _shingles(system_prompt) if system_prompt else set()
+
+        # A prompt too SHORT to shingle disables the leak check, silently.
+        #
+        # `_shingles` produces nothing from fewer than `_SHINGLE_WORDS`
+        # words, so `OutputValidator(system_prompt="You are a guide.")`
+        # looks configured and checks nothing. An empty prompt is a
+        # deliberate choice — several tests pass one — but a non-empty
+        # prompt that yields no shingles is a configuration mistake with
+        # no symptom, which is the shape of failure this whole module
+        # exists to prevent.
+        #
+        # Found by a Phase 5 streaming test whose own 7-word prompt
+        # produced zero shingles, so its "a leak is blocked" assertion
+        # was checking nothing.
+        if system_prompt and not self._prompt_shingles:
+            log.warning(
+                "the system prompt is too short to shingle, so prompt-leak detection is disabled",
+                extra={
+                    "words": len(re.findall(r"[a-z0-9']+", system_prompt.lower())),
+                    "required": _SHINGLE_WORDS,
+                },
+            )
 
     # ─── fabricated chart facts ──────────────────────────────────────
 

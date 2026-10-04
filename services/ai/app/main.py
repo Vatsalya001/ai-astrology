@@ -22,7 +22,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from app import middleware, telemetry
-from app.api import complete, embed, health
+from app.api import chat, complete, embed, health
 from app.env_check import assert_no_typos
 from app.guards import run_all_startup_guards
 from app.observability import configure as configure_logging
@@ -80,3 +80,8 @@ middleware.install(app, internal_token=settings.internal_token)
 app.include_router(health.router)
 app.include_router(complete.router)
 app.include_router(embed.router)
+# The SSE chat route (PHASE-05 task 5.11). Mounted after
+# `complete` because it imports `get_orchestrator_parts` from it,
+# so the two share one provider chain and therefore one circuit
+# breaker — see OrchestratorParts.
+app.include_router(chat.router)

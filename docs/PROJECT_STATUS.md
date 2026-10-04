@@ -5166,3 +5166,106 @@ chart would let a field-name mistake pass — reading `name` where astro-service
 validator bug.
 
 `task verify` green: 1279 Python, 310 astro, 606 web, Go unit + `-race`.
+
+---
+
+# Phase 5 task 5.11 — the SSE chat endpoint (2026-10-04)
+
+`POST /v1/chat` streams §6's event sequence. 29 tests, no model called — the provider
+is a scripted fake, which is what lets the whole sequence be asserted in CI under the
+rule that CI never calls a language model.
+
+## The tension §6 does not address
+
+**A streamed response cannot be validated before the user has seen it.**
+
+Phase 4's non-streaming path generates, validates, and regenerates once with a
+corrective instruction if the output claims a fact the chart does not hold. That
+sequence is impossible here: by the time a fabricated placement is visible to the
+validator, it is also visible to the user.
+
+Four options, none free:
+
+1. Buffer the whole response, validate, then emit. Correct, and it deletes
+   streaming — §15 budgets "first token < 2 s" and a buffered response's first token
+   is its last.
+2. Stream everything, validate at the end. The user has already read the wrong
+   placement; the validator becomes a logging facility.
+3. Hold the first token until the first sentence validates. Preserves the guarantee
+   and spends most of the 2-second budget before anything appears.
+4. Stream, and validate each sentence **as it completes**, cutting the stream the
+   moment a violation appears.
+
+Shipped (4), with the cost stated rather than hidden: **a blocked response may have
+shown the user up to one sentence of invalid text.** What it cannot do is complete —
+the stream ends in `error`, not `done`, so a client that renders on `done` cannot
+show a fabrication as a finished answer. `test_the_cut_happens_before_the_rest_of_the_response`
+asserts the later chunks never went out.
+
+The final pass matters too: the incremental check only fires on a completed sentence,
+and a model truncated by a token limit stops mid-sentence constantly. Without a final
+validation over the unterminated tail, a fabrication in the last fragment would ship.
+
+## Two real bugs the tests found
+
+**Abandoning the stream did not stop generation.** §6 point 2 requires that "an
+abandoned request stops burning tokens immediately. This is a real cost saving at
+volume." It did not happen: when the consumer abandons the generator, Python raises
+`GeneratorExit` at its `yield` and the frame unwinds, but an inner **async** generator
+is finalised by the event loop's `shutdown_asyncgens` rather than synchronously. So
+the provider's stream stayed live and kept generating until the loop cleaned it up —
+which in a long-lived server can be process exit.
+
+Fixed with an explicit `aclose()` in a `finally`.
+`test_abandoning_the_stream_stops_generation_and_keeps_the_partial` closes the consumer
+after two tokens and asserts the provider saw it. It had not.
+
+The same test exposed a second ordering mistake: the outcome was being written *after*
+the loop, and `GeneratorExit` is raised **at** the yield, so nothing after it runs on an
+abandoned stream. §6 point 3 requires the partial to survive or "every disconnect loses
+the partial response". The outcome is now updated per token, so the proxy's
+`context.WithoutCancel` persist always has something to write however the stream ended.
+
+**A system prompt shorter than 8 words silently disables leak detection.**
+`_shingles` produces nothing from fewer than `_SHINGLE_WORDS` words, so
+`OutputValidator(system_prompt="You are a guide.")` looks configured and checks
+nothing.
+
+Found because this file's own first leak test used a 7-word prompt and therefore
+asserted nothing — a test that passed while measuring zero. `OutputValidator` now logs
+a warning for a non-empty prompt that yields no shingles, because the failure otherwise
+has no symptom at all.
+
+## Decisions worth keeping
+
+**The crisis path emits no token events and never calls the model.** The assertion is
+not that the static text came back — it is that `provider.requests == []`. A crisis
+path that called the model and discarded its answer would pass a text assertion and
+violate `.claude/rules/ai.md`. Both the keyword pass and the model screener are tested,
+and the second is the one easy to get wrong because generation is already set up by the
+time it fires.
+
+**The `context` event carries counts, not content.** §6 specifies `fact_count` and
+`chunk_count`, and the test asserts that no placement name — Saturn, Libra, Bharani —
+appears anywhere in the serialised event. The context holds the user's placements, and
+`.claude/rules/security.md` keeps birth details out of anything a client logs.
+
+**The outcome rides on the terminal event.** An HTTP response cannot return a value
+after its body, and the Go proxy needs the accumulated text and telemetry *after* the
+stream to write one row in one transaction. A second call would be a second chance to
+fail after the money was already spent.
+
+**The error handler yields rather than raises.** A `StreamingResponse` has already sent
+its headers, so raising truncates the body and the client sees a stream that stops with
+no terminal event — indistinguishable from a network failure, which means a client
+retrying on truncation would retry a request that failed deterministically.
+
+**`get_orchestrator_parts` is shared with `/v1/complete`.** The circuit breaker's state
+lives in the provider, so two chains would mean two breakers and a provider that had
+failed five times on the chat path would still look healthy to the completion path.
+
+**`ensure_ascii` on the wire.** SSE is line-oriented over a byte stream, and a proxy
+that re-chunks on bytes can split a multi-byte character across two reads. Devanagari
+is escaped rather than sent raw.
+
+`task verify` green: 1306 Python, 310 astro, 606 web, Go unit + `-race`.
