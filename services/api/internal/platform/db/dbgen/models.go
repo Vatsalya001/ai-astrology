@@ -189,6 +189,19 @@ type ChartShare struct {
 	CreatedAt      time.Time
 }
 
+type Conversation struct {
+	ID             pgtype.UUID
+	UserID         pgtype.UUID
+	BirthProfileID pgtype.UUID
+	Title          *string
+	Category       *string
+	Persona        string
+	MessageCount   int32
+	IsArchived     bool
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
+}
+
 type Dasha struct {
 	ID        pgtype.UUID
 	ChartID   pgtype.UUID
@@ -230,6 +243,36 @@ type KnowledgeDocument struct {
 	UpdatedAt       time.Time
 	// SHA-256 of the authored file, whole file including front matter. Empty means unknown, which the ingester treats as needing re-ingestion.
 	SourceChecksum string
+}
+
+type Message struct {
+	ID             pgtype.UUID
+	ConversationID pgtype.UUID
+	Role           string
+	Content        string
+	Intent         *string
+	Model          *string
+	ProviderID     *string
+	PromptVersion  *string
+	InputTokens    *int32
+	OutputTokens   *int32
+	LatencyMs      *int32
+	IsPartial      bool
+	SafetyFlags    []byte
+	IsReported     bool
+	CreatedAt      time.Time
+	SearchTsv      interface{}
+}
+
+type MessageContext struct {
+	ID                pgtype.UUID
+	MessageID         pgtype.UUID
+	AstrologyContext  []byte
+	FactIndex         []byte
+	KnowledgeChunkIds []byte
+	PromptVersion     string
+	ContextVersion    string
+	CreatedAt         time.Time
 }
 
 type Place struct {

@@ -10,7 +10,7 @@
 
 Ketu crosses a sign in about eighteen months, so everyone born inside that window
 shares the placement. The sign is a cohort marker; the house and the dispositor are what
-make a chart's reading of it particular.
+particularise it.
 
 ## Two modern schemes, no classical one
 
@@ -42,5 +42,4 @@ anyone's money.
 ## If the Moon shares the sign
 
 Taurus is the Moon's exaltation. A Ketu sharing it with the Moon puts a node on the
-emotional significator at its strongest — a configuration to read on the Moon's terms,
-carefully, and not as Ketu's story.
+emotional significator at its strongest — read that on the Moon's terms, not Ketu's.

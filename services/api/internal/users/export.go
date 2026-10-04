@@ -61,6 +61,66 @@ type Export struct {
 	// minutes since 2026-09-16 and `task verify` does not run the
 	// integration suite. The guard worked the first hour it was able to.
 	AIRequests []ExportAIRequest `json:"ai_requests"`
+
+	// Phase 5. The chat history: the threads and every turn in them.
+	//
+	// This is the first section that carries text the person WROTE,
+	// which makes it the largest and the most obviously theirs. Nothing
+	// else in the product is as plainly "my data" as the questions
+	// somebody asked about their own life.
+	//
+	// `message_contexts` is deliberately absent and that is a decision,
+	// not an omission. It holds no fact about the person that is not
+	// already here: the astrology context is a filtered VIEW of the
+	// chart, which `Charts` above exports whole, and the chunk ids name
+	// rows in our own corpus rather than anything about them. Including
+	// it would add megabytes of duplicated placements to an export in
+	// exchange for nothing a reader could use.
+	Conversations []ExportConversation `json:"conversations"`
+	Messages      []ExportMessage      `json:"messages"`
+}
+
+// ExportConversation is one thread's metadata.
+//
+// Flat, with `Messages` alongside rather than nested, for the same
+// reason `Charts` is flat next to `BirthProfiles`: nesting would mean one
+// query per conversation, and an account with three hundred threads
+// would turn a portability request into three hundred round trips.
+type ExportConversation struct {
+	ID           uuid.UUID `json:"id"`
+	ProfileID    uuid.UUID `json:"birth_profile_id"`
+	Title        *string   `json:"title"`
+	Category     *string   `json:"category"`
+	Persona      string    `json:"persona"`
+	MessageCount int32     `json:"message_count"`
+	IsArchived   bool      `json:"is_archived"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
+}
+
+// ExportMessage is one turn, as the person who had the conversation
+// receives it back.
+//
+// `provider_id`, token counts and latency are absent, on the same
+// reasoning as `ExportAIRequest`: they describe our infrastructure
+// rather than the person, and the ones that are genuinely about cost are
+// already in `ai_requests`. `model` stays, because "which model told me
+// this" is a fact about the answer they were given.
+//
+// `is_partial` stays too. A truncated answer in somebody's history needs
+// to export AS truncated — otherwise the copy they keep reads as a
+// complete reading that simply stops mid-sentence.
+type ExportMessage struct {
+	ID             uuid.UUID `json:"id"`
+	ConversationID uuid.UUID `json:"conversation_id"`
+	Role           string    `json:"role"`
+	Content        string    `json:"content"`
+	Intent         *string   `json:"intent"`
+	Model          *string   `json:"model"`
+	PromptVersion  *string   `json:"prompt_version"`
+	IsPartial      bool      `json:"is_partial"`
+	IsReported     bool      `json:"is_reported"`
+	CreatedAt      time.Time `json:"created_at"`
 }
 
 // ExportAIRequest is one model call, as the person it was made for
@@ -188,6 +248,15 @@ func NewExporter(q dbgen.Querier) *Exporter {
 // actually wants.
 const exportAuditLimit = 1000
 
+// exportMessageLimit caps the chat turns returned, for the same reason.
+//
+// Higher than the audit cap because this is the section a person asking
+// "what do you know about me" most wants, and lower than unbounded
+// because a heavy account's history is the one part of this export that
+// can reach tens of megabytes. Oldest first, so a truncated export is a
+// truncated end of the history rather than an arbitrary slice.
+const exportMessageLimit = 10000
+
 func (e *Exporter) Export(ctx context.Context, userID uuid.UUID) (Export, error) {
 	pgUser := toPgUUID(userID)
 
@@ -293,6 +362,56 @@ func (e *Exporter) Export(ctx context.Context, userID uuid.UUID) (Export, error)
 		aiRequests = append(aiRequests, item)
 	}
 
+	/*
+	   Chat history.
+
+	   Uncapped for conversations and capped for messages — the asymmetry
+	   is in the queries and explained there. Both fail the whole export
+	   if they fail, like every other section: a partial export that
+	   looks complete is worse than none.
+	*/
+	conversationRows, err := e.q.ListAllConversationsForUser(ctx, pgUser)
+	if err != nil {
+		return Export{}, fmt.Errorf("users: export conversations: %w", err)
+	}
+	conversations := make([]ExportConversation, 0, len(conversationRows))
+	for _, row := range conversationRows {
+		conversations = append(conversations, ExportConversation{
+			ID:           row.ID.Bytes,
+			ProfileID:    row.BirthProfileID.Bytes,
+			Title:        row.Title,
+			Category:     row.Category,
+			Persona:      row.Persona,
+			MessageCount: row.MessageCount,
+			IsArchived:   row.IsArchived,
+			CreatedAt:    row.CreatedAt,
+			UpdatedAt:    row.UpdatedAt,
+		})
+	}
+
+	messageRows, err := e.q.ListMessagesForUser(ctx, dbgen.ListMessagesForUserParams{
+		UserID: pgUser,
+		Limit:  exportMessageLimit,
+	})
+	if err != nil {
+		return Export{}, fmt.Errorf("users: export messages: %w", err)
+	}
+	messages := make([]ExportMessage, 0, len(messageRows))
+	for _, row := range messageRows {
+		messages = append(messages, ExportMessage{
+			ID:             row.ID.Bytes,
+			ConversationID: row.ConversationID.Bytes,
+			Role:           row.Role,
+			Content:        row.Content,
+			Intent:         row.Intent,
+			Model:          row.Model,
+			PromptVersion:  row.PromptVersion,
+			IsPartial:      row.IsPartial,
+			IsReported:     row.IsReported,
+			CreatedAt:      row.CreatedAt,
+		})
+	}
+
 	out := Export{
 		ExportedAt: time.Now().UTC(),
 		// Versioned so a later change to the shape is detectable by
@@ -310,6 +429,8 @@ func (e *Exporter) Export(ctx context.Context, userID uuid.UUID) (Export, error)
 		Charts:        make([]ExportChart, 0, len(profiles)),
 		ShareLinks:    shareLinks,
 		AIRequests:    aiRequests,
+		Conversations: conversations,
+		Messages:      messages,
 	}
 
 	for _, profile := range profiles {

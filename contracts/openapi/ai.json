@@ -17,6 +17,137 @@
         "title": "AIResponseEnvelope[CompleteResult]",
         "type": "object"
       },
+      "Ascendant": {
+        "properties": {
+          "degree": {
+            "default": 0.0,
+            "title": "Degree",
+            "type": "number"
+          },
+          "nakshatra": {
+            "default": "",
+            "title": "Nakshatra",
+            "type": "string"
+          },
+          "pada": {
+            "default": 0,
+            "title": "Pada",
+            "type": "integer"
+          },
+          "sign": {
+            "title": "Sign",
+            "type": "string"
+          }
+        },
+        "required": [
+          "sign"
+        ],
+        "title": "Ascendant",
+        "type": "object"
+      },
+      "ChartPayload": {
+        "description": "What Go sends: one computed chart, plus its dasha tree.\n\n\u2500\u2500 Why `ayanamsa` is carried and not assumed \u2500\u2500\n\nBecause it changes the answer. A chart computed under Lahiri and read\nas though it were Raman moves planets across sign boundaries near a\ncusp, and nothing in the response would look wrong. It is recorded on\nthe context version for the same reason `.claude/rules/database.md`\nrequires it in every cache key.",
+        "properties": {
+          "ascendant": {
+            "$ref": "#/components/schemas/Ascendant"
+          },
+          "ayanamsa": {
+            "default": "lahiri",
+            "title": "Ayanamsa",
+            "type": "string"
+          },
+          "chart_type": {
+            "default": "rasi",
+            "title": "Chart Type",
+            "type": "string"
+          },
+          "dasha_periods": {
+            "items": {
+              "$ref": "#/components/schemas/DashaPeriod"
+            },
+            "title": "Dasha Periods",
+            "type": "array"
+          },
+          "engine_version": {
+            "default": "",
+            "title": "Engine Version",
+            "type": "string"
+          },
+          "houses": {
+            "items": {
+              "$ref": "#/components/schemas/HousePosition"
+            },
+            "title": "Houses",
+            "type": "array"
+          },
+          "planets": {
+            "items": {
+              "$ref": "#/components/schemas/PlanetPosition"
+            },
+            "title": "Planets",
+            "type": "array"
+          }
+        },
+        "required": [
+          "ascendant"
+        ],
+        "title": "ChartPayload",
+        "type": "object"
+      },
+      "ChatRequest": {
+        "additionalProperties": false,
+        "description": "One chat turn, as `api-service` sends it.\n\n\u2500\u2500 Why the chart is in the body \u2500\u2500\n\n\u00a712: \"Chart context comes from the chart Go loaded after an ownership\ncheck \u2014 never from an ID in the message body.\" So Go sends the chart\nitself, having proved the caller owns it, and this service has no way\nto ask for a different one. The positions are not birth details \u2014\nno name, no date, no place \u2014 so `.claude/rules/security.md`'s PII\nrule is satisfied by what is absent rather than by redaction.",
+        "properties": {
+          "chart": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ChartPayload"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "conversation_id": {
+            "default": "",
+            "title": "Conversation Id",
+            "type": "string"
+          },
+          "language": {
+            "default": "en",
+            "title": "Language",
+            "type": "string"
+          },
+          "message": {
+            "maxLength": 4000,
+            "minLength": 1,
+            "title": "Message",
+            "type": "string"
+          },
+          "persona": {
+            "default": "vedic_guide",
+            "title": "Persona",
+            "type": "string"
+          },
+          "recent": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Recent",
+            "type": "array"
+          },
+          "user_id": {
+            "default": "",
+            "title": "User Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "message"
+        ],
+        "title": "ChatRequest",
+        "type": "object"
+      },
       "CompleteRequest": {
         "description": "What `api-service` sends.\n\n`user_id` and `conversation_id` are IDs. No name, no email, no birth\ndetails \u2014 `.claude/rules/security.md`. The chart comes from\n`astro-service` via the context builder, keyed by the ID, and never\ntravels through this request body.",
         "properties": {
@@ -86,6 +217,44 @@
           "text"
         ],
         "title": "CompleteResult",
+        "type": "object"
+      },
+      "DashaPeriod": {
+        "description": "One node of the Vimshottari tree.\n\n`children` is recursive and the tree is three levels deep by the time\nit reaches here. Typed rather than left as a dict because the context\nbuilder walks it to find the CURRENT period, and walking an untyped\ntree is where an off-by-one in the level becomes a wrong date.",
+        "properties": {
+          "children": {
+            "items": {
+              "$ref": "#/components/schemas/DashaPeriod"
+            },
+            "title": "Children",
+            "type": "array"
+          },
+          "end": {
+            "format": "date-time",
+            "title": "End",
+            "type": "string"
+          },
+          "level": {
+            "default": 1,
+            "title": "Level",
+            "type": "integer"
+          },
+          "planet": {
+            "title": "Planet",
+            "type": "string"
+          },
+          "start": {
+            "format": "date-time",
+            "title": "Start",
+            "type": "string"
+          }
+        },
+        "required": [
+          "planet",
+          "start",
+          "end"
+        ],
+        "title": "DashaPeriod",
         "type": "object"
       },
       "EmbedRequest": {
@@ -207,6 +376,38 @@
         "title": "HealthResponse",
         "type": "object"
       },
+      "HousePosition": {
+        "properties": {
+          "house": {
+            "maximum": 12.0,
+            "minimum": 1.0,
+            "title": "House",
+            "type": "integer"
+          },
+          "lord": {
+            "default": "",
+            "title": "Lord",
+            "type": "string"
+          },
+          "planets": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Planets",
+            "type": "array"
+          },
+          "sign": {
+            "title": "Sign",
+            "type": "string"
+          }
+        },
+        "required": [
+          "house",
+          "sign"
+        ],
+        "title": "HousePosition",
+        "type": "object"
+      },
       "Intent": {
         "description": "The 21 intents from PHASE-04 \u00a76.\n\n`StrEnum` so an intent survives a round trip through JSON, a log line\nand an admin dashboard as itself, rather than as an integer nobody\ncan read at 3am.",
         "enum": [
@@ -251,6 +452,62 @@
         ],
         "title": "JobType",
         "type": "string"
+      },
+      "PlanetPosition": {
+        "description": "One body, as computed. Field names match astro-service's output.",
+        "properties": {
+          "degree": {
+            "default": 0.0,
+            "title": "Degree",
+            "type": "number"
+          },
+          "dignity": {
+            "default": "",
+            "title": "Dignity",
+            "type": "string"
+          },
+          "house": {
+            "maximum": 12.0,
+            "minimum": 1.0,
+            "title": "House",
+            "type": "integer"
+          },
+          "is_combust": {
+            "default": false,
+            "title": "Is Combust",
+            "type": "boolean"
+          },
+          "is_retrograde": {
+            "default": false,
+            "title": "Is Retrograde",
+            "type": "boolean"
+          },
+          "nakshatra": {
+            "default": "",
+            "title": "Nakshatra",
+            "type": "string"
+          },
+          "pada": {
+            "default": 0,
+            "title": "Pada",
+            "type": "integer"
+          },
+          "planet": {
+            "title": "Planet",
+            "type": "string"
+          },
+          "sign": {
+            "title": "Sign",
+            "type": "string"
+          }
+        },
+        "required": [
+          "planet",
+          "sign",
+          "house"
+        ],
+        "title": "PlanetPosition",
+        "type": "object"
       },
       "RoutingOverride": {
         "description": "One admin change, validated before it reaches the router.\n\nA Pydantic model rather than a raw dict so an override arriving from\nthe Go admin panel with a typo'd job name fails at the boundary with\na readable message, rather than silently adding a key nothing reads.",
@@ -594,6 +851,46 @@
         "summary": "Health",
         "tags": [
           "ops"
+        ]
+      }
+    },
+    "/v1/chat": {
+      "post": {
+        "description": "Stream one chat turn as Server-Sent Events.\n\n\u2500\u2500 The headers, and why each one is load-bearing \u2500\u2500\n\n`text/event-stream` is the content type the SSE spec requires, and\n`EventSource` in the browser refuses anything else.\n\n`Cache-Control: no-cache` stops an intermediary serving a stale\nstream \u2014 which for SSE means replaying somebody else's answer.\n\n`X-Accel-Buffering: no` is the one that is easy to omit and\nexpensive to omit. \u00a76 names it: nginx buffers proxied responses by\ndefault, so without this the client receives the whole stream at\nonce and \"first token < 2 s\" becomes \"first token at the end\". It is\nset HERE as well as in the Go proxy because whichever reverse proxy\nsits in front reads the header from whatever it is proxying, and\n\u00a714 lists \"SSE buffering breaks streaming in production\" as a risk\nwhose mitigation is to \"test through the real reverse proxy, not\njust locally\".",
+        "operationId": "chat_v1_chat_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChatRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Chat",
+        "tags": [
+          "ai"
         ]
       }
     },

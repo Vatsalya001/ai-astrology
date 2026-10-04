@@ -12,6 +12,49 @@ import (
 )
 
 type Querier interface {
+	// ─── messages: append ────────────────────────────────────────────────
+	// One turn, and the conversation's counter, in a single statement.
+	//
+	// ── Why the UPDATE is the CTE and the INSERT is the main statement ──
+	//
+	// The UPDATE is the authorisation. It matches nothing for a non-owner,
+	// so `owned` is empty, so the INSERT's SELECT produces no row and no
+	// message is written — the same "no row rather than a row the caller is
+	// trusted to inspect" shape as the rest of this file, applied to a
+	// write. Appending to somebody else's conversation is not merely
+	// refused; it is unrepresentable.
+	//
+	// It is also what keeps `message_count` honest. One statement means the
+	// counter and the row land together or not at all: a CHECK violation on
+	// the message rolls the increment back with it, and the increment cannot
+	// happen without a message because the INSERT is what consumes `owned`.
+	//
+	// Concurrency: `message_count + 1` is re-evaluated after the row lock
+	// the UPDATE takes, so two simultaneous appends serialise and neither
+	// increment is lost. No explicit `FOR UPDATE` is needed — that is for
+	// read-then-write sequences (balances, Phase 7), not for a counter
+	// incremented in terms of itself.
+	//
+	// ── Why not a trigger ──
+	//
+	// A trigger on `messages` is the reflex and it is a trap here. An
+	// AFTER DELETE trigger decrementing the counter would fire for every
+	// message during a conversation's `ON DELETE CASCADE` and try to UPDATE
+	// the `conversations` row that is itself being deleted. That either
+	// errors or silently does nothing depending on trigger timing, and the
+	// failure appears at account deletion — the one path that must not have
+	// surprises. The cascade needs no decrement, because the counter is
+	// deleted along with the row that holds it.
+	// ── Two pieces of sqlc pedantry, both load-bearing ──
+	//
+	// The predicate columns are table-qualified and the CTE's output column
+	// is aliased. Postgres accepts the unqualified, unaliased version
+	// without complaint; sqlc's analyser resolves names across the whole
+	// statement, sees `id` on both `conversations` and `messages`, and fails
+	// the build with `column reference "id" is ambiguous` — reported at a
+	// line several statements further down, which is not a hint worth
+	// rediscovering.
+	AppendMessage(ctx context.Context, arg AppendMessageParams) (AppendMessageRow, error)
 	// The whole tree in ONE round trip.
 	//
 	// 819 rows per chart — 9 mahadashas, 81 antardashas, 729
@@ -66,6 +109,64 @@ type Querier interface {
 	//   row, not a row the caller is trusted to inspect.
 	// ─── creating and listing, for the owner ─────────────────────────────
 	CreateChartShare(ctx context.Context, arg CreateChartShareParams) (ChartShare, error)
+	// Conversation, message and context queries. PHASE-05 task 5.10.
+	//
+	// ── Every read is scoped by user_id in the SQL ──
+	//
+	// Not in the handler. `shares.sql` put it this way and it is worth
+	// repeating because this file is where it matters most: "a predicate in
+	// the query is a guarantee the handler cannot forget to apply."
+	//
+	// `.claude/rules/security.md`: "Cross-user access returns 404, not 403 —
+	// a 403 confirms the resource exists." A query that returned the row and
+	// left the ownership decision to Go would make that guarantee depend on
+	// every future call site remembering to check — including the ones added
+	// by tasks 5.12, 5.16 and 5.17, by someone who has not read this
+	// comment. Scoped in the SQL, a non-owner's request produces NO ROW,
+	// `pgx.ErrNoRows`, and a 404 that cannot accidentally become a 403.
+	//
+	// The writes are scoped the same way, which matters more: a rename or an
+	// archive that affected somebody else's row would be a silent
+	// cross-account mutation, not merely an information leak.
+	//
+	// ── Why the message queries name their columns ──
+	//
+	// `messages.search_tsv` is a GENERATED tsvector — index payload, not
+	// data. `SELECT *` would carry it over the wire on every message read,
+	// into a Go field no code in this service can use (sqlc types tsvector
+	// as `interface{}`). The column lists below are therefore explicit and
+	// identical, in schema order:
+	//
+	//   id, conversation_id, role, content, intent, model, provider_id,
+	//   prompt_version, input_tokens, output_tokens, latency_ms, is_partial,
+	//   safety_flags, is_reported, created_at
+	//
+	// `conversations` and `message_contexts` have no generated column, so
+	// they use `*`.
+	// ─── conversations: create ───────────────────────────────────────────
+	// Start a thread against one of the caller's own birth profiles.
+	//
+	// INSERT ... SELECT rather than INSERT ... VALUES, and that is the whole
+	// point of this query. `birth_profile_id` arrives from the client, so
+	// VALUES would happily open a conversation bound to another user's
+	// chart — §12's first checklist item ("chart context comes from the
+	// chart Go loaded after an ownership check — never from an ID in the
+	// message body") lost at the moment the thread is created rather than
+	// when it is read.
+	//
+	// Selecting the row makes the profile's ownership the precondition for
+	// the insert: a foreign profile matches nothing, no row is inserted, and
+	// the caller gets `pgx.ErrNoRows` → 404.
+	//
+	// `user_id` is taken from the profile row, not from the parameter, so
+	// the two cannot disagree. The parameter only narrows.
+	//
+	// `is_active` is required too. Correcting a birth time supersedes the
+	// old profile (000003), and a NEW thread started on a superseded
+	// version would be read against a chart its owner has already said was
+	// wrong. Existing threads keep pointing at it — that is the audit trail
+	// — but nothing new attaches to it.
+	CreateConversation(ctx context.Context, arg CreateConversationParams) (Conversation, error)
 	// ─── Preferences ─────────────────────────────────────────────────────
 	CreateDefaultPreferences(ctx context.Context, userID pgtype.UUID) (UserPreference, error)
 	// ─── Sessions ────────────────────────────────────────────────────────
@@ -73,6 +174,15 @@ type Querier interface {
 	CreateUserWithEmail(ctx context.Context, email *string) (User, error)
 	CreateUserWithPhone(ctx context.Context, phone *string) (User, error)
 	DeactivateBirthProfile(ctx context.Context, arg DeactivateBirthProfileParams) (int64, error)
+	// Scoped by user. `:execrows` rather than `:exec` so the handler can
+	// tell "deleted" from "not yours or not there" and return 404 for both
+	// — the two cases must be indistinguishable to the client.
+	//
+	// The messages and their contexts go with it, by `ON DELETE CASCADE` in
+	// migration 000009 rather than by two more statements here. §16 gates on
+	// it ("Deleting a conversation cascades to messages and contexts") and
+	// the database is the only place that cannot forget.
+	DeleteConversation(ctx context.Context, arg DeleteConversationParams) (int64, error)
 	// Recomputing replaces the whole tree. Deleting first keeps it a tree
 	// rather than two overlapping generations of one.
 	DeleteDashasForChart(ctx context.Context, chartID pgtype.UUID) (int64, error)
@@ -136,6 +246,12 @@ type Querier interface {
 	// statement that fetches the data. A separate ownership check is a
 	// check someone can forget.
 	GetChart(ctx context.Context, arg GetChartParams) (Chart, error)
+	// ─── conversations: read ─────────────────────────────────────────────
+	// One thread, for its owner.
+	//
+	// Archived threads are included: §7's history screen can open one, and
+	// "archived" means "not in the default list", not "gone".
+	GetConversation(ctx context.Context, arg GetConversationParams) (Conversation, error)
 	// What the database already holds for this identity.
 	//
 	// Returns the checksum and the chunk count together because both have to
@@ -144,6 +260,22 @@ type Querier interface {
 	// and the chunk inserts — and skipping that leaves a document in the
 	// corpus with nothing retrievable in it.
 	GetKnowledgeDocumentChecksum(ctx context.Context, arg GetKnowledgeDocumentChecksumParams) (GetKnowledgeDocumentChecksumRow, error)
+	// The "Why am I seeing this?" payload (§7), and §16's "renders the real
+	// stored context".
+	//
+	// A read, not a regeneration. Rebuilding the context from the chart
+	// would use today's context builder against today's corpus and answer a
+	// different question — "what would we retrieve now?" — while looking
+	// like it answered the original one. Task 5.5's dimension migration
+	// re-embeds the whole corpus, and re-chunking changes which chunk ids
+	// exist at all, so the regenerated answer would drift without anything
+	// appearing to change.
+	//
+	// Two joins to reach `user_id`: contexts hang off messages, which hang
+	// off conversations, which is where ownership lives. The alternative —
+	// trusting the handler to have loaded the conversation first — is the
+	// thing this file refuses to do.
+	GetMessageContext(ctx context.Context, arg GetMessageContextParams) (MessageContext, error)
 	GetPlace(ctx context.Context, id int32) (Place, error)
 	GetPreferences(ctx context.Context, userID pgtype.UUID) (UserPreference, error)
 	GetSadeSatiWindow(ctx context.Context, moonSignIndex int16) (SadeSatiWindow, error)
@@ -176,6 +308,26 @@ type Querier interface {
 	// See the note at the top of this file for why the vector is a string
 	// here and cast in the SQL.
 	InsertKnowledgeChunk(ctx context.Context, arg InsertKnowledgeChunkParams) error
+	// ─── message_contexts ────────────────────────────────────────────────
+	// What was supplied to the model for one assistant message.
+	//
+	// `prompt_version` is NOT a parameter. It is selected off the message
+	// row, so the copy here and the copy on `messages` cannot disagree —
+	// the duplication §5 implies becomes a derivation. A message with no
+	// `prompt_version` fails the NOT NULL and the insert errors loudly,
+	// which is correct: a context row for a response that does not record
+	// which prompt produced it cannot explain that response.
+	//
+	// INSERT ... SELECT also makes a context for a non-existent message
+	// return no row rather than a foreign-key error, matching the shape of
+	// every other write in this file.
+	//
+	// Not scoped by user, and that is deliberate — this runs inside the
+	// chat pipeline, immediately after `AppendMessage` returned the message
+	// it is about, in the same request. There is no client-supplied id to
+	// validate. The scoping lives on the READ, below, which is where a
+	// client-supplied id does arrive.
+	InsertMessageContext(ctx context.Context, arg InsertMessageContextParams) (MessageContext, error)
 	// ON CONFLICT DO UPDATE rather than DO NOTHING: DO NOTHING returns no
 	// row, so the caller cannot tell "already linked" from "insert failed"
 	// without a second query.
@@ -222,6 +374,15 @@ type Querier interface {
 	// case: the history is what explains a reading given before a correction,
 	// and dropping it hands back less than was actually stored.
 	ListAllBirthProfilesForUser(ctx context.Context, userID pgtype.UUID) ([]BirthProfile, error)
+	// Every thread, archived or not, uncapped — for the data export.
+	//
+	// Uncapped on purpose, like `ListChartSharesForUser`. A portability
+	// export that silently drops the tail is the failure
+	// `internal/users/export.go` exists to prevent: the user reads an absent
+	// row as "I never had that conversation".
+	ListAllConversationsForUser(ctx context.Context, userID pgtype.UUID) ([]Conversation, error)
+	// The archive, as its own list rather than a flag on the one above.
+	ListArchivedConversations(ctx context.Context, arg ListArchivedConversationsParams) ([]Conversation, error)
 	ListAuditLogsForUser(ctx context.Context, arg ListAuditLogsForUserParams) ([]AuditLog, error)
 	// The history behind one profile, newest first.
 	//
@@ -248,6 +409,14 @@ type Querier interface {
 	// followed by a targeted recompute instead of a guess.
 	ListChartsByEngineVersion(ctx context.Context, arg ListChartsByEngineVersionParams) ([]Chart, error)
 	ListChartsForProfile(ctx context.Context, arg ListChartsForProfileParams) ([]Chart, error)
+	// The history screen's default list: this user's live threads, most
+	// recently active first.
+	//
+	// `is_archived = FALSE` is spelled out rather than parameterised. A
+	// single query with `is_archived = $2` would read as tidier and would
+	// defeat `conversations_user_active_idx`, which is partial precisely
+	// because this is the query that runs on every history load.
+	ListConversations(ctx context.Context, arg ListConversationsParams) ([]Conversation, error)
 	ListDashasByLevel(ctx context.Context, arg ListDashasByLevelParams) ([]Dasha, error)
 	// Needed by the data export. Without it the export declares an
 	// auth_identities field and always returns [], which is worse than
@@ -256,12 +425,70 @@ type Querier interface {
 	// Every stored document's identity and checksum, for verifying the corpus
 	// against what is on disk.
 	ListKnowledgeChecksums(ctx context.Context) ([]ListKnowledgeChecksumsRow, error)
+	// ─── messages: read ──────────────────────────────────────────────────
+	// One conversation's turns, oldest first, for its owner.
+	//
+	// The join is the ownership check. `conversation_id` alone would return
+	// the whole of somebody else's thread to anyone who learned its id,
+	// which is the single worst read in this product: it is the complete
+	// text of what a person asked about their health and their marriage.
+	//
+	// `id` is the tiebreaker on `created_at`. `now()` is the transaction's
+	// start time, so two messages written in one transaction share a
+	// timestamp exactly; a random UUID is not a meaningful order but it is a
+	// STABLE one, which is what keeps a paginated list from repeating or
+	// skipping a row. In normal operation the user's turn and the
+	// assistant's are seconds apart (§6 persists the user message before the
+	// model is called), so the tiebreaker is a guard, not the usual path.
+	ListMessages(ctx context.Context, arg ListMessagesParams) ([]ListMessagesRow, error)
+	// Every message this person has, across every conversation — the data
+	// export.
+	//
+	// Capped, unlike the conversation list, and the asymmetry is deliberate:
+	// a long-lived account has tens of thousands of messages and a response
+	// that times out is not an export. The audit log is capped for the same
+	// reason in `internal/users/export.go`. Ordered oldest-first so a
+	// truncated export is a truncated BEGINNING of the history rather than
+	// an arbitrary slice.
+	ListMessagesForUser(ctx context.Context, arg ListMessagesForUserParams) ([]ListMessagesForUserRow, error)
+	// The last N turns, for §5's context window (`CHAT_RECENT_MESSAGE_WINDOW`).
+	//
+	// Newest first, because "the last 6" has to be taken from the recent end
+	// — the caller reverses them before building the prompt. Ordering
+	// ascending with a LIMIT would return the OLDEST six, which is the
+	// version of this query that looks right and produces a model with no
+	// idea what was just said.
+	//
+	// Partial messages are included. A disconnect mid-answer is part of the
+	// thread the user can see, and omitting it from the context would make
+	// the model's next turn contradict the screen.
+	ListRecentMessages(ctx context.Context, arg ListRecentMessagesParams) ([]ListRecentMessagesRow, error)
 	// For the health probe and for anyone reading the table by hand.
 	ListSadeSatiWindows(ctx context.Context) ([]SadeSatiWindow, error)
 	// Global and free of personal data, so no user scoping — and that is
 	// what makes them safe to cache across all users.
 	ListTransitsAt(ctx context.Context, arg ListTransitsAtParams) ([]Transit, error)
 	ListUsersPastDeletionGrace(ctx context.Context, deletionRequestedAt pgtype.Timestamptz) ([]User, error)
+	// §7's Report button (task 5.17).
+	//
+	// Scoped by owner through the conversation, so a user can only report an
+	// answer given to them. Without the join, any message id would be
+	// reportable by anyone — a way to flood the review queue with other
+	// people's conversations.
+	//
+	// Idempotent: reporting twice sets a boolean that is already true.
+	// `:execrows` returns 0 for a message that is not this user's, which the
+	// handler turns into 404.
+	MarkMessageReported(ctx context.Context, arg MarkMessageReportedParams) (int64, error)
+	// ─── conversations: update and delete ────────────────────────────────
+	// Scoped by user, so renaming somebody else's thread affects no row and
+	// the handler answers 404 — never 403, which would confirm it exists.
+	//
+	// `updated_at` is deliberately NOT touched. It is the history sort key
+	// and it means "when did this conversation last have something said in
+	// it"; a rename would otherwise shuffle a year-old thread to the top of
+	// the list for a cosmetic edit.
+	RenameConversation(ctx context.Context, arg RenameConversationParams) (Conversation, error)
 	// ─── Deletion ────────────────────────────────────────────────────────
 	RequestUserDeletion(ctx context.Context, id pgtype.UUID) (User, error)
 	// ─── resolving, for the viewer ───────────────────────────────────────
@@ -317,12 +544,39 @@ type Querier interface {
 	// wrote — the classic TOCTOU that makes a leaked token usable twice. No
 	// application lock is needed, and a mocked database cannot test this.
 	RotateRefreshToken(ctx context.Context, refreshHash []byte) (Session, error)
+	// Full-text search across one user's own history (§7, task 5.16).
+	//
+	// Scoped by `c.user_id` in the same WHERE clause as the match, so a
+	// search can only ever rank this person's own text. A search endpoint is
+	// the easiest place in a product to leak the whole corpus of user
+	// content, because the predicate that limits it looks like a filter
+	// rather than like authorisation.
+	//
+	// `websearch_to_tsquery` rather than `plainto_tsquery`: it accepts what
+	// people actually type into a search box — quoted phrases, `or`, a
+	// leading `-` to exclude — and, unlike `to_tsquery`, it cannot raise a
+	// syntax error on user input. A search that 500s on an apostrophe is a
+	// search nobody uses twice.
+	//
+	// The query text is matched against `search_tsv`, the generated column,
+	// so `messages_search_idx` serves it. `ts_rank` recomputes over the
+	// matched rows only, which is a user-sized set, not a corpus-sized one.
+	//
+	// `conversation_title` comes along because a search hit is useless
+	// without the thread it belongs to — the UI needs somewhere to send the
+	// tap.
+	SearchMessages(ctx context.Context, arg SearchMessagesParams) ([]SearchMessagesRow, error)
 	// ─── places ──────────────────────────────────────────────────────────
 	// Prefix match, ranked by population — which is what makes "jaip"
 	// return Jaipur, Rajasthan rather than a village of 600 people. The
 	// ranking matters more than the matching at the highest drop-off point
 	// in the product.
 	SearchPlaces(ctx context.Context, arg SearchPlacesParams) ([]Place, error)
+	// Archive or restore. One query for both directions, because a toggle
+	// implemented as two endpoints drifts.
+	//
+	// `updated_at` untouched, same reasoning as the rename.
+	SetConversationArchived(ctx context.Context, arg SetConversationArchivedParams) (Conversation, error)
 	SetSchemaPhase(ctx context.Context, phase string) (SchemaMetum, error)
 	// Marks a version replaced. Returns the row so the caller can tell
 	// "superseded it" from "there was nothing to supersede" without a second

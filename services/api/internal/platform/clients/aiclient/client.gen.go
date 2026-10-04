@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/oapi-codegen/runtime"
 )
@@ -221,6 +222,53 @@ type AIResponseEnvelopeCompleteResult struct {
 	Telemetry Telemetry `json:"telemetry"`
 }
 
+// Ascendant defines model for Ascendant.
+type Ascendant struct {
+	Degree    *float32 `json:"degree,omitempty"`
+	Nakshatra *string  `json:"nakshatra,omitempty"`
+	Pada      *int     `json:"pada,omitempty"`
+	Sign      string   `json:"sign"`
+}
+
+// ChartPayload What Go sends: one computed chart, plus its dasha tree.
+//
+// ── Why `ayanamsa` is carried and not assumed ──
+//
+// Because it changes the answer. A chart computed under Lahiri and read
+// as though it were Raman moves planets across sign boundaries near a
+// cusp, and nothing in the response would look wrong. It is recorded on
+// the context version for the same reason `.claude/rules/database.md`
+// requires it in every cache key.
+type ChartPayload struct {
+	Ascendant     Ascendant         `json:"ascendant"`
+	Ayanamsa      *string           `json:"ayanamsa,omitempty"`
+	ChartType     *string           `json:"chart_type,omitempty"`
+	DashaPeriods  *[]DashaPeriod    `json:"dasha_periods,omitempty"`
+	EngineVersion *string           `json:"engine_version,omitempty"`
+	Houses        *[]HousePosition  `json:"houses,omitempty"`
+	Planets       *[]PlanetPosition `json:"planets,omitempty"`
+}
+
+// ChatRequest One chat turn, as `api-service` sends it.
+//
+// ── Why the chart is in the body ──
+//
+// §12: "Chart context comes from the chart Go loaded after an ownership
+// check — never from an ID in the message body." So Go sends the chart
+// itself, having proved the caller owns it, and this service has no way
+// to ask for a different one. The positions are not birth details —
+// no name, no date, no place — so `.claude/rules/security.md`'s PII
+// rule is satisfied by what is absent rather than by redaction.
+type ChatRequest struct {
+	Chart          *ChartPayload `json:"chart,omitempty"`
+	ConversationId *string       `json:"conversation_id,omitempty"`
+	Language       *string       `json:"language,omitempty"`
+	Message        string        `json:"message"`
+	Persona        *string       `json:"persona,omitempty"`
+	Recent         *[]string     `json:"recent,omitempty"`
+	UserId         *string       `json:"user_id,omitempty"`
+}
+
 // CompleteRequest What `api-service` sends.
 //
 // `user_id` and `conversation_id` are IDs. No name, no email, no birth
@@ -255,6 +303,20 @@ type CompleteResult struct {
 	IsCrisisResponse *bool           `json:"is_crisis_response,omitempty"`
 	SafetyCategory   *SafetyCategory `json:"safety_category,omitempty"`
 	Text             string          `json:"text"`
+}
+
+// DashaPeriod One node of the Vimshottari tree.
+//
+// `children` is recursive and the tree is three levels deep by the time
+// it reaches here. Typed rather than left as a dict because the context
+// builder walks it to find the CURRENT period, and walking an untyped
+// tree is where an off-by-one in the level becomes a wrong date.
+type DashaPeriod struct {
+	Children *[]DashaPeriod `json:"children,omitempty"`
+	End      time.Time      `json:"end"`
+	Level    *int           `json:"level,omitempty"`
+	Planet   string         `json:"planet"`
+	Start    time.Time      `json:"start"`
 }
 
 // EmbedRequest defines model for EmbedRequest.
@@ -292,6 +354,14 @@ type HealthResponse struct {
 	Version      string           `json:"version"`
 }
 
+// HousePosition defines model for HousePosition.
+type HousePosition struct {
+	House   int       `json:"house"`
+	Lord    *string   `json:"lord,omitempty"`
+	Planets *[]string `json:"planets,omitempty"`
+	Sign    string    `json:"sign"`
+}
+
 // Intent The 21 intents from PHASE-04 §6.
 //
 // `StrEnum` so an intent survives a round trip through JSON, a log line
@@ -305,6 +375,19 @@ type Intent string
 // override and a log line as itself rather than as an integer nobody
 // can read in a dashboard.
 type JobType string
+
+// PlanetPosition One body, as computed. Field names match astro-service's output.
+type PlanetPosition struct {
+	Degree       *float32 `json:"degree,omitempty"`
+	Dignity      *string  `json:"dignity,omitempty"`
+	House        int      `json:"house"`
+	IsCombust    *bool    `json:"is_combust,omitempty"`
+	IsRetrograde *bool    `json:"is_retrograde,omitempty"`
+	Nakshatra    *string  `json:"nakshatra,omitempty"`
+	Pada         *int     `json:"pada,omitempty"`
+	Planet       string   `json:"planet"`
+	Sign         string   `json:"sign"`
+}
 
 // RoutingOverride One admin change, validated before it reaches the router.
 //
@@ -417,6 +500,9 @@ type ValidationError_Loc_Item struct {
 type HealthHealthGetParams struct {
 	Probe *bool `form:"probe,omitempty" json:"probe,omitempty"`
 }
+
+// ChatV1ChatPostJSONRequestBody defines body for ChatV1ChatPost for application/json ContentType.
+type ChatV1ChatPostJSONRequestBody = ChatRequest
 
 // CompleteV1CompletePostJSONRequestBody defines body for CompleteV1CompletePost for application/json ContentType.
 type CompleteV1CompletePostJSONRequestBody = CompleteRequest
@@ -596,6 +682,60 @@ type ClientInterface interface {
 	// Corresponds with GET /health (the `HealthHealthGet` operationId).
 	HealthHealthGet(ctx context.Context, params *HealthHealthGetParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// ChatV1ChatPostWithBody Chat
+	//
+	// Stream one chat turn as Server-Sent Events.
+	//
+	// ── The headers, and why each one is load-bearing ──
+	//
+	// `text/event-stream` is the content type the SSE spec requires, and
+	// `EventSource` in the browser refuses anything else.
+	//
+	// `Cache-Control: no-cache` stops an intermediary serving a stale
+	// stream — which for SSE means replaying somebody else's answer.
+	//
+	// `X-Accel-Buffering: no` is the one that is easy to omit and
+	// expensive to omit. §6 names it: nginx buffers proxied responses by
+	// default, so without this the client receives the whole stream at
+	// once and "first token < 2 s" becomes "first token at the end". It is
+	// set HERE as well as in the Go proxy because whichever reverse proxy
+	// sits in front reads the header from whatever it is proxying, and
+	// §14 lists "SSE buffering breaks streaming in production" as a risk
+	// whose mitigation is to "test through the real reverse proxy, not
+	// just locally".
+	//
+	// Takes any type of body and a specified content type.
+	//
+	// Corresponds with POST /v1/chat (the `ChatV1ChatPost` operationId).
+	ChatV1ChatPostWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ChatV1ChatPost Chat
+	//
+	// Stream one chat turn as Server-Sent Events.
+	//
+	// ── The headers, and why each one is load-bearing ──
+	//
+	// `text/event-stream` is the content type the SSE spec requires, and
+	// `EventSource` in the browser refuses anything else.
+	//
+	// `Cache-Control: no-cache` stops an intermediary serving a stale
+	// stream — which for SSE means replaying somebody else's answer.
+	//
+	// `X-Accel-Buffering: no` is the one that is easy to omit and
+	// expensive to omit. §6 names it: nginx buffers proxied responses by
+	// default, so without this the client receives the whole stream at
+	// once and "first token < 2 s" becomes "first token at the end". It is
+	// set HERE as well as in the Go proxy because whichever reverse proxy
+	// sits in front reads the header from whatever it is proxying, and
+	// §14 lists "SSE buffering breaks streaming in production" as a risk
+	// whose mitigation is to "test through the real reverse proxy, not
+	// just locally".
+	//
+	// Takes a body of the `application/json` content type.
+	//
+	// Corresponds with POST /v1/chat (the `ChatV1ChatPost` operationId).
+	ChatV1ChatPost(ctx context.Context, body ChatV1ChatPostJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// CompleteV1CompletePostWithBody Complete
 	//
 	// Run the pipeline and return the result with its telemetry.
@@ -729,6 +869,80 @@ type ClientInterface interface {
 // Corresponds with GET /health (the `HealthHealthGet` operationId).
 func (c *Client) HealthHealthGet(ctx context.Context, params *HealthHealthGetParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewHealthHealthGetRequest(c.Server, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// ChatV1ChatPostWithBody Chat
+//
+// Stream one chat turn as Server-Sent Events.
+//
+// ── The headers, and why each one is load-bearing ──
+//
+// `text/event-stream` is the content type the SSE spec requires, and
+// `EventSource` in the browser refuses anything else.
+//
+// `Cache-Control: no-cache` stops an intermediary serving a stale
+// stream — which for SSE means replaying somebody else's answer.
+//
+// `X-Accel-Buffering: no` is the one that is easy to omit and
+// expensive to omit. §6 names it: nginx buffers proxied responses by
+// default, so without this the client receives the whole stream at
+// once and "first token < 2 s" becomes "first token at the end". It is
+// set HERE as well as in the Go proxy because whichever reverse proxy
+// sits in front reads the header from whatever it is proxying, and
+// §14 lists "SSE buffering breaks streaming in production" as a risk
+// whose mitigation is to "test through the real reverse proxy, not
+// just locally".
+//
+// Takes any type of body and a specified content type.
+//
+// Corresponds with POST /v1/chat (the `ChatV1ChatPost` operationId).
+func (c *Client) ChatV1ChatPostWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewChatV1ChatPostRequestWithBody(c.Server, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// ChatV1ChatPost Chat
+//
+// Stream one chat turn as Server-Sent Events.
+//
+// ── The headers, and why each one is load-bearing ──
+//
+// `text/event-stream` is the content type the SSE spec requires, and
+// `EventSource` in the browser refuses anything else.
+//
+// `Cache-Control: no-cache` stops an intermediary serving a stale
+// stream — which for SSE means replaying somebody else's answer.
+//
+// `X-Accel-Buffering: no` is the one that is easy to omit and
+// expensive to omit. §6 names it: nginx buffers proxied responses by
+// default, so without this the client receives the whole stream at
+// once and "first token < 2 s" becomes "first token at the end". It is
+// set HERE as well as in the Go proxy because whichever reverse proxy
+// sits in front reads the header from whatever it is proxying, and
+// §14 lists "SSE buffering breaks streaming in production" as a risk
+// whose mitigation is to "test through the real reverse proxy, not
+// just locally".
+//
+// Takes a body of the `application/json` content type.
+//
+// Corresponds with POST /v1/chat (the `ChatV1ChatPost` operationId).
+func (c *Client) ChatV1ChatPost(ctx context.Context, body ChatV1ChatPostJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewChatV1ChatPostRequest(c.Server, body)
 	if err != nil {
 		return nil, err
 	}
@@ -962,6 +1176,46 @@ func NewHealthHealthGetRequest(server string, params *HealthHealthGetParams) (*h
 	return req, nil
 }
 
+// NewChatV1ChatPostRequest calls the generic ChatV1ChatPost builder with application/json body
+func NewChatV1ChatPostRequest(server string, body ChatV1ChatPostJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewChatV1ChatPostRequestWithBody(server, "application/json", bodyReader)
+}
+
+// NewChatV1ChatPostRequestWithBody constructs an http.Request for the ChatV1ChatPost method, with any body, and a specified content type
+func NewChatV1ChatPostRequestWithBody(server string, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/chat")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
 // NewCompleteV1CompletePostRequest calls the generic CompleteV1CompletePost builder with application/json body
 func NewCompleteV1CompletePostRequest(server string, body CompleteV1CompletePostJSONRequestBody) (*http.Request, error) {
 	var bodyReader io.Reader
@@ -1188,6 +1442,60 @@ type ClientWithResponsesInterface interface {
 	// Corresponds with GET /health (the `HealthHealthGet` operationId).
 	HealthHealthGetWithResponse(ctx context.Context, params *HealthHealthGetParams, reqEditors ...RequestEditorFn) (*HealthHealthGetResponse, error)
 
+	// ChatV1ChatPostWithBodyWithResponse Chat
+	//
+	// Stream one chat turn as Server-Sent Events.
+	//
+	// ── The headers, and why each one is load-bearing ──
+	//
+	// `text/event-stream` is the content type the SSE spec requires, and
+	// `EventSource` in the browser refuses anything else.
+	//
+	// `Cache-Control: no-cache` stops an intermediary serving a stale
+	// stream — which for SSE means replaying somebody else's answer.
+	//
+	// `X-Accel-Buffering: no` is the one that is easy to omit and
+	// expensive to omit. §6 names it: nginx buffers proxied responses by
+	// default, so without this the client receives the whole stream at
+	// once and "first token < 2 s" becomes "first token at the end". It is
+	// set HERE as well as in the Go proxy because whichever reverse proxy
+	// sits in front reads the header from whatever it is proxying, and
+	// §14 lists "SSE buffering breaks streaming in production" as a risk
+	// whose mitigation is to "test through the real reverse proxy, not
+	// just locally".
+	//
+	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /v1/chat (the `ChatV1ChatPost` operationId).
+	ChatV1ChatPostWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*ChatV1ChatPostResponse, error)
+
+	// ChatV1ChatPostWithResponse Chat
+	//
+	// Stream one chat turn as Server-Sent Events.
+	//
+	// ── The headers, and why each one is load-bearing ──
+	//
+	// `text/event-stream` is the content type the SSE spec requires, and
+	// `EventSource` in the browser refuses anything else.
+	//
+	// `Cache-Control: no-cache` stops an intermediary serving a stale
+	// stream — which for SSE means replaying somebody else's answer.
+	//
+	// `X-Accel-Buffering: no` is the one that is easy to omit and
+	// expensive to omit. §6 names it: nginx buffers proxied responses by
+	// default, so without this the client receives the whole stream at
+	// once and "first token < 2 s" becomes "first token at the end". It is
+	// set HERE as well as in the Go proxy because whichever reverse proxy
+	// sits in front reads the header from whatever it is proxying, and
+	// §14 lists "SSE buffering breaks streaming in production" as a risk
+	// whose mitigation is to "test through the real reverse proxy, not
+	// just locally".
+	//
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /v1/chat (the `ChatV1ChatPost` operationId).
+	ChatV1ChatPostWithResponse(ctx context.Context, body ChatV1ChatPostJSONRequestBody, reqEditors ...RequestEditorFn) (*ChatV1ChatPostResponse, error)
+
 	// CompleteV1CompletePostWithBodyWithResponse Complete
 	//
 	// Run the pipeline and return the result with its telemetry.
@@ -1332,6 +1640,54 @@ func (r HealthHealthGetResponse) StatusCode() int {
 
 // ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
 func (r HealthHealthGetResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type ChatV1ChatPostResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *interface{}
+	// JSON422 the response for an HTTP 422 `application/json` response
+	JSON422 *HTTPValidationError
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r ChatV1ChatPostResponse) GetJSON200() *interface{} {
+	return r.JSON200
+}
+
+// GetJSON422 returns the response for an HTTP 422 `application/json` response
+func (r ChatV1ChatPostResponse) GetJSON422() *HTTPValidationError {
+	return r.JSON422
+}
+
+// GetBody returns the raw response body bytes
+func (r ChatV1ChatPostResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r ChatV1ChatPostResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ChatV1ChatPostResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r ChatV1ChatPostResponse) ContentType() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Header.Get("Content-Type")
 	}
@@ -1564,6 +1920,72 @@ func (c *ClientWithResponses) HealthHealthGetWithResponse(ctx context.Context, p
 	return ParseHealthHealthGetResponse(rsp)
 }
 
+// ChatV1ChatPostWithBodyWithResponse Chat
+//
+// Stream one chat turn as Server-Sent Events.
+//
+// ── The headers, and why each one is load-bearing ──
+//
+// `text/event-stream` is the content type the SSE spec requires, and
+// `EventSource` in the browser refuses anything else.
+//
+// `Cache-Control: no-cache` stops an intermediary serving a stale
+// stream — which for SSE means replaying somebody else's answer.
+//
+// `X-Accel-Buffering: no` is the one that is easy to omit and
+// expensive to omit. §6 names it: nginx buffers proxied responses by
+// default, so without this the client receives the whole stream at
+// once and "first token < 2 s" becomes "first token at the end". It is
+// set HERE as well as in the Go proxy because whichever reverse proxy
+// sits in front reads the header from whatever it is proxying, and
+// §14 lists "SSE buffering breaks streaming in production" as a risk
+// whose mitigation is to "test through the real reverse proxy, not
+// just locally".
+//
+// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /v1/chat (the `ChatV1ChatPost` operationId).
+func (c *ClientWithResponses) ChatV1ChatPostWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*ChatV1ChatPostResponse, error) {
+	rsp, err := c.ChatV1ChatPostWithBody(ctx, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseChatV1ChatPostResponse(rsp)
+}
+
+// ChatV1ChatPostWithResponse Chat
+//
+// Stream one chat turn as Server-Sent Events.
+//
+// ── The headers, and why each one is load-bearing ──
+//
+// `text/event-stream` is the content type the SSE spec requires, and
+// `EventSource` in the browser refuses anything else.
+//
+// `Cache-Control: no-cache` stops an intermediary serving a stale
+// stream — which for SSE means replaying somebody else's answer.
+//
+// `X-Accel-Buffering: no` is the one that is easy to omit and
+// expensive to omit. §6 names it: nginx buffers proxied responses by
+// default, so without this the client receives the whole stream at
+// once and "first token < 2 s" becomes "first token at the end". It is
+// set HERE as well as in the Go proxy because whichever reverse proxy
+// sits in front reads the header from whatever it is proxying, and
+// §14 lists "SSE buffering breaks streaming in production" as a risk
+// whose mitigation is to "test through the real reverse proxy, not
+// just locally".
+//
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /v1/chat (the `ChatV1ChatPost` operationId).
+func (c *ClientWithResponses) ChatV1ChatPostWithResponse(ctx context.Context, body ChatV1ChatPostJSONRequestBody, reqEditors ...RequestEditorFn) (*ChatV1ChatPostResponse, error) {
+	rsp, err := c.ChatV1ChatPost(ctx, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseChatV1ChatPostResponse(rsp)
+}
+
 // CompleteV1CompletePostWithBodyWithResponse Complete
 //
 // Run the pipeline and return the result with its telemetry.
@@ -1723,6 +2145,39 @@ func ParseHealthHealthGetResponse(rsp *http.Response) (*HealthHealthGetResponse,
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
 		var dest HealthResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest HTTPValidationError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON422 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseChatV1ChatPostResponse parses an HTTP response from a ChatV1ChatPostWithResponse call
+func ParseChatV1ChatPostResponse(rsp *http.Response) (*ChatV1ChatPostResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ChatV1ChatPostResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest interface{}
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}

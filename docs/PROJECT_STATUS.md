@@ -5269,3 +5269,60 @@ that re-chunks on bytes can split a multi-byte character across two reads. Devan
 is escaped rather than sent raw.
 
 `task verify` green: 1306 Python, 310 astro, 606 web, Go unit + `-race`.
+
+---
+
+# Phase 5 task 5.7 part 2 — the combinatorial corpus (2026-10-04)
+
+**351 documents, 1657 chunks.** 228 new: 108 planet-in-house, 108 planet-in-sign, 12
+ascendants. Written by 19 agents in parallel, one per planet per axis.
+
+§16 wants ≥400, so this is 49 short and that gap is named rather than rounded away.
+
+## What the parallelism needed, and what it got wrong
+
+The brief required **individually authored, distinct content** rather than a template
+with swapped nouns, because templated siblings defeat the whole corpus: the embeddings
+cluster, the chunks compete with each other, and the retriever cannot tell "Saturn in
+the 10th" from "Saturn in the 11th".
+
+Spot-checking says that held. Examples from the output:
+
+- `saturn-in-house-10.md` hit the one title that already existed, named itself
+  "(Expanded Reading)", and opens by saying what it does **not** repeat — then gives the
+  structural account: the 10th is the only house that is both a kendra and an upachaya,
+  and it does **not** carry dig bala, which is "one way it is routinely claimed to be
+  strong that it is not"
+- `taurus-ascendant.md` derives Saturn as the **yogakaraka** from first principles —
+  it rules the 9th and 10th, a trine and an angle — and notes that the designation
+  requires both, which holds for only six of the twelve ascendants
+- the Moon-in-house agent dismantled the Scorpio-debilitation shortcut: a Libra
+  ascendant puts an *exalted* Moon in the 8th, so "debilitated in the 8th" is a
+  statement about a sign, not a house
+- the Mars agent stated the frequency first for the 7th (~half of all charts), and
+  noted the 6th is **absent** from the Mangal Dosha list
+
+Several agents refused things on their own: longevity in the 8th, children in the 5th,
+third-party claims about siblings and fathers, medical associations marked as
+significator associations only.
+
+## The concurrency hazard one agent caught
+
+The Moon agent flagged it unprompted:
+
+> "`placements` was 89 documents at check time, so other agents are writing into this
+> directory concurrently. I verified no title collisions against the corpus as it stood
+> at my final check, but that guarantee is only as fresh as the last writer."
+
+Exactly right, and the reason it matters is specific: `kd_identity_idx` is
+`UNIQUE (title, language, version)`, so a collision does not error — one authored
+document **silently overwrites another** and the loser disappears from the corpus.
+Nineteen agents each checking against a moving target cannot establish uniqueness.
+
+Checked after all of them finished: **352 title lines, 352 distinct.** No collisions.
+
+That is the right shape for a parallel authoring task — per-agent validation for fast
+feedback, one global check at the end for the property that is only true of the whole.
+
+`task verify` green, and `ingest-kb --check` parses all 351 with the largest chunk at
+304 of the 350-token window.

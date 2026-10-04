@@ -33,7 +33,7 @@ Fixed modality gives the Moon something it does not naturally carry: steadiness 
 mood. Generosity is a standard reading. So is a slow fuse that nevertheless keeps an
 accurate record of having been slighted.
 
-## The caution
+## The specific vulnerability
 
 Pride about feeling, rather than the feeling itself. Needing to be seen is
 traditionally read as the specific vulnerability here, and the texts treat it as a real

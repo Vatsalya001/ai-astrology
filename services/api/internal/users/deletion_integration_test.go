@@ -96,11 +96,34 @@ func seedFullUser(ctx context.Context, t *testing.T, pool *pgxpool.Pool, email s
 			         'mock-chat', 'local', 'chat_response.v1', 'ctx.v1',
 			         11, 7, 42, 0, 'stop')`,
 			[]any{userID}},
+		// Phase 5, and the same standing obligation again — the comment
+		// on `userOwnedTables` below has been predicting this one since
+		// Phase 1 ("Phase 5 adds conversations"). The guard discovers
+		// `conversations` the moment migration 000009 applies and
+		// refuses to pass until there is a row in it.
+		//
+		// A conversation is a transcript of somebody asking about their
+		// marriage and their health. Nothing about it may outlive the
+		// account.
+		{"conversation",
+			`INSERT INTO conversations (user_id, birth_profile_id, title, category)
+			 SELECT $1, id, 'Career, in the deletion test', 'CAREER'
+			 FROM birth_profiles WHERE user_id = $1 LIMIT 1`,
+			[]any{userID}},
 	} {
 		if _, err := pool.Exec(ctx, stmt.sql, stmt.args...); err != nil {
 			t.Fatalf("seed %s: %v", stmt.what, err)
 		}
 	}
+
+	// messages and message_contexts hang off the conversation and have no
+	// user_id column, so userOwnedTables cannot discover them — the same
+	// shape as charts and dashas below, and the same hazard: a cascade
+	// that stops at `conversations` leaves the text of what the person
+	// wrote and the chart facts they were shown behind, unreachable by
+	// every query and by the export, which is residue by any reading of
+	// the gate.
+	seedMessagesAndContext(ctx, t, pool, userID)
 
 	// charts and dashas hang off the birth profile rather than the user,
 	// so userOwnedTables cannot discover them — there is no user_id
@@ -111,6 +134,59 @@ func seedFullUser(ctx context.Context, t *testing.T, pool *pgxpool.Pool, email s
 	seedChartAndDashas(ctx, t, pool, userID)
 
 	return userID
+}
+
+// seedMessagesAndContext hangs a complete chat turn off the user's
+// conversation: their question, the answer, and the stored context that
+// produced the answer.
+//
+// Written with raw SQL rather than through `AppendMessage`, deliberately.
+// This file's subject is what the DATABASE removes, and a seed built from
+// the same query whose predicate is being tested would make a deletion
+// bug and a query bug indistinguishable.
+func seedMessagesAndContext(ctx context.Context, t *testing.T, pool *pgxpool.Pool, userID uuid.UUID) {
+	t.Helper()
+
+	var conversationID uuid.UUID
+	if err := pool.QueryRow(ctx,
+		`SELECT id FROM conversations WHERE user_id = $1 LIMIT 1`, userID,
+	).Scan(&conversationID); err != nil {
+		t.Fatalf("find seeded conversation: %v", err)
+	}
+
+	if _, err := pool.Exec(ctx,
+		`INSERT INTO messages (conversation_id, role, content, intent)
+		 VALUES ($1, 'user', 'Should I change my job this year?', 'CAREER')`,
+		conversationID,
+	); err != nil {
+		t.Fatalf("seed user message: %v", err)
+	}
+
+	var answerID uuid.UUID
+	if err := pool.QueryRow(ctx,
+		`INSERT INTO messages
+		   (conversation_id, role, content, intent, model, provider_id, prompt_version)
+		 VALUES ($1, 'assistant', 'Saturn is placed in your eleventh house.',
+		         'CAREER', 'mock-chat', 'mock', 'chat_response.v1')
+		 RETURNING id`, conversationID,
+	).Scan(&answerID); err != nil {
+		t.Fatalf("seed assistant message: %v", err)
+	}
+
+	// The chart facts the answer was built from. This is the row that
+	// makes an old response explainable, and it is also a copy of this
+	// person's placements — so it is the one a cascade must not stop
+	// short of.
+	if _, err := pool.Exec(ctx,
+		`INSERT INTO message_contexts
+		   (message_id, astrology_context, fact_index, knowledge_chunk_ids,
+		    prompt_version, context_version)
+		 VALUES ($1, '{"relevant_houses":[10]}', '["Saturn: 11th house"]', '[]',
+		         'chat_response.v1', 'ctx.career.lahiri.v1')`,
+		answerID,
+	); err != nil {
+		t.Fatalf("seed message context: %v", err)
+	}
 }
 
 // seedChartAndDashas hangs a chart and a two-level dasha tree off the
@@ -264,6 +340,12 @@ func TestHardDeleteLeavesNoResidue(t *testing.T) {
 	// level short leaves a chart of a deleted person's sky behind —
 	// which is residue by any reading of the gate.
 	//
+	// Phase 5 adds a second chain of the same shape:
+	// conversations → messages → message_contexts. `conversations` IS
+	// discovered above because it has a user_id; the two below are not,
+	// and they are the ones holding the text of what the person wrote and
+	// a copy of the placements they were shown.
+	//
 	// Counted globally rather than by user, because the survivor account
 	// seeds its own rows: a global count of zero would be satisfied by a
 	// cascade that deleted everybody's. So the assertion is that the
@@ -280,6 +362,13 @@ func TestHardDeleteLeavesNoResidue(t *testing.T) {
 		            JOIN charts c ON c.id = d.chart_id
 		            JOIN birth_profiles p ON p.id = c.birth_profile_id
 		            WHERE p.user_id = $1`},
+		{"messages", `SELECT count(*) FROM messages m
+		              JOIN conversations c ON c.id = m.conversation_id
+		              WHERE c.user_id = $1`},
+		{"message_contexts", `SELECT count(*) FROM message_contexts mc
+		                      JOIN messages m ON m.id = mc.message_id
+		                      JOIN conversations c ON c.id = m.conversation_id
+		                      WHERE c.user_id = $1`},
 	} {
 		var gone int
 		if err := pool.QueryRow(ctx, c.sql, userID).Scan(&gone); err != nil {
@@ -287,7 +376,7 @@ func TestHardDeleteLeavesNoResidue(t *testing.T) {
 		}
 		if gone != 0 {
 			t.Errorf("%d rows remain in %q after hard deletion — the cascade "+
-				"stopped short of the chart data", gone, c.table)
+				"stopped short", gone, c.table)
 		}
 
 		var survived int
@@ -647,6 +736,18 @@ func TestEveryUserOwnedTableAppearsInTheExport(t *testing.T) {
 		// timestamps are still personal data — "asked about medical
 		// matters on these dates" is a fact about a person.
 		"ai_request_logs": "ai_requests",
+		// Phase 5. The chat history is the most plainly personal thing
+		// in the product: the questions somebody asked about their own
+		// life, in their own words.
+		//
+		// `messages` and `message_contexts` have no user_id and are not
+		// discovered here. Messages ARE exported, as the `messages`
+		// section; contexts deliberately are not, and `Export`'s doc
+		// comment carries the reason — the astrology context is a
+		// filtered view of the chart, which is exported whole, and the
+		// chunk ids name rows in our corpus rather than facts about the
+		// person.
+		"conversations": "conversations",
 		// Charts hang off birth_profiles and have no user_id column, so
 		// they are not discovered here; TestExportIncludesBirthProfiles
 		// AndCharts asserts them directly.

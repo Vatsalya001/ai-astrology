@@ -34,7 +34,7 @@ reported directly. Equilibrium is read as conditional on the atmosphere being se
 so open disagreement is traditionally read as costing more here than its subject
 warrants. Memory attaches to the tenor of an exchange more than to its content.
 
-## Proportion
+## Where the weight actually comes from
 
 Common, and in most charts a supporting detail rather than a theme. If a reading is
 carrying a whole narrative on the Moon in Libra, the weight is coming from somewhere
