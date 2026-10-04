@@ -329,6 +329,15 @@ tasks:
     # in a way that makes no sense.
     cmds:
       - ./scripts/check-toolchain.sh
+      # The complement, and the built-in tool for the same class of
+      # problem: every module in the build list, against go.sum. It found
+      # a flipped bit in golang.org/x/sys on 2026-10-04 that the
+      # toolchain check structurally could not see.
+      #
+      # It does NOT cover modules of other modules — kin-openapi is a
+      # dependency of oapi-codegen, not of this module, so neither check
+      # reaches it.
+      - cd {{.API_DIR}} && go mod verify
 
   integrity:gate:
     desc: The dirty-tree-safe half — fails only on mismatches git cannot see

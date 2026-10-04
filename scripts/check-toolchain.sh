@@ -33,6 +33,31 @@
 # The zip's own CRCs are checked first. Repairing from a corrupt source
 # would be worse than not repairing.
 #
+# ── What this does NOT cover, and what does ──
+#
+#   this script            the extracted Go toolchain
+#   `go mod verify`        every module in the current build list
+#   `npm ci`               node_modules, against package-lock integrity hashes
+#   check-integrity.sh     tracked files, against the git index
+#
+# Two gaps remain and both were hit on 2026-10-04:
+#
+#   **Modules of OTHER modules.** `go mod verify` checks the build list of
+#   the module you run it in. `kin-openapi` is a dependency of
+#   `oapi-codegen`, not of services/api, so it is verified by neither.
+#
+#   **Installed binaries in $GOBIN.** `~/go/bin/oapi-codegen` was
+#   corrupted and segfaulted on a 120-byte OpenAPI document. Nothing
+#   checks those, and the fix is non-obvious:
+#
+#     ⚠ `go install` DOES NOT rebuild an existing binary. It saw the
+#       corrupt one as up to date and did nothing — twice — and the
+#       hash before and after therefore matched, which read as "the
+#       binary is fine" when it meant "nothing happened".
+#
+#       `rm $(which <tool>) && go install ...` is the response. The
+#       rebuilt binary differed and worked.
+#
 # ── Usage ──
 #
 #   scripts/check-toolchain.sh            # report
