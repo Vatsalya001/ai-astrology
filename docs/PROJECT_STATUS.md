@@ -5045,3 +5045,124 @@ a test that proved less than it claimed:
   the absence of any `hi` row rather than on the filter excluding one
 
 `task verify` green: 1188 Python (40 new), 310 astro, 606 web, Go unit + `-race`.
+
+---
+
+# Phase 5 tasks 5.8 and 5.9 — the context service, and a hole in Phase 4's validator (2026-10-04)
+
+`app/context/` turns a chart `api-service` already proved the caller owns into the two
+things the pipeline needs: prose for the model, and a `fact_index` for the validator.
+198 tests across the two modules.
+
+## The security design decides the module's shape
+
+§12: "**Chart context comes from the chart Go loaded after an ownership check** — never
+from an ID in the message body", and "`ai-service` cannot fetch arbitrary user charts
+(it has no such query path)."
+
+So `AstrologyContextService` takes a chart in its constructor and **ignores the
+`user_id`** its Protocol hands it. The absence of the lookup is the enforcement: a
+prompt injection asking for someone else's chart has nothing to reach, because nothing
+in this service knows how to fetch one. `test_the_user_id_is_ignored` passes
+`"../../etc/passwd"` and asserts the context is identical.
+
+## One traversal, two outputs
+
+The invariant the module exists to maintain: **the text and the fact index are built
+from the same walk.** A prose summary that drifted from the index would make the
+validator block *correct* answers — a failure that looks like a validator bug, gets
+"fixed" by relaxing the validator, and quietly ends the determinism guarantee.
+
+`test_every_fact_in_the_text_is_in_the_index` parses the facts back out of the rendered
+prose and checks them against the index, for **all 21 intents**. Reading both from the
+same variable would prove nothing.
+
+The refactor that satisfied `mypy --strict` caught a real instance: the house-lords
+loop built its `PlanetFact` without the nakshatra, so a response correctly naming the
+10th lord's nakshatra would have been blocked as fabricated. Three call sites now share
+one `index_planet` closure.
+
+## Six intents select nothing, and that is a safety property
+
+MEDICAL, LEGAL, TAROT, NUMEROLOGY, HUMAN_ASTROLOGER and OTHER get an empty selection.
+With an empty fact index the validator's **strict** branch fires on any personal claim,
+so the model cannot build a health or legal interpretation out of chart facts *even if
+the safety layer were bypassed*. The safety layer refuses the question; this makes the
+refusal unforgeable.
+
+§3's table covers 11 of the 21 intents. The other 10 are derived, each carries a
+`notes` field saying so, and `test_derived_selections_say_they_are_derived` stops a
+derived row claiming spec authority.
+
+## The hole: Phase 4's validator missed the commonest phrasing
+
+§11 calls one test "the critical one":
+
+> Feed a chart where Saturn is in the 11th, mock a response claiming the 7th, assert
+> the validator blocks it. This test is the machine-readable version of Principle 1.
+
+**It failed.** The response was not blocked.
+
+```
+extract_claims("Your Saturn is in the 7th house.")   ->  0 claims
+extract_claims("Saturn is in your 7th house.")       ->  1 claim
+```
+
+Every house pattern required the possessive on the **house** — `your 10th house`. The
+sign and nakshatra patterns require it on the **planet** — `your Saturn is in Scorpio`.
+Nothing required it on the planet with a *house* target. So the commoner phrasing of
+the two in model output extracted nothing, the fabrication check never ran, and a wrong
+placement reached the user unchallenged.
+
+Two more forms were unguarded for the same reason — every pattern spelled
+`{N} house` inline and none spelled `house {N}`:
+
+```
+"Your Saturn is in house 7."    ->  0 claims
+"You have Saturn in house 7."   ->  0 claims
+```
+
+### Why Phase 4's suite did not catch it
+
+Because **every house test in it uses the covered phrasing**. `grep` on
+`tests/test_validation.py` finds `"in your Nth house"` throughout and the
+possessive-on-planet form nowhere. 125 tests, all passing, all exercising one of the
+two grammars.
+
+This is the clearest example so far of a guard that was tested only in the shape it
+already handled. The fix is `HOUSE_CLAIM_POSSESSIVE_BODY`, a shared `_HOUSE_AT`
+alternation covering both `the 7th house` and `house 7`, an optional determiner in the
+`you have` form, and a 24-case regression class — 10 false claims that must block, 4
+true ones that must not, 7 general statements that must stay general, and one assertion
+that the violation detail names the real house so a blocked response is diagnosable.
+
+The widening cannot make a general sentence checkable, because `your <planet>` is what
+makes a claim personal: there is no reading of "your Saturn" that is a statement about
+astrology at large. `test_general_statements_stay_general` includes the clause-boundary
+case the original patterns were deliberately narrowed to exclude —
+`"Saturn rules discipline, and your 10th house is career."` — to confirm admitting
+`the` did not reopen it.
+
+## Smaller decisions worth keeping
+
+**Dasha dates render to the day, not the second.** The computation is exact —
+`astro-service` uses `Decimal` precisely so it is — but a response quoting a boundary
+to the second claims a precision the birth time does not support. A time rounded to
+five minutes moves a third-level boundary by hours.
+
+**`now` is a parameter.** §3 requires the service to be a pure function over the chart
+JSON. An ambient clock would make both the context and its `context_version`
+irreproducible.
+
+**`context_version` carries the intent and the ayanamsa.** One says what we showed, the
+prompt version says what we asked; without both, a response from three weeks ago cannot
+be explained. The ayanamsa is in there because it changes the answer — a chart read
+under the wrong one moves planets across sign boundaries near a cusp and nothing looks
+wrong.
+
+**Tests use the real Phase 2 golden charts**, not hand-written ones. A hand-written
+chart would let a field-name mistake pass — reading `name` where astro-service writes
+`planet` yields an empty chart, an empty fact index, and a failure that presents as a
+validator bug.
+
+`task verify` green: 1279 Python, 310 astro, 606 web, Go unit + `-race`.

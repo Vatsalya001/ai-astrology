@@ -164,21 +164,68 @@ def _compile(pattern: str) -> re.Pattern[str]:
 
 # ─── house ───────────────────────────────────────────────────────────
 
+# Where a house can be NAMED, as one alternation.
+#
+# Factored out because the forms were spelled inline and only one of them
+# was ever written: every house pattern used `{_HOUSE_NUMBER}\s+house`,
+# so "in house 7" — which a model writes about as often as "in the 7th
+# house" — matched nothing and was unguarded.
+#
+# Both alternatives capture, so exactly one of the two groups is set and
+# `_house_group` takes whichever is not None. A single shared group would
+# need a backreference across an alternation, which `re` cannot express.
+_HOUSE_AT = rf"(?:{_HOUSE_NUMBER}\s+house|house\s+{_HOUSE_NUMBER})"
+
 # "Saturn is in your 10th house", "Saturn occupies your tenth house"
-HOUSE_CLAIM = _compile(rf"\b({_BODY})\b{_ASIDE}{_ADVERB}{_PLACES}your\s+{_HOUSE_NUMBER}\s+house")
+HOUSE_CLAIM = _compile(rf"\b({_BODY})\b{_ASIDE}{_ADVERB}{_PLACES}your\s+{_HOUSE_AT}")
+
+# ── "Your Saturn is in the 7th house" ──
+#
+# THE GAP THIS CLOSES, and it was the largest one in the validator.
+#
+# Every house pattern required the possessive on the HOUSE — `your 10th
+# house`. The sign and nakshatra patterns require it on the PLANET —
+# `your Saturn is in Scorpio`. Nothing required it on the planet with a
+# HOUSE target, so:
+#
+#     "Your Saturn is in the 7th house."     ->  0 claims
+#     "Saturn is in your 7th house."         ->  1 claim
+#
+# The first is how a model actually writes it. It extracted nothing, so
+# the fabrication check never ran, and a wrong placement reached the user
+# unchallenged.
+#
+# Found by PHASE-05 §11's determinism test — the one the spec calls "the
+# critical one" — failing on its own canonical example: a chart with
+# Saturn in the 11th and a response claiming the 7th was NOT blocked.
+# Phase 4 shipped that validator with this hole in it, and every test it
+# had passed, because every test used the phrasing the patterns covered.
+#
+# `your <planet>` is already unambiguously personal, so admitting `the`
+# on the house cannot make a general sentence checkable: there is no
+# reading of "your Saturn" that is a statement about astrology at large.
+HOUSE_CLAIM_POSSESSIVE_BODY = _compile(
+    rf"\byour\s+({_BODY})\b{_ASIDE}{_ADVERB}{_PLACES}(?:the\s+)?{_HOUSE_AT}"
+)
 
 # "your 10th house is occupied by Saturn", "your 4th house holds Saturn"
-HOUSE_CLAIM_REVERSED = _compile(rf"\byour\s+{_HOUSE_NUMBER}\s+house{_CONTAINS}({_BODY})\b")
+HOUSE_CLAIM_REVERSED = _compile(rf"\byour\s+{_HOUSE_AT}{_CONTAINS}({_BODY})\b")
 
 # "you have Saturn in the 10th house" — `you have` carries the possessive,
 # so `the` is personal here in a way it is not on its own.
+#
+# The determiner is OPTIONAL, which the first version got wrong by
+# requiring `your|the`: "you have Saturn in house 7" has neither and was
+# therefore unguarded. If `you have` is enough to make `the` personal —
+# and the comment above says it is — then it is enough to make a bare
+# "house 7" personal too.
 HOUSE_CLAIM_YOU_HAVE = _compile(
-    rf"\byou\s+have\s+({_BODY})\b{_ADVERB}{_PLACES}(?:your|the)\s+{_HOUSE_NUMBER}\s+house"
+    rf"\byou\s+have\s+({_BODY})\b{_ADVERB}{_PLACES}(?:(?:your|the)\s+)?{_HOUSE_AT}"
 )
 
 # "Saturn in your chart is in the 10th house"
 HOUSE_CLAIM_IN_CHART = _compile(
-    rf"\b({_BODY})\b\s+in\s+your\s+{_CHART}{_ADVERB}{_PLACES}(?:your|the)\s+{_HOUSE_NUMBER}\s+house"
+    rf"\b({_BODY})\b\s+in\s+your\s+{_CHART}{_ADVERB}{_PLACES}(?:your|the)\s+{_HOUSE_AT}"
 )
 
 # ─── sign ────────────────────────────────────────────────────────────
@@ -266,6 +313,16 @@ def _excerpt(match: re.Match[str]) -> str:
     return match.group(0).strip()[:120]
 
 
+def _house_group(match: re.Match[str], first: int) -> str | None:
+    """The house number from a `_HOUSE_AT` match starting at group `first`.
+
+    `_HOUSE_AT` is an alternation in which both branches capture, so
+    exactly one of the two groups is set. Taking only the first would
+    silently drop every "in house 7" phrasing.
+    """
+    return match.group(first) or match.group(first + 1)
+
+
 def _add_house(claims: list[Claim], body: str, house: str, match: re.Match[str]) -> None:
     number = _house_number(house)
     if number is None:
@@ -284,13 +341,23 @@ def extract_claims(text: str) -> list[Claim]:
     """
     claims: list[Claim] = []
 
-    for pattern in (HOUSE_CLAIM, HOUSE_CLAIM_YOU_HAVE, HOUSE_CLAIM_IN_CHART):
+    # Body first, house second. `_HOUSE_AT` contributes two capture
+    # groups, so the house is group 2 or group 3.
+    for pattern in (
+        HOUSE_CLAIM,
+        HOUSE_CLAIM_POSSESSIVE_BODY,
+        HOUSE_CLAIM_YOU_HAVE,
+        HOUSE_CLAIM_IN_CHART,
+    ):
         for match in pattern.finditer(text):
-            _add_house(claims, match.group(1), match.group(2), match)
+            if house := _house_group(match, 2):
+                _add_house(claims, match.group(1), house, match)
 
     for match in HOUSE_CLAIM_REVERSED.finditer(text):
-        # Groups are the other way round in the house-first form.
-        _add_house(claims, match.group(2), match.group(1), match)
+        # House first in this form, so it is group 1 or 2 and the body
+        # follows at group 3.
+        if house := _house_group(match, 1):
+            _add_house(claims, match.group(3), house, match)
 
     for pattern in (SIGN_CLAIM, SIGN_CLAIM_YOU_HAVE, SIGN_CLAIM_IN_CHART):
         for match in pattern.finditer(text):

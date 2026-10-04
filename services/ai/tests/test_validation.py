@@ -623,3 +623,113 @@ class TestPredictionsThatHarmRegardlessOfHedging:
         them would block its own house style.
         """
         assert OutputValidator(system_prompt="").validate(text, None) == []
+
+
+class TestThePossessiveOnThePlanetIsAlsoPersonal:
+    """The phrasing Phase 4's patterns missed entirely.
+
+    Every house test above says `"... in your Nth house"` — the
+    possessive on the HOUSE. Not one said `"Your Saturn is in the Nth
+    house"` — the possessive on the PLANET — and the patterns required
+    the first form, so the second extracted **zero claims** and the
+    fabrication check never ran on it.
+
+    That is the commoner phrasing of the two in model output, so the
+    determinism guarantee had a hole exactly the size of its main case.
+    It survived the whole Phase 4 suite because the suite only ever used
+    the covered form.
+
+    Found by PHASE-05 §11's determinism test — the one the spec calls
+    "the critical one" — failing on its own canonical example.
+    """
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            # The canonical case from §11, and the one that was unguarded.
+            "Your Saturn is in the 7th house.",
+            "Your Saturn is in the 7th house, which is read as partnership.",
+            "your saturn is in the seventh house",
+            # "in house N" rather than "in the Nth house" — the other
+            # inline form that no pattern spelled out.
+            "Your Saturn is in house 7.",
+            "Saturn is in your house 7.",
+            "You have Saturn in house 7.",
+            # With an appositive, which a model adds constantly.
+            "Your Saturn, the planet of discipline, is in the 7th house.",
+            # With an adverb on either side of the verb.
+            "Your Saturn is currently in the 7th house.",
+            "Your Saturn currently sits in the 7th house.",
+            # A Sanskrit name, since the alias table is meant to cover it.
+            "Your Shani is in the 7th house.",
+        ],
+    )
+    def test_a_false_claim_in_the_missed_phrasing_is_blocked(self, text: str) -> None:
+        assert blocks(text), (
+            f"{text!r} was not blocked. CHART puts Saturn in the 4th, so this "
+            f"is a fabrication — and if it extracts no claim, the validator is "
+            f"not looking at the commonest phrasing a model produces."
+        )
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "Your Saturn is in the 4th house.",
+            "Your Saturn is in house 4.",
+            "Your Saturn, the planet of discipline, is in the fourth house.",
+            "Your Shani is currently in the 4th house.",
+        ],
+    )
+    def test_the_same_phrasing_passes_when_it_is_true(self, text: str) -> None:
+        """The control, and it matters as much as the block.
+
+        Without it, "the new patterns block wrong claims" is also
+        satisfied by patterns that block every claim — a product that
+        cannot answer a question, discovered in production.
+        """
+        assert not blocks(text), f"{text!r} is TRUE for CHART and was blocked"
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            # `your <planet>` is absent, so none of these is personal.
+            "Saturn is traditionally associated with discipline, and the 10th "
+            "house is read as vocation.",
+            "The 7th house is read as partnership and open opposition.",
+            "Jupiter aspects the 5th, 7th and 9th houses from itself.",
+            "Saturn in the 10th house is traditionally read as slow recognition.",
+            "In house 7, Venus is traditionally read as harmony in partnership.",
+            # The clause-boundary case the original patterns were
+            # narrowed to exclude. Admitting `the` on the house must not
+            # reopen it.
+            "Saturn rules discipline, and your 10th house is career.",
+            "Your chart is interesting; the 7th house is about partnership.",
+        ],
+    )
+    def test_general_statements_stay_general(self, text: str) -> None:
+        """The widening must not make a general sentence checkable.
+
+        `your <planet>` is what makes a claim personal, and this asserts
+        the new pattern needs it: there is no reading of "your Saturn"
+        that is a statement about astrology at large, and equally no
+        reading of "the 7th house" on its own that is about the reader.
+        """
+        assert OutputValidator(system_prompt="").validate(text, CHART) == [], (
+            f"{text!r} is a general statement and was flagged. A validator that "
+            f"blocks explanations has stopped the product doing its main job."
+        )
+
+    def test_the_violation_names_the_real_house(self) -> None:
+        """A blocked response has to be diagnosable.
+
+        The detail is what a reviewer reads, and "fabricated" without the
+        real value tells them nothing about whether the chart or the
+        model was wrong.
+        """
+        violations = OutputValidator(system_prompt="").validate(
+            "Your Saturn is in the 7th house.", CHART
+        )
+
+        assert violations
+        detail = " ".join(v.detail for v in violations)
+        assert "4" in detail, f"the real house is missing from {detail!r}"
